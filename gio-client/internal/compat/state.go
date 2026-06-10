@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -151,6 +152,25 @@ func SetSavePromptSuppressed(value bool) error {
 	return SaveState(state)
 }
 
+func RememberTrustedOutputRoot(state shared.State, root string) shared.State {
+	state = shared.Normalize(state)
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return state
+	}
+	if abs, err := filepath.Abs(root); err == nil {
+		root = abs
+	}
+	root = filepath.Clean(root)
+	for _, existing := range state.Settings.TrustedOutputRoots {
+		if filepath.Clean(strings.TrimSpace(existing)) == root {
+			return state
+		}
+	}
+	state.Settings.TrustedOutputRoots = append(state.Settings.TrustedOutputRoots, root)
+	return state
+}
+
 func UpsertConfig(state shared.State, cfg kernel.Config) shared.State {
 	state = shared.Normalize(state)
 	now := time.Now().UnixMilli()
@@ -208,6 +228,7 @@ func UpsertConfig(state shared.State, cfg kernel.Config) shared.State {
 	state.Settings.CompletionSound = &completionSound
 	state.Settings.OutputFormat = strings.TrimSpace(cfg.OutputFormat)
 	state.Settings.OutputDir = strings.TrimSpace(cfg.OutputDir)
+	state = RememberTrustedOutputRoot(state, state.Settings.OutputDir)
 	state.Settings.Background = strings.TrimSpace(cfg.Background)
 	state.Settings.InputFidelity = strings.TrimSpace(cfg.InputFidelity)
 	state.Settings.ImageStyle = strings.TrimSpace(cfg.ImageStyle)

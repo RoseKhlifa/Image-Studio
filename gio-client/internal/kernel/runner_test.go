@@ -2,6 +2,7 @@ package kernel
 
 import (
 	"context"
+	"encoding/base64"
 	"image"
 	"image/color"
 	"image/png"
@@ -9,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gen2brain/avif"
@@ -147,6 +149,155 @@ func TestProbeUpstreamReturnsModelCount(t *testing.T) {
 	}
 	if result.ModelCount != 2 {
 		t.Fatalf("ModelCount=%d want 2", result.ModelCount)
+	}
+	if len(result.Models) != 2 || result.Models[0].ID != "gpt-5.5" || result.Models[1].ID != "gpt-image-2" {
+		t.Fatalf("Models=%v want parsed descriptors", result.Models)
+	}
+}
+
+func TestProbeUpstreamSkipsModelItemsWithoutID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"id":"gpt-5.5"},{"id":""},{"owned_by":"x"}]}`))
+	}))
+	defer server.Close()
+
+	result, err := ProbeUpstream(context.Background(), Config{
+		APIKey:  "sk-test",
+		BaseURL: server.URL,
+	})
+	if err != nil {
+		t.Fatalf("ProbeUpstream: %v", err)
+	}
+	if result.ModelCount != 3 {
+		t.Fatalf("ModelCount=%d want 3", result.ModelCount)
+	}
+	if len(result.Models) != 1 || result.Models[0].ID != "gpt-5.5" {
+		t.Fatalf("Models=%v want only non-empty ids", result.Models)
+	}
+}
+
+func TestProbeUpstreamReportsStructuredWebSocketProbeFailure(t *testing.T) {
+	var gotUpgrade bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/models" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[{"id":"gpt-5.5"}]}`))
+			return
+		}
+		if r.URL.Path == "/v1/responses" {
+			if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+				gotUpgrade = true
+			}
+			http.Error(w, "ws unsupported", http.StatusBadRequest)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	result, err := ProbeUpstream(context.Background(), Config{
+		APIKey:             "sk-test",
+		BaseURL:            server.URL,
+		APIMode:            client.APIModeResponses,
+		ResponsesTransport: client.ResponsesTransportWebSocket,
+	})
+	if err != nil {
+		t.Fatalf("ProbeUpstream: %v", err)
+	}
+	if result.ModelCount != 1 {
+		t.Fatalf("ModelCount=%d want 1", result.ModelCount)
+	}
+	if result.ResponsesTransport != string(client.ResponsesTransportWebSocket) {
+		t.Fatalf("responsesTransport=%q want websocket", result.ResponsesTransport)
+	}
+	if result.ResponsesTransportOK {
+		t.Fatal("responsesTransportOK=true want false")
+	}
+	if strings.TrimSpace(result.ResponsesTransportError) == "" {
+		t.Fatal("responsesTransportError should not be empty")
+	}
+	if !gotUpgrade {
+		t.Fatal("expected websocket probe upgrade attempt")
+	}
+}
+
+func TestRunnerRunFallsBackToSecondaryProfileAfterPrimaryFailure(t *testing.T) {
+	finalB64 := base64.StdEncoding.EncodeToString([]byte("\x89PNG\r\n\x1a\nfallback"))
+	primaryHits := 0
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		primaryHits++
+		if r.URL.Path != "/v1/images/generations" {
+			t.Fatalf("unexpected primary path %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":{"message":"service unavailable"}}`))
+	}))
+	defer primary.Close()
+
+	fallbackHits := 0
+	fallback := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fallbackHits++
+		if r.URL.Path != "/v1/images/generations" {
+			t.Fatalf("unexpected fallback path %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"b64_json":"` + finalB64 + `"}]}`))
+	}))
+	defer fallback.Close()
+
+	originalBackoff := client.RetryBackoffSeconds
+	client.RetryBackoffSeconds = 0
+	defer func() { client.RetryBackoffSeconds = originalBackoff }()
+
+	var logs []string
+	outDir := t.TempDir()
+	result, err := (Runner{}).Run(context.Background(), Config{
+		APIKey:           "sk-primary",
+		BaseURL:          primary.URL,
+		Prompt:           "hello",
+		APIMode:          client.APIModeImages,
+		OutputDir:        outDir,
+		AutoRetryEnabled: false,
+		FallbackProfile: &FallbackProfileConfig{
+			APIKey:  "sk-fallback",
+			BaseURL: fallback.URL,
+			APIMode: client.APIModeImages,
+		},
+	}, Callbacks{
+		Log: func(line string) {
+			logs = append(logs, line)
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if primaryHits != 1 {
+		t.Fatalf("primaryHits=%d want 1", primaryHits)
+	}
+	if fallbackHits != 1 {
+		t.Fatalf("fallbackHits=%d want 1", fallbackHits)
+	}
+	if result.SavedPath == "" || result.SourceEvent != "images_api" {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+	foundSwitchLog := false
+	for _, line := range logs {
+		if line == "主上游自动重试失败，切换到备用上游再试一次..." {
+			foundSwitchLog = true
+			break
+		}
+	}
+	if !foundSwitchLog {
+		t.Fatalf("fallback switch log missing: %v", logs)
+	}
+	logEntries, err := os.ReadDir(filepath.Join(outDir, "log"))
+	if err != nil {
+		t.Fatalf("ReadDir(log): %v", err)
+	}
+	if len(logEntries) < 2 {
+		t.Fatalf("expected raw logs from primary and fallback attempts, got %d", len(logEntries))
 	}
 }
 

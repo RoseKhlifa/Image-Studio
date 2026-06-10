@@ -92,21 +92,7 @@ Section
     CreateShortCut "$DESKTOP\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
 
     !insertmacro wails.associateFiles
-
-    # Custom protocol registration -- intentionally NOT using
-    # `wails.associateCustomProtocols` because Wails' upstream macro writes
-    # the registry command as `$INSTDIR\<exe>.exe "%1"` without quoting the
-    # exe path. Our default install dir contains spaces
-    # (`C:\Program Files\YuanHua\Image Studio\`), so Windows ShellExecute
-    # cannot locate the binary when a browser opens `image-studio://...`,
-    # and the Image-Prompts page falls back to "Image-Studio not detected".
-    # The CUSTOM_PROTOCOL_ASSOCIATE macro itself is fine -- we just pass it
-    # a properly quoted COMMAND string.
-    #
-    # Protocol values are hardcoded because Go-template `{{range}}` syntax is
-    # NOT processed in this file (see header note line 4 above) -- only
-    # `wails_tools.nsh` gets templated by `wails build`. If we ever add more
-    # schemes to wails.json, add another !insertmacro line here.
+    # Quote the exe path explicitly so protocol launch still works under Program Files.
     !insertmacro CUSTOM_PROTOCOL_ASSOCIATE "image-studio" "Image-Prompts import" "$INSTDIR\${PRODUCT_EXECUTABLE},0" "$\"$INSTDIR\${PRODUCT_EXECUTABLE}$\" $\"%1$\""
 
     !insertmacro wails.writeUninstaller

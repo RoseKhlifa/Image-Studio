@@ -59,6 +59,7 @@ type snapshot struct {
 	TestingUpstream           bool
 	SyncingCodexConfig        bool
 	LastProbeSummary          string
+	LastProbeModels           []kernel.UpstreamModelDescriptor
 	ActivePromptGroup         historyPromptGroup
 	ActiveResultDetail        sharedCompat.HistoryItem
 	HistoryTimelineOpen       bool
@@ -200,6 +201,7 @@ type App struct {
 	loopAutoSaveDirInput      widget.Editor
 	batchInputDirInput        widget.Editor
 	batchOutputDirInput       widget.Editor
+	upstreamQuickImportInput  widget.Editor
 	rawResponseViewerInput    widget.Editor
 	historyQueryInput         widget.Editor
 	historyTimelineQueryInput widget.Editor
@@ -322,8 +324,14 @@ type App struct {
 	optimizePromptButton                     widget.Clickable
 	testUpstreamButton                       widget.Clickable
 	settingsTestUpstreamButton               widget.Clickable
+	loadUpstreamModelsButton                 widget.Clickable
 	settingsImagesCompatButton               widget.Clickable
 	syncCodexConfigButton                    widget.Clickable
+	exportUpstreamConfigsButton              widget.Clickable
+	importUpstreamConfigsButton              widget.Clickable
+	openQuickImportUpstreamConfigsButton     widget.Clickable
+	confirmQuickImportUpstreamConfigsButton  widget.Clickable
+	closeQuickImportUpstreamConfigsButton    widget.Clickable
 	historyTimelineModePickerButton          widget.Clickable
 	historyTimelineDatePickerButton          widget.Clickable
 	toggleAPIKeyMaskButton                   widget.Clickable
@@ -341,6 +349,8 @@ type App struct {
 	openGeneralUpstreamButton                widget.Clickable
 	openGeneralOutputButton                  widget.Clickable
 	chooseGeneralOutputButton                widget.Clickable
+	chooseGeneralLoopAutoSaveDirButton       widget.Clickable
+	useGeneralLoopOutputDirButton            widget.Clickable
 	chooseGeneralBatchInputButton            widget.Clickable
 	chooseGeneralBatchFilesButton            widget.Clickable
 	chooseGeneralBatchOutputButton           widget.Clickable
@@ -350,6 +360,7 @@ type App struct {
 	exportGeneralHistoryButton               widget.Clickable
 	importGeneralHistoryButton               widget.Clickable
 	openGeneralAboutButton                   widget.Clickable
+	openGeneralUpdateButton                  widget.Clickable
 	openGeneralDiagnosticsDirButton          widget.Clickable
 	openGeneralLastLowFPSSnapshotButton      widget.Clickable
 	clearGeneralAPIKeyButton                 widget.Clickable
@@ -357,7 +368,11 @@ type App struct {
 	pruneGeneralHistoryButtons               []widget.Clickable
 	openGeneralRepoButton                    widget.Clickable
 	openGeneralFeedbackButton                widget.Clickable
+	dismissAppUpdateButton                   widget.Clickable
+	ignoreAppUpdateButton                    widget.Clickable
+	openAppUpdateButton                      widget.Clickable
 	closeAboutButton                         widget.Clickable
+	openAboutUpdateButton                    widget.Clickable
 	openAboutRepoButton                      widget.Clickable
 	openAboutFeedbackButton                  widget.Clickable
 	openAboutLicenseButton                   widget.Clickable
@@ -376,6 +391,7 @@ type App struct {
 	generalAutoRetryCountButtons             []widget.Clickable
 	generalLoopButtons                       []widget.Clickable
 	generalLoopAutoSaveButtons               []widget.Clickable
+	generalLoopPreviewButtons                []widget.Clickable
 	generalBatchButtons                      []widget.Clickable
 	generalBatchRetryButtons                 []widget.Clickable
 	generalBatchAutoAspectButtons            []widget.Clickable
@@ -460,6 +476,7 @@ type App struct {
 	syncingCodexConfig           bool
 	processingImageTransform     bool
 	lastProbeSummary             string
+	lastProbeModels              []kernel.UpstreamModelDescriptor
 	fullscreen                   bool
 	activeResultDetail           sharedCompat.HistoryItem
 	result                       resultState
@@ -597,10 +614,15 @@ type App struct {
 	generalSettingsOpen              bool
 	generalRuntimePickerOpen         bool
 	aboutModalOpen                   bool
+	appUpdateChecking                bool
+	appUpdateModalOpen               bool
 	settingsModalOpen                bool
 	settingsHelpOpen                 bool
+	upstreamQuickImportOpen          bool
 	settingsSelectedProfileID        string
 	apiKeyVisible                    bool
+	appUpdateInfo                    *appUpdateInfo
+	ignoredReleaseTag                string
 	workspaces                       []workspaceState
 	activeWorkspaceID                string
 	workspaceButtons                 map[string]*widget.Clickable
@@ -679,6 +701,7 @@ func New() *App {
 		completionNotificationPermission:        readSystemNotificationPermission(),
 		cleanupPreviewCacheOnExit:               compatState.Settings.CleanupPreviewCacheOnExit,
 		windowFocused:                           true,
+		ignoredReleaseTag:                       strings.TrimSpace(compatState.Settings.IgnoredReleaseTag),
 		batchCount:                              1,
 		themeButtons:                            make([]widget.Clickable, 3),
 		generalThemeButtons:                     make([]widget.Clickable, 3),
@@ -695,6 +718,7 @@ func New() *App {
 		generalAutoRetryCountButtons:            make([]widget.Clickable, 5),
 		generalLoopButtons:                      make([]widget.Clickable, 2),
 		generalLoopAutoSaveButtons:              make([]widget.Clickable, 2),
+		generalLoopPreviewButtons:               make([]widget.Clickable, 2),
 		generalBatchButtons:                     make([]widget.Clickable, 2),
 		generalBatchRetryButtons:                make([]widget.Clickable, 2),
 		generalBatchAutoAspectButtons:           make([]widget.Clickable, 2),
@@ -853,6 +877,8 @@ func (a *App) configureEditors(cfg kernel.Config) {
 	a.partialImagesInput.Filter = "0123456789"
 	a.outputCompressionInput.Filter = "0123456789"
 	a.concurrencyLimitInput.Filter = "0123456789"
+	a.loopTotalCountInput.Filter = "0123456789"
+	a.loopConcurrencyInput.Filter = "0123456789"
 	a.apiKeyInput.SetText(cfg.APIKey)
 	a.baseURLInput.SetText(cfg.BaseURL)
 	a.textModelInput.SetText(cfg.TextModelID)
@@ -862,6 +888,7 @@ func (a *App) configureEditors(cfg kernel.Config) {
 	a.outputCompressionInput.SetText(strconv.Itoa(cfg.OutputCompression))
 	a.proxyURLInput.SetText(cfg.ProxyURL)
 	a.userIdentifierInput.SetText(cfg.UserIdentifier)
+	a.syncLoopInputsFromState()
 	a.promptInput.SetText("")
 }
 

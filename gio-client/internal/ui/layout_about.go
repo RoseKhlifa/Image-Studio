@@ -2,6 +2,7 @@ package ui
 
 import (
 	"image"
+	"strings"
 
 	"gioui.org/font"
 	"gioui.org/layout"
@@ -12,6 +13,17 @@ import (
 func (a *App) layoutAboutModal(gtx layout.Context) layout.Dimensions {
 	for a.closeAboutButton.Clicked(gtx) {
 		a.aboutModalOpen = false
+	}
+	for a.openAboutUpdateButton.Clicked(gtx) {
+		info, _, _, _ := a.readAppUpdateState()
+		if info != nil && info.HasUpdate && strings.TrimSpace(info.ReleaseTag) != strings.TrimSpace(a.ignoredReleaseTag) {
+			a.mu.Lock()
+			a.appUpdateModalOpen = true
+			a.mu.Unlock()
+			a.invalidateNow()
+			continue
+		}
+		a.openAppUpdateRelease()
 	}
 	for a.openAboutRepoButton.Clicked(gtx) {
 		if err := openExternalURL(repoURL); err != nil {
@@ -27,6 +39,17 @@ func (a *App) layoutAboutModal(gtx layout.Context) layout.Dimensions {
 		if err := openExternalURL(licenseURL); err != nil {
 			a.appendLog("打开 License 失败: " + err.Error())
 		}
+	}
+	info, _, checking, _ := a.readAppUpdateState()
+	updateSummary := "未发现更高版本"
+	if checking {
+		updateSummary = "检查更新中..."
+	} else if info != nil && info.HasUpdate {
+		updateSummary = "可升级到 v" + info.LatestVersion
+	}
+	updateButtonLabel := "查看更新"
+	if info == nil || (!info.HasUpdate && !checking) {
+		updateButtonLabel = "发布页"
 	}
 
 	return a.layoutStandardModal(
@@ -81,6 +104,11 @@ func (a *App) layoutAboutModal(gtx layout.Context) layout.Dimensions {
 					return a.label(gtx, "Copyright © 2026 RoseKhlifa · 本程序按 GNU AGPL v3.0 发布，不提供任何担保。", unit.Sp(10), fluent.textDim, font.Normal)
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return a.helpInfoCard(gtx, "更新", "", func(gtx layout.Context) layout.Dimensions {
+						return a.label(gtx, updateSummary, unit.Sp(11), fluent.text, font.Medium)
+					})
+				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(unit.Dp(8))}.Layout(gtx,
 						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 							return a.helpInfoCard(gtx, "数据", "", func(gtx layout.Context) layout.Dimensions {
@@ -112,7 +140,10 @@ func (a *App) layoutAboutModal(gtx layout.Context) layout.Dimensions {
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(unit.Dp(8))}.Layout(gtx,
 						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-							return a.primaryIconTextButton(gtx, &a.openAboutRepoButton, uiIconLaunch, "GitHub 仓库", fluent.accent, fluent.white)
+							return a.primaryIconTextButton(gtx, &a.openAboutUpdateButton, uiIconLaunch, updateButtonLabel, fluent.accent, fluent.white)
+						}),
+						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+							return a.compactIconTextButton(gtx, &a.openAboutRepoButton, uiIconInfo, "GitHub 仓库", false)
 						}),
 						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 							return a.compactIconTextButton(gtx, &a.openAboutFeedbackButton, uiIconFeedback, "反馈", false)

@@ -154,6 +154,7 @@ func (a *App) applyWorkspace(ws workspaceState) {
 	a.loopEnabled = ws.LoopEnabled
 	a.loopTotalCount = normalizeLoopGenerationCount(ws.LoopTotalCount)
 	a.loopConcurrency = normalizeLoopGenerationConcurrency(ws.LoopConcurrency)
+	a.syncLoopInputsFromState()
 	a.loopAutoSave = ws.LoopAutoSave
 	a.loopAutoSaveDirInput.SetText(strings.TrimSpace(ws.LoopAutoSaveDir))
 	a.loopLivePreview = ws.LoopLivePreview

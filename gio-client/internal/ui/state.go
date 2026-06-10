@@ -8,6 +8,7 @@ import (
 	"gioui.org/widget"
 	"github.com/yuanhua/image-gptcodex/pkg/client"
 	gioCompat "image-studio/gio-client/internal/compat"
+	"image-studio/gio-client/internal/kernel"
 	sharedCompat "image-studio/shared/compat"
 )
 
@@ -275,6 +276,7 @@ func (a *App) readSnapshot() snapshot {
 	promptTemplates := a.promptTemplates
 	presets := a.presets
 	todayCount := a.todayHistoryCountLocked()
+	lastProbeModels := append([]kernel.UpstreamModelDescriptor(nil), a.lastProbeModels...)
 	snap := snapshot{
 		Running:                   a.running,
 		ProcessingImageTransform:  a.processingImageTransform,
@@ -299,6 +301,7 @@ func (a *App) readSnapshot() snapshot {
 		TestingUpstream:           a.testingUpstream,
 		SyncingCodexConfig:        a.syncingCodexConfig,
 		LastProbeSummary:          a.lastProbeSummary,
+		LastProbeModels:           lastProbeModels,
 		ActivePromptGroup:         a.activePromptGroup,
 		ActiveResultDetail:        a.activeResultDetail,
 		HistoryTimelineOpen:       a.historyTimelineOpen,
@@ -430,7 +433,9 @@ func (a *App) persistGeneralSettings() error {
 	state.Settings.ReducedEffects = a.reducedEffects
 	state.Settings.ProxyURL = strings.TrimSpace(a.proxyURLInput.Text())
 	state.Settings.OutputDir = strings.TrimSpace(a.outputDirInput.Text())
+	state = gioCompat.RememberTrustedOutputRoot(state, state.Settings.OutputDir)
 	state.Settings.KeepLogs = a.keepLogs
+	state.Settings.IgnoredReleaseTag = strings.TrimSpace(a.ignoredReleaseTag)
 	state.Settings.UserIdentifier = strings.TrimSpace(a.userIdentifierInput.Text())
 	state.UpdatedAt = time.Now().UnixMilli()
 	if err := gioCompat.SaveState(state); err != nil {

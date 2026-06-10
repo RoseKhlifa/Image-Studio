@@ -73,6 +73,8 @@ type historyMediaBackfillUpdate struct {
 	PreviewPath string
 }
 
+var probeUpstreamFunc = kernel.ProbeUpstream
+
 func isMissingPreview(err error) bool {
 	return errors.Is(err, errMissingPreview)
 }
@@ -1588,6 +1590,7 @@ func (a *App) restoreActiveRuntimeConfig(logErrors bool) error {
 	a.completionNotificationPermission = readSystemNotificationPermission()
 	a.keepLogs = state.Settings.KeepLogs
 	a.cleanupPreviewCacheOnExit = state.Settings.CleanupPreviewCacheOnExit
+	a.ignoredReleaseTag = strings.TrimSpace(state.Settings.IgnoredReleaseTag)
 	a.mu.Unlock()
 	a.apiKeyVisible = false
 	return nil
@@ -1661,6 +1664,7 @@ func (a *App) saveSettingsSelection() error {
 	}
 	state.Settings.ProxyURL = strings.TrimSpace(a.proxyURLInput.Text())
 	state.Settings.OutputDir = strings.TrimSpace(a.outputDirInput.Text())
+	state = gioCompat.RememberTrustedOutputRoot(state, state.Settings.OutputDir)
 	state.Settings.Background = strings.TrimSpace(a.background)
 	outputCompression := client.DefaultOutputCompression
 	if raw := strings.TrimSpace(a.outputCompressionInput.Text()); raw != "" {
@@ -3035,6 +3039,10 @@ func (a *App) startPromptOptimize() {
 		return
 	}
 	cfg := a.currentConfig()
+	if normalizeKernelRuntimeMode(a.kernelRuntimeMode) == "remote" && cfg.ProxyMode != client.ProxyModeSystem {
+		a.appendLog("优化提示词失败: 当前远程内核不能控制代理,请切回本地内核或使用 Android 原生运行")
+		return
+	}
 	a.mu.Lock()
 	if a.optimizingPrompt {
 		a.mu.Unlock()
@@ -3078,12 +3086,13 @@ func (a *App) startUpstreamProbe() {
 	}
 	a.testingUpstream = true
 	a.lastProbeSummary = ""
+	a.lastProbeModels = nil
 	a.appendLogLocked("开始测试上游连接")
 	a.mu.Unlock()
 	a.invalidateNow()
 
 	go func() {
-		result, err := kernel.ProbeUpstream(context.Background(), cfg)
+		result, err := probeUpstreamFunc(context.Background(), cfg)
 		a.mu.Lock()
 		a.testingUpstream = false
 		if err != nil {
@@ -3092,11 +3101,29 @@ func (a *App) startUpstreamProbe() {
 			a.appendLog("上游测试失败: " + err.Error())
 			return
 		}
-		a.lastProbeSummary = fmt.Sprintf("已连接 · %d models", result.ModelCount)
-		a.appendLogLocked(fmt.Sprintf("上游测试成功: 发现 %d 个 models", result.ModelCount))
+		switch {
+		case result.ResponsesTransport == string(client.ResponsesTransportWebSocket) && !result.ResponsesTransportOK:
+			a.lastProbeSummary = fmt.Sprintf("已连接 · %d models · WebSocket 不可用", result.ModelCount)
+			a.appendLogLocked(fmt.Sprintf("上游测试成功: 发现 %d 个 models，但 Responses WebSocket 不可用: %s", result.ModelCount, strings.TrimSpace(result.ResponsesTransportError)))
+		case result.ResponsesTransport == string(client.ResponsesTransportWebSocket):
+			a.lastProbeSummary = fmt.Sprintf("已连接 · %d models · WebSocket 可用", result.ModelCount)
+			a.appendLogLocked(fmt.Sprintf("上游测试成功: 发现 %d 个 models，Responses WebSocket 可用", result.ModelCount))
+		default:
+			a.lastProbeSummary = fmt.Sprintf("已连接 · %d models", result.ModelCount)
+			a.appendLogLocked(fmt.Sprintf("上游测试成功: 发现 %d 个 models", result.ModelCount))
+		}
+		a.lastProbeModels = append([]kernel.UpstreamModelDescriptor(nil), result.Models...)
 		a.mu.Unlock()
 		a.invalidateNow()
 	}()
+}
+
+func (a *App) testSettingsSelection() error {
+	if err := a.saveSettingsSelection(); err != nil {
+		return err
+	}
+	a.startUpstreamProbe()
+	return nil
 }
 
 func (a *App) replaceCurrentResultWithPath(path string, sourceEvent string) error {

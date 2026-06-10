@@ -25,6 +25,7 @@ import (
 )
 
 func (a *App) startRun() {
+	a.syncLoopSettingsFromInputs()
 	cfg := a.currentConfig()
 	if strings.TrimSpace(cfg.APIKey) == "" || strings.TrimSpace(cfg.BaseURL) == "" {
 		return
@@ -53,7 +54,74 @@ func (a *App) startRun() {
 		}
 		total = len(batchSources)
 	}
+	if errMsg := validateKernelRuntimeForRun(a.kernelRuntimeMode, cfg); errMsg != "" {
+		a.appendLog(errMsg)
+		return
+	}
+	requiredConcurrency := requestedRunConcurrency(total, a.loopEnabled, a.loopConcurrency)
+	if limit := parseConcurrencyLimit(strings.TrimSpace(a.concurrencyLimitInput.Text())); limit > 0 && requiredConcurrency > limit {
+		a.appendLog(runConcurrencyLimitError(cfg.APIMode, limit, requiredConcurrency, a.batchMode, a.loopEnabled))
+		return
+	}
 	a.startRunWithConfig(cfg, total)
+}
+
+func parseConcurrencyLimit(raw string) int {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value <= 0 {
+		return 0
+	}
+	return value
+}
+
+func requestedRunConcurrency(total int, loopEnabled bool, loopConcurrency int) int {
+	total = normalizeBatchCount(total)
+	if loopEnabled {
+		concurrency := normalizeLoopGenerationConcurrency(loopConcurrency)
+		if concurrency > total {
+			concurrency = total
+		}
+		if concurrency < 1 {
+			concurrency = 1
+		}
+		return concurrency
+	}
+	if total < 1 {
+		return 1
+	}
+	return total
+}
+
+func validateKernelRuntimeForRun(kernelRuntimeMode string, cfg kernel.Config) string {
+	if normalizeKernelRuntimeMode(kernelRuntimeMode) != "remote" {
+		return ""
+	}
+	if cfg.ProxyMode != client.ProxyModeSystem {
+		return "当前远程内核不能控制代理,请切回本地内核或使用 Android 原生运行"
+	}
+	if cfg.APIMode == client.APIModeResponses && cfg.ResponsesTransport == client.ResponsesTransportWebSocket {
+		return "当前远程内核模式暂不支持 Responses WebSocket mode，请切回本地内核或关闭该开关。"
+	}
+	return ""
+}
+
+func runConcurrencyLimitError(apiMode client.APIMode, limit int, required int, batchMode bool, loopEnabled bool) string {
+	apiLabel := "Responses API"
+	if apiMode == client.APIModeImages {
+		apiLabel = "Images API"
+	}
+	switch {
+	case batchMode:
+		return fmt.Sprintf("%s 并发限制 %d,当前还可提交 %d 个,批处理并发需要 %d 个。", apiLabel, limit, limit, required)
+	case loopEnabled:
+		return fmt.Sprintf("%s 并发限制 %d,当前还可提交 %d 个,循环模式并发需要 %d 个。", apiLabel, limit, limit, required)
+	default:
+		return fmt.Sprintf("%s 并发限制 %d,当前还可提交 %d 个,本次需要 %d 个。", apiLabel, limit, limit, required)
+	}
 }
 
 func (a *App) retryLastRun() {

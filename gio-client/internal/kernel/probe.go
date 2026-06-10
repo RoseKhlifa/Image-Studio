@@ -16,7 +16,18 @@ const probeUpstreamTimeout = 20 * time.Second
 const probeUpstreamMaxBody = 1 << 20
 
 type ProbeResult struct {
-	ModelCount int
+	ModelCount              int
+	Models                  []UpstreamModelDescriptor
+	ResponsesTransport      string
+	ResponsesTransportOK    bool
+	ResponsesTransportError string
+}
+
+type UpstreamModelDescriptor struct {
+	ID          string
+	Object      string
+	OwnedBy     string
+	DisplayName string
 }
 
 func ProbeUpstream(ctx context.Context, cfg Config) (ProbeResult, error) {
@@ -70,7 +81,12 @@ func ProbeUpstream(ctx context.Context, cfg Config) (ProbeResult, error) {
 	}
 
 	var parsed struct {
-		Data []json.RawMessage `json:"data"`
+		Data []struct {
+			ID          string `json:"id"`
+			Object      string `json:"object"`
+			OwnedBy     string `json:"owned_by"`
+			DisplayName string `json:"name"`
+		} `json:"data"`
 	}
 	if err := json.Unmarshal(body, &parsed); err != nil {
 		return ProbeResult{}, fmt.Errorf("上游 /v1/models 返回的 JSON 无效: %w", err)
@@ -78,7 +94,39 @@ func ProbeUpstream(ctx context.Context, cfg Config) (ProbeResult, error) {
 	if parsed.Data == nil {
 		return ProbeResult{}, fmt.Errorf("上游 /v1/models 响应缺少 data 数组")
 	}
-	return ProbeResult{ModelCount: len(parsed.Data)}, nil
+	models := make([]UpstreamModelDescriptor, 0, len(parsed.Data))
+	for _, item := range parsed.Data {
+		id := strings.TrimSpace(item.ID)
+		if id == "" {
+			continue
+		}
+		models = append(models, UpstreamModelDescriptor{
+			ID:          id,
+			Object:      strings.TrimSpace(item.Object),
+			OwnedBy:     strings.TrimSpace(item.OwnedBy),
+			DisplayName: strings.TrimSpace(item.DisplayName),
+		})
+	}
+	result := ProbeResult{
+		ModelCount: len(parsed.Data),
+		Models:     models,
+	}
+	if cfg.APIMode == client.APIModeResponses &&
+		client.NormalizeProxyTransportValue(strings.TrimSpace(string(cfg.ResponsesTransport))) == string(client.ResponsesTransportWebSocket) {
+		result.ResponsesTransport = string(client.ResponsesTransportWebSocket)
+		if wsErr := client.ProbeResponsesWebSocket(ctx, client.ProbeResponsesWebSocketOptions{
+			BaseURL: baseURL,
+			APIKey:  apiKey,
+			Proxy:   proxyConfig,
+			Model:   client.NormalizeTextModel(cfg.TextModelID),
+		}); wsErr != nil {
+			result.ResponsesTransportOK = false
+			result.ResponsesTransportError = wsErr.Error()
+			return result, nil
+		}
+		result.ResponsesTransportOK = true
+	}
+	return result, nil
 }
 
 func summarizeProbeBody(body []byte) string {

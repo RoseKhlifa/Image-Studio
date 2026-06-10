@@ -205,7 +205,7 @@ func (Runner) Run(ctx context.Context, cfg Config, cb Callbacks) (Result, error)
 		if idx > 0 {
 			nonNilLog(cb.Log)("主上游自动重试失败，切换到备用上游再试一次...")
 		}
-		result, err := runSingleConfig(ctx, variant, cb, imagesDir, logDir)
+		result, err := runSingleConfig(ctx, variant, cb, imagesDir, logDir, idx)
 		if err == nil {
 			return result, nil
 		}
@@ -351,7 +351,7 @@ func normalizeRequestPolicy(policy client.RequestPolicy) client.RequestPolicy {
 	return client.RequestPolicyOpenAI
 }
 
-func runSingleConfig(ctx context.Context, cfg Config, cb Callbacks, imagesDir string, logDir string) (Result, error) {
+func runSingleConfig(ctx context.Context, cfg Config, cb Callbacks, imagesDir string, logDir string, variantIndex int) (Result, error) {
 	proxy, err := client.NormalizeProxyConfig(cfg.ProxyMode, cfg.ProxyURL)
 	if err != nil {
 		return Result{}, err
@@ -397,6 +397,9 @@ func runSingleConfig(ctx context.Context, cfg Config, cb Callbacks, imagesDir st
 	}
 
 	timestamp := time.Now().Format("20060102-150405")
+	if variantIndex > 0 {
+		timestamp = fmt.Sprintf("%s-fallback%d", timestamp, variantIndex)
+	}
 	result, rawPath, err := client.RequestAndExtractWithRetriesAndPartial(
 		ctx,
 		transport,

@@ -721,25 +721,46 @@ func (a *App) layoutSettingsModal(gtx layout.Context, snap snapshot) layout.Dime
 	for a.settingsImagesCompatButton.Clicked(gtx) {
 		a.imagesNewAPICompat = !a.imagesNewAPICompat
 	}
+	for a.loadUpstreamModelsButton.Clicked(gtx) {
+		if !a.settingsDraftReady() {
+			continue
+		}
+		if err := a.testSettingsSelection(); err != nil {
+			a.appendLog("拉取模型列表失败: " + err.Error())
+			continue
+		}
+	}
 	for a.settingsTestUpstreamButton.Clicked(gtx) {
 		if !a.settingsDraftReady() {
 			continue
 		}
-		if err := a.saveSettingsSelection(); err != nil {
+		if err := a.testSettingsSelection(); err != nil {
 			a.appendLog("保存配置失败: " + err.Error())
 			continue
 		}
-		if strings.TrimSpace(a.settingsSelectedProfileID) != "" && a.settingsSelectedProfileID != a.activeProfileID {
-			if err := a.activateStoredProfile(a.settingsSelectedProfileID); err != nil {
-				a.appendLog("切换上游失败: " + err.Error())
-				continue
-			}
-		}
-		a.closeSettingsModal()
-		a.startUpstreamProbe()
 	}
 	for a.syncCodexConfigButton.Clicked(gtx) {
 		a.startCodexConfigSync()
+	}
+	for a.exportUpstreamConfigsButton.Clicked(gtx) {
+		a.exportUpstreamConfigs()
+	}
+	for a.importUpstreamConfigsButton.Clicked(gtx) {
+		a.importUpstreamConfigsFromFile()
+	}
+	for a.openQuickImportUpstreamConfigsButton.Clicked(gtx) {
+		a.upstreamQuickImportOpen = true
+	}
+	for a.closeQuickImportUpstreamConfigsButton.Clicked(gtx) {
+		a.upstreamQuickImportOpen = false
+	}
+	for a.confirmQuickImportUpstreamConfigsButton.Clicked(gtx) {
+		if err := a.importUpstreamConfigsFromRaw(a.upstreamQuickImportInput.Text()); err != nil {
+			a.appendLog("快捷导入失败: " + err.Error())
+			continue
+		}
+		a.upstreamQuickImportInput.SetText("")
+		a.upstreamQuickImportOpen = false
 	}
 	for a.createProfileButton.Clicked(gtx) {
 		if err := a.createSettingsProfile(string(client.APIModeResponses)); err != nil {
@@ -1015,6 +1036,18 @@ func (a *App) layoutGeneralSettingsModal(gtx layout.Context, snap snapshot) layo
 	for a.generalLoopButtons[1].Clicked(gtx) {
 		a.loopEnabled = false
 	}
+	for a.generalLoopAutoSaveButtons[0].Clicked(gtx) {
+		a.setLoopAutoSaveEnabled(true)
+	}
+	for a.generalLoopAutoSaveButtons[1].Clicked(gtx) {
+		a.setLoopAutoSaveEnabled(false)
+	}
+	for a.generalLoopPreviewButtons[0].Clicked(gtx) {
+		a.loopLivePreview = true
+	}
+	for a.generalLoopPreviewButtons[1].Clicked(gtx) {
+		a.loopLivePreview = false
+	}
 	for a.generalBatchButtons[0].Clicked(gtx) {
 		a.batchMode = true
 	}
@@ -1077,6 +1110,12 @@ func (a *App) layoutGeneralSettingsModal(gtx layout.Context, snap snapshot) layo
 	for a.resetGeneralOutputButton.Clicked(gtx) {
 		a.outputDirInput.SetText(kernel.DefaultOutputDir())
 	}
+	for a.chooseGeneralLoopAutoSaveDirButton.Clicked(gtx) {
+		a.chooseLoopAutoSaveDir("选择循环自动另存为目录失败: ")
+	}
+	for a.useGeneralLoopOutputDirButton.Clicked(gtx) {
+		a.useCurrentOutputDirForLoopAutoSave()
+	}
 	for a.chooseGeneralBatchInputButton.Clicked(gtx) {
 		dir, err := chooseDirectory()
 		if err != nil {
@@ -1110,6 +1149,7 @@ func (a *App) layoutGeneralSettingsModal(gtx layout.Context, snap snapshot) layo
 			a.batchOutputDir = dir
 		}
 	}
+	a.syncLoopSettingsFromInputs()
 	for a.openGeneralHistoryTimelineButton.Clicked(gtx) {
 		a.closeGeneralSettingsModal()
 		a.openHistoryTimeline()
@@ -1160,6 +1200,17 @@ func (a *App) layoutGeneralSettingsModal(gtx layout.Context, snap snapshot) layo
 		if err := openExternalURL(issuesURL); err != nil {
 			a.appendLog("打开反馈页失败: " + err.Error())
 		}
+	}
+	for a.openGeneralUpdateButton.Clicked(gtx) {
+		info, _, _, _ := a.readAppUpdateState()
+		if info != nil && info.HasUpdate && strings.TrimSpace(info.ReleaseTag) != strings.TrimSpace(a.ignoredReleaseTag) {
+			a.mu.Lock()
+			a.appUpdateModalOpen = true
+			a.mu.Unlock()
+			a.invalidateNow()
+			continue
+		}
+		a.openAppUpdateRelease()
 	}
 	renderDiagnostics := formatRenderDiagnostics(snap)
 	partialPreview := strings.TrimSpace(a.partialImagesInput.Text())
@@ -1394,6 +1445,22 @@ func (a *App) layoutGeneralSettingsModal(gtx layout.Context, snap snapshot) layo
 			return a.compactButton(gtx, &a.generalLoopButtons[1], "关闭", !a.loopEnabled)
 		}),
 	}
+	loopAutoSaveRows := []layout.FlexChild{
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			return a.compactButton(gtx, &a.generalLoopAutoSaveButtons[0], "自动另存为", a.loopAutoSave)
+		}),
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			return a.compactButton(gtx, &a.generalLoopAutoSaveButtons[1], "不自动保存", !a.loopAutoSave)
+		}),
+	}
+	loopPreviewRows := []layout.FlexChild{
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			return a.compactButton(gtx, &a.generalLoopPreviewButtons[0], "实时预览开", a.loopLivePreview)
+		}),
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			return a.compactButton(gtx, &a.generalLoopPreviewButtons[1], "实时预览关", !a.loopLivePreview)
+		}),
+	}
 	batchRows := []layout.FlexChild{
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			return a.compactButton(gtx, &a.generalBatchButtons[0], "开启", a.batchMode)
@@ -1626,6 +1693,15 @@ func (a *App) layoutGeneralSettingsModal(gtx layout.Context, snap snapshot) layo
 		},
 		func(gtx layout.Context) layout.Dimensions {
 			return a.generalSettingsCard(gtx, "循环出图", func(gtx layout.Context) layout.Dimensions {
+				currentOutputDir := strings.TrimSpace(a.outputDirInput.Text())
+				loopAutoSaveSummary := "未开启自动另存为"
+				if a.loopAutoSave {
+					if dir := strings.TrimSpace(a.loopAutoSaveDirInput.Text()); dir != "" {
+						loopAutoSaveSummary = "当前复制目录: " + dir
+					} else {
+						loopAutoSaveSummary = "已开启自动另存为,目录为空时会沿用当前输出目录"
+					}
+				}
 				rows := []layout.FlexChild{
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(unit.Dp(6))}.Layout(gtx, loopRows...)
@@ -1641,7 +1717,33 @@ func (a *App) layoutGeneralSettingsModal(gtx layout.Context, snap snapshot) layo
 						)
 					}),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return a.label(gtx, "开启后提交按钮会按这里的总张数和并发持续补位生成。当前先对齐桌面主路径，不含自动另存为。", unit.Sp(10), fluent.textDim, font.Normal)
+						return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(unit.Dp(6))}.Layout(gtx, loopAutoSaveRows...)
+					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return a.technicalField(gtx, "自动另存为目录", &a.loopAutoSaveDirInput, "留空 = 沿用当前输出目录", unit.Dp(42))
+					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(unit.Dp(6))}.Layout(gtx,
+							layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+								return a.compactIconTextButton(gtx, &a.chooseGeneralLoopAutoSaveDirButton, uiIconFolder, "选择自动另存为目录", false)
+							}),
+							layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+								label := "使用当前输出目录"
+								if currentOutputDir == "" {
+									label = "当前输出目录未设置"
+								}
+								return a.compactIconTextButton(gtx, &a.useGeneralLoopOutputDirButton, uiIconSave, label, false)
+							}),
+						)
+					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(unit.Dp(6))}.Layout(gtx, loopPreviewRows...)
+					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return a.label(gtx, "开启后会按这里的总张数和并发持续补位生成；常规出图张数只在普通模式下生效。"+loopAutoSaveSummary+"。", unit.Sp(10), fluent.textDim, font.Normal)
+					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return a.label(gtx, "关闭实时预览后不会在画布显示过程图，可以明显降低内存占用。", unit.Sp(10), fluent.textDim, font.Normal)
 					}),
 				}
 				return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(unit.Dp(8))}.Layout(gtx, rows...)
@@ -1947,6 +2049,13 @@ func (a *App) layoutGeneralSettingsModal(gtx layout.Context, snap snapshot) layo
 		},
 		func(gtx layout.Context) layout.Dimensions {
 			return a.generalSettingsCard(gtx, "支持与反馈", func(gtx layout.Context) layout.Dimensions {
+				info, _, checking, _ := a.readAppUpdateState()
+				updateLabel := "更新"
+				if checking {
+					updateLabel = "检查中..."
+				} else if info != nil && info.HasUpdate {
+					updateLabel = "更新 v" + info.LatestVersion
+				}
 				return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(unit.Dp(8))}.Layout(gtx,
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						return a.label(gtx, "代码仓库、问题反馈和更新记录都以 GitHub 为准。", unit.Sp(10), fluent.textDim, font.Normal)
@@ -1954,7 +2063,7 @@ func (a *App) layoutGeneralSettingsModal(gtx layout.Context, snap snapshot) layo
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(unit.Dp(6))}.Layout(gtx,
 							layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-								return a.compactIconTextButton(gtx, &a.openGeneralRepoButton, uiIconLaunch, "GitHub", false)
+								return a.compactIconTextButton(gtx, &a.openGeneralUpdateButton, uiIconLaunch, updateLabel, false)
 							}),
 							layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 								return a.compactIconTextButton(gtx, &a.openGeneralFeedbackButton, uiIconFeedback, "反馈", false)
@@ -2461,6 +2570,19 @@ func (a *App) layoutSettingsProfileRail(gtx layout.Context, snap snapshot) layou
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(unit.Dp(6))}.Layout(gtx,
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					return a.compactIconTextButton(gtx, &a.exportUpstreamConfigsButton, uiIconSave, "导出", false)
+				}),
+				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					return a.compactIconTextButton(gtx, &a.importUpstreamConfigsButton, uiIconFolder, "导入文件", false)
+				}),
+			)
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return a.compactIconTextButton(gtx, &a.openQuickImportUpstreamConfigsButton, uiIconEdit, "粘贴 JSON 快捷导入", false)
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(unit.Dp(6))}.Layout(gtx,
+				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 					return a.compactIconTextButton(gtx, &a.createProfileButton, uiIconAdd, "新建", false)
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -2567,10 +2689,44 @@ func (a *App) layoutSettingsEditorPane(gtx layout.Context, snap snapshot) layout
 	runtimeSection := func(gtx layout.Context) layout.Dimensions {
 		rows := []layout.FlexChild{}
 		canSave := strings.TrimSpace(a.baseURLInput.Text()) != "" && strings.TrimSpace(a.apiKeyInput.Text()) != ""
+		probeTextModels, probeImageModels := preferredProbeModels(a.api, snap.LastProbeModels)
+		rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			countLabel := "尚未加载"
+			if len(snap.LastProbeModels) > 0 {
+				countLabel = fmt.Sprintf("已识别 %d 个模型", len(snap.LastProbeModels))
+			}
+			if snap.TestingUpstream {
+				countLabel = "拉取中..."
+			}
+			return a.helpInfoCard(gtx, "上游模型列表", "", func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(unit.Dp(8))}.Layout(gtx,
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return a.label(gtx, countLabel, unit.Sp(11), fluent.text, font.Medium)
+					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return a.label(gtx, "通过宿主侧请求 /v1/models 获取模型列表，避免浏览器跨域或 WebView 差异影响结果。", unit.Sp(10), fluent.textDim, font.Normal)
+					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						label := "拉取并解析上游模型"
+						if snap.TestingUpstream {
+							label = "拉取中..."
+						}
+						return a.compactIconTextButton(gtx, &a.loadUpstreamModelsButton, uiIconRefresh, label, false)
+					}),
+				)
+			})
+		}))
 		if a.api == string(client.APIModeResponses) {
 			rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				return a.technicalField(gtx, "文本模型 ID", &a.textModelInput, client.TextModel, unit.Dp(40))
 			}))
+			if len(probeTextModels) > 0 {
+				rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return a.layoutProbeModelSuggestions(gtx, "推荐文本模型", "text", probeTextModels, strings.TrimSpace(a.textModelInput.Text()), func(id string) {
+						a.textModelInput.SetText(strings.TrimSpace(id))
+					})
+				}))
+			}
 			rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				return a.layoutSettingsOptionCards(gtx, "推理强度", reasoningEffortChoices, a.reasoningEffort, a.reasoningEffortButtons, 2, func(value string) {
 					a.reasoningEffort = normalizeReasoningEffort(value)
@@ -2588,6 +2744,13 @@ func (a *App) layoutSettingsEditorPane(gtx layout.Context, snap snapshot) layout
 				return a.technicalField(gtx, "并发数量限制", &a.concurrencyLimitInput, "留空 = 不限制", unit.Dp(40))
 			}),
 		)
+		if len(probeImageModels) > 0 {
+			rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return a.layoutProbeModelSuggestions(gtx, "推荐图像模型", "image", probeImageModels, strings.TrimSpace(a.imageModelInput.Text()), func(id string) {
+					a.imageModelInput.SetText(strings.TrimSpace(id))
+				})
+			}))
+		}
 		rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			children := []layout.FlexChild{
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -3549,10 +3712,10 @@ func (a *App) layoutLoopSection(gtx layout.Context) layout.Dimensions {
 		a.loopEnabled = false
 	}
 	for a.composeLoopAutoSaveButtons[0].Clicked(gtx) {
-		a.loopAutoSave = true
+		a.setLoopAutoSaveEnabled(true)
 	}
 	for a.composeLoopAutoSaveButtons[1].Clicked(gtx) {
-		a.loopAutoSave = false
+		a.setLoopAutoSaveEnabled(false)
 	}
 	for a.composeLoopPreviewButtons[0].Clicked(gtx) {
 		a.loopLivePreview = true
@@ -3561,26 +3724,21 @@ func (a *App) layoutLoopSection(gtx layout.Context) layout.Dimensions {
 		a.loopLivePreview = false
 	}
 	for a.chooseLoopAutoSaveDirButton.Clicked(gtx) {
-		dir, err := chooseDirectory()
-		if err != nil {
-			a.appendLog("选择循环自动另存为目录失败: " + err.Error())
-		} else if strings.TrimSpace(dir) != "" {
-			a.loopAutoSaveDirInput.SetText(dir)
-			a.loopAutoSave = true
-		}
+		a.chooseLoopAutoSaveDir("选择循环自动另存为目录失败: ")
 	}
 	for idx, value := range []int{4, 8, 10, 20, 50} {
 		value := value
 		for a.composeLoopCountButtons[idx].Clicked(gtx) {
-			a.loopTotalCount = value
+			a.setLoopTotalCount(value)
 		}
 	}
 	for idx, value := range []int{1, 2, 4, 8} {
 		value := value
 		for a.composeLoopConcurrencyButtons[idx].Clicked(gtx) {
-			a.loopConcurrency = value
+			a.setLoopConcurrency(value)
 		}
 	}
+	a.syncLoopSettingsFromInputs()
 
 	loopRows := []layout.FlexChild{
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
@@ -4170,6 +4328,65 @@ func (a *App) editorText(gtx layout.Context, editor *widget.Editor, hint string,
 
 func apiChoiceLabel(value string) string {
 	return choiceLabel(apiChoices, value)
+}
+
+func (a *App) layoutProbeModelSuggestions(
+	gtx layout.Context,
+	title string,
+	prefix string,
+	models []kernel.UpstreamModelDescriptor,
+	selectedID string,
+	onSelect func(string),
+) layout.Dimensions {
+	if len(models) == 0 {
+		return layout.Dimensions{}
+	}
+	limit := len(models)
+	if limit > 8 {
+		limit = 8
+	}
+	rows := []layout.FlexChild{
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return a.label(gtx, title, unit.Sp(11), fluent.textMuted, font.SemiBold)
+		}),
+	}
+	for idx := 0; idx < limit; idx += 2 {
+		idx := idx
+		rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			children := make([]layout.FlexChild, 0, 2)
+			for col := 0; col < 2; col++ {
+				modelIndex := idx + col
+				if modelIndex >= limit {
+					children = append(children, layout.Flexed(1, layout.Spacer{}.Layout))
+					continue
+				}
+				model := models[modelIndex]
+				btn := a.settingsProfileButton("probe-model:" + prefix + ":" + model.ID)
+				for btn.Clicked(gtx) {
+					onSelect(model.ID)
+				}
+				active := strings.TrimSpace(selectedID) == strings.TrimSpace(model.ID)
+				children = append(children, layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					return a.surfaceButton(
+						gtx,
+						btn,
+						chooseColor(active, fluent.accentSoft, fluent.surface),
+						chooseColor(active, accentAlpha(0x18), fluent.surface2),
+						chooseColor(active, accentAlpha(0x24), fluent.border),
+						unit.Dp(8),
+						layout.Inset{Top: 8, Bottom: 8, Left: 10, Right: 10},
+						func(gtx layout.Context) layout.Dimensions {
+							return a.label(gtx, probeModelLabel(model), unit.Sp(10), chooseColor(active, fluent.accent, fluent.text), font.Medium)
+						},
+					)
+				}))
+			}
+			return layout.Inset{Bottom: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(unit.Dp(8))}.Layout(gtx, children...)
+			})
+		}))
+	}
+	return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(unit.Dp(6))}.Layout(gtx, rows...)
 }
 
 func policyChoiceLabel(value string) string {

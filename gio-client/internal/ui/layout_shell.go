@@ -89,8 +89,14 @@ func (a *App) layout(gtx layout.Context) layout.Dimensions {
 	if a.aboutModalOpen {
 		a.layoutAboutModal(gtx)
 	}
+	if _, open, _, _ := a.readAppUpdateState(); open {
+		a.layoutAppUpdateModal(gtx)
+	}
 	if a.settingsModalOpen {
 		a.layoutSettingsModal(gtx, snap)
+		if a.upstreamQuickImportOpen {
+			a.layoutUpstreamQuickImportModal(gtx)
+		}
 		if a.settingsHelpOpen {
 			a.layoutSettingsHelpModal(gtx)
 		}

@@ -22,6 +22,7 @@ func main() {
 		os.Exit(exitCode)
 	}
 	appUI := ui.New()
+	appUI.StartBackgroundAppUpdateCheck()
 	server, alreadyRunning, err := promptipc.TryStart(func(msg promptipc.Message) {
 		switch msg.Type {
 		case promptipc.MessageTypeRaise:

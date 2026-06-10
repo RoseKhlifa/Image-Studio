@@ -245,6 +245,70 @@ func TestCurrentConfigIncludesResponsesTransportAndReasoning(t *testing.T) {
 	}
 }
 
+func TestStartPromptOptimizeBlocksWhenRemoteKernelCannotControlProxy(t *testing.T) {
+	app := &App{
+		kernelRuntimeMode: "remote",
+		proxy:             client.ProxyModeCustom,
+	}
+	app.apiKeyInput.SetText("sk-test")
+	app.baseURLInput.SetText("https://example.com")
+	app.promptInput.SetText("hello")
+	app.textModelInput.SetText(client.TextModel)
+	app.proxyURLInput.SetText("http://127.0.0.1:7890")
+
+	app.startPromptOptimize()
+
+	if app.optimizingPrompt {
+		t.Fatal("startPromptOptimize should not enter optimizing state when remote kernel cannot control proxy")
+	}
+	if len(app.logs) == 0 || !strings.Contains(app.logs[len(app.logs)-1], "当前远程内核不能控制代理") {
+		t.Fatalf("unexpected logs: %v", app.logs)
+	}
+}
+
+func TestResolveFallbackProfileConfigRequiresKeyAndBaseURL(t *testing.T) {
+	state := sharedCompat.State{
+		Profiles: []sharedCompat.UpstreamProfile{
+			{
+				ID:                 "fallback-1",
+				Name:               "备用",
+				APIMode:            string(client.APIModeResponses),
+				ResponsesTransport: string(client.ResponsesTransportWebSocket),
+				RequestPolicy:      string(client.RequestPolicyCompat),
+				BaseURL:            "https://fallback.example",
+				TextModelID:        "gpt-5.5",
+				ImageModelID:       "gpt-image-2",
+				ReasoningEffort:    "high",
+			},
+		},
+	}
+	got := resolveFallbackProfileConfig(state, "fallback-1", func(profileID string) (string, error) {
+		if profileID != "fallback-1" {
+			t.Fatalf("unexpected profileID %q", profileID)
+		}
+		return "sk-fallback", nil
+	})
+	if got == nil {
+		t.Fatal("expected fallback profile config")
+	}
+	if got.APIKey != "sk-fallback" || got.BaseURL != "https://fallback.example" || got.ResponsesTransport != client.ResponsesTransportWebSocket || got.RequestPolicy != client.RequestPolicyCompat || got.ReasoningEffort != "high" {
+		t.Fatalf("unexpected fallback config: %#v", got)
+	}
+
+	if got := resolveFallbackProfileConfig(state, "fallback-1", func(string) (string, error) {
+		return "", nil
+	}); got != nil {
+		t.Fatalf("expected nil fallback when key missing, got %#v", got)
+	}
+
+	state.Profiles[0].BaseURL = ""
+	if got := resolveFallbackProfileConfig(state, "fallback-1", func(string) (string, error) {
+		return "sk-fallback", nil
+	}); got != nil {
+		t.Fatalf("expected nil fallback when baseURL missing, got %#v", got)
+	}
+}
+
 func TestApplyHistoryThumbBackfillUpdatesInMemoryState(t *testing.T) {
 	app := &App{}
 	item := sharedCompat.HistoryItem{ID: "hist-1", SavedPath: "/tmp/full.png"}

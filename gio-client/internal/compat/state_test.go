@@ -1,6 +1,7 @@
 package compat
 
 import (
+	"path/filepath"
 	"testing"
 
 	"image-studio/gio-client/internal/kernel"
@@ -103,6 +104,9 @@ func TestUpsertConfigPreservesActiveProfileIdentity(t *testing.T) {
 	if next.Settings.OutputFormat != "jpeg" || next.Settings.OutputDir != "/tmp/images" || next.Settings.ProxyMode != client.ProxyModeNone {
 		t.Fatalf("settings not updated: %#v", next.Settings)
 	}
+	if len(next.Settings.TrustedOutputRoots) != 1 || next.Settings.TrustedOutputRoots[0] != filepath.Clean("/tmp/images") {
+		t.Fatalf("trusted output roots not updated: %#v", next.Settings.TrustedOutputRoots)
+	}
 	if next.Settings.CompletionSound == nil || !next.Settings.CompletionSound.Enabled || next.Settings.CompletionSound.Mode != "custom" || next.Settings.CompletionSound.CustomName != "done.wav" || next.Settings.CompletionSound.CustomData != "data:audio/wav;base64,BB==" {
 		t.Fatalf("completion sound not updated: %#v", next.Settings.CompletionSound)
 	}
@@ -139,5 +143,17 @@ func TestHistoryItemFromRunUsesWebViewCompatibleFields(t *testing.T) {
 	}
 	if len(item.SourcePaths) != 2 || item.SourcePaths[0] != "/tmp/images/src-a.png" || item.SourcePaths[1] != "/tmp/images/src-b.png" {
 		t.Fatalf("source paths not mapped: %#v", item.SourcePaths)
+	}
+}
+
+func TestRememberTrustedOutputRootDeduplicatesAndNormalizes(t *testing.T) {
+	state := RememberTrustedOutputRoot(shared.State{}, "./tmp/out")
+	if len(state.Settings.TrustedOutputRoots) != 1 {
+		t.Fatalf("trusted output roots len=%d want 1", len(state.Settings.TrustedOutputRoots))
+	}
+	first := state.Settings.TrustedOutputRoots[0]
+	state = RememberTrustedOutputRoot(state, first)
+	if len(state.Settings.TrustedOutputRoots) != 1 {
+		t.Fatalf("trusted output roots duplicated: %#v", state.Settings.TrustedOutputRoots)
 	}
 }
