@@ -1,11 +1,11 @@
-import { ReactNode, useEffect } from "react";
+import { ReactNode, Ref, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { usePlatform } from "../../platform/context";
 
 // 居中 modal:点击背景 / Esc 关闭。
 export function Modal({
-  open, onClose, title, children, width = 480, backdropClassName = "", cardClassName = "", headerClassName = "", bodyClassName = "",
+  open, onClose, title, children, width = 480, backdropClassName = "", cardClassName = "", headerClassName = "", bodyClassName = "", bodyRef,
 }: {
   open: boolean;
   onClose: () => void;
@@ -16,6 +16,7 @@ export function Modal({
   cardClassName?: string;
   headerClassName?: string;
   bodyClassName?: string;
+  bodyRef?: Ref<HTMLDivElement>;
 }) {
   const { isAndroidPhone, usesFluentUI, usesAppleUI } = usePlatform();
   useEffect(() => {
@@ -53,7 +54,7 @@ export function Modal({
             </button>
           </div>
         )}
-        <div className={`modal-scroll-body app-modal-body ${isAndroidPhone ? "app-modal-body-phone" : "app-modal-body-desktop"} ${bodyClassName}`}>{children}</div>
+        <div ref={bodyRef} className={`modal-scroll-body app-modal-body ${isAndroidPhone ? "app-modal-body-phone" : "app-modal-body-desktop"} ${bodyClassName}`}>{children}</div>
       </div>
     </div>
   );
