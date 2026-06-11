@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"encoding/base64"
 	"image"
 	"os"
 	"runtime"
@@ -417,5 +418,26 @@ func TestBuildPerformanceDiagnosticsReportIncludesKeyFields(t *testing.T) {
 		if !strings.Contains(report, want) {
 			t.Fatalf("report missing %q:\n%s", want, report)
 		}
+	}
+}
+
+func TestBuildPerformanceDiagnosticsReportMarksVirtualCurrentResultPresent(t *testing.T) {
+	virtualPath := registerVirtualImage(base64.StdEncoding.EncodeToString([]byte("virtual-image")), "remote-result.png", "png")
+	app := &App{}
+	app.result = resultState{
+		SavedPath: virtualPath,
+		Item: sharedCompat.HistoryItem{
+			ID:        "result-virtual",
+			SavedPath: virtualPath,
+		},
+		HasItem: true,
+	}
+
+	report := app.buildPerformanceDiagnosticsReport()
+	if !strings.Contains(report, "current_result_saved_present: true") {
+		t.Fatalf("report missing virtual saved presence:\n%s", report)
+	}
+	if !strings.Contains(report, "current_result_managed_preview_ready: false") {
+		t.Fatalf("report missing virtual managed preview state:\n%s", report)
 	}
 }

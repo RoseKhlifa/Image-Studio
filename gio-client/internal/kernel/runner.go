@@ -51,14 +51,19 @@ type Config struct {
 	AutoRetryCount       int
 	CompletionSound      sharedCompat.CompletionSoundSettings
 	SourcePaths          []string
+	SourceImageDataURLs  []string
+	ParentID             string
 	OutputDir            string
 	Seed                 int64
 	NegativePrompt       string
+	MaskB64              string
 	PartialImages        int
 	StyleTag             string
 	BatchIndex           int
+	PreviewSlotIndex     int
 	FallbackProfileID    string
 	FallbackProfile      *FallbackProfileConfig
+	PreviewOnlyResult    bool
 }
 
 type FallbackProfileConfig struct {
@@ -84,6 +89,7 @@ type Result struct {
 	PreviewPath   string
 	ThumbPath     string
 	RawPath       string
+	RawText       string
 	ImageB64      string
 	RevisedPrompt string
 	SourceEvent   string
@@ -169,19 +175,26 @@ func (Runner) Run(ctx context.Context, cfg Config, cb Callbacks) (Result, error)
 	if cfg.BaseURL == "" {
 		return Result{}, fmt.Errorf("上游 BASE_URL 不能为空")
 	}
-	if cfg.Mode == client.ModeEdit && len(cfg.SourcePaths) == 0 {
+	if cfg.Mode == client.ModeEdit && len(cfg.SourcePaths) == 0 && len(cfg.SourceImageDataURLs) == 0 {
 		return Result{}, fmt.Errorf("图生图模式需要至少一张源图")
 	}
-	if err := os.MkdirAll(cfg.OutputDir, 0o700); err != nil {
-		return Result{}, fmt.Errorf("创建输出目录失败:%w", err)
-	}
-	imagesDir := filepath.Join(cfg.OutputDir, "images")
 	logDir := filepath.Join(cfg.OutputDir, "log")
-	if err := os.MkdirAll(imagesDir, 0o700); err != nil {
-		return Result{}, fmt.Errorf("创建图片目录失败:%w", err)
+	if !cfg.PreviewOnlyResult {
+		if err := os.MkdirAll(cfg.OutputDir, 0o700); err != nil {
+			return Result{}, fmt.Errorf("创建输出目录失败:%w", err)
+		}
+		if err := os.MkdirAll(logDir, 0o700); err != nil {
+			return Result{}, fmt.Errorf("创建日志目录失败:%w", err)
+		}
+	} else {
+		logDir = ""
 	}
-	if err := os.MkdirAll(logDir, 0o700); err != nil {
-		return Result{}, fmt.Errorf("创建日志目录失败:%w", err)
+	imagesDir := ""
+	if !cfg.PreviewOnlyResult {
+		imagesDir = filepath.Join(cfg.OutputDir, "images")
+		if err := os.MkdirAll(imagesDir, 0o700); err != nil {
+			return Result{}, fmt.Errorf("创建图片目录失败:%w", err)
+		}
 	}
 
 	variants := []Config{cfg}
@@ -314,6 +327,7 @@ func normalizeConfig(cfg Config) Config {
 	cfg.FallbackProfileID = strings.TrimSpace(cfg.FallbackProfileID)
 	cfg.FallbackProfile = normalizeFallbackProfileConfig(cfg.FallbackProfile)
 	cfg.SourcePaths = normalizeSourcePaths(cfg.SourcePaths)
+	cfg.SourceImageDataURLs = normalizeSourceImageDataURLs(cfg.SourceImageDataURLs)
 	return cfg
 }
 
@@ -387,11 +401,12 @@ func runSingleConfig(ctx context.Context, cfg Config, cb Callbacks, imagesDir st
 		AutoRetryCount:     cfg.AutoRetryCount,
 		Seed:               cfg.Seed,
 		NegativePrompt:     cfg.NegativePrompt,
+		MaskB64:            cfg.MaskB64,
 		PartialImages:      cfg.PartialImages,
 		DisablePreview:     cfg.PartialImages == 0,
 	}
 	if cfg.Mode == client.ModeEdit {
-		if err := attachSourceImages(&opts, cfg.SourcePaths); err != nil {
+		if err := attachSourceImages(&opts, cfg.SourcePaths, cfg.SourceImageDataURLs); err != nil {
 			return Result{}, err
 		}
 	}
@@ -400,20 +415,47 @@ func runSingleConfig(ctx context.Context, cfg Config, cb Callbacks, imagesDir st
 	if variantIndex > 0 {
 		timestamp = fmt.Sprintf("%s-fallback%d", timestamp, variantIndex)
 	}
-	result, rawPath, err := client.RequestAndExtractWithRetriesAndPartial(
-		ctx,
-		transport,
-		opts,
-		logDir,
-		timestamp,
-		nonNilLog(cb.Log),
-		cb.Progress,
-		cb.Partial,
+	var (
+		result  client.ImageResult
+		rawPath string
+		rawText string
+		reqErr  error
 	)
-	if err != nil {
-		return Result{RawPath: absPathOrRaw(rawPath)}, err
+	if cfg.PreviewOnlyResult {
+		result, rawText, reqErr = client.RequestAndExtractWithRetriesAndPartialInMemory(
+			ctx,
+			transport,
+			opts,
+			nonNilLog(cb.Log),
+			cb.Progress,
+			cb.Partial,
+		)
+		rawPath = ""
+	} else {
+		result, rawPath, reqErr = client.RequestAndExtractWithRetriesAndPartial(
+			ctx,
+			transport,
+			opts,
+			logDir,
+			timestamp,
+			nonNilLog(cb.Log),
+			cb.Progress,
+			cb.Partial,
+		)
+		rawPath = absPathOrRaw(rawPath)
 	}
-	rawPath = absPathOrRaw(rawPath)
+	if reqErr != nil {
+		return Result{RawPath: rawPath, RawText: rawText}, reqErr
+	}
+	if cfg.PreviewOnlyResult {
+		return Result{
+			RawPath:       rawPath,
+			RawText:       rawText,
+			ImageB64:      result.ImageB64,
+			RevisedPrompt: result.RevisedPrompt,
+			SourceEvent:   result.SourceEvent,
+		}, nil
+	}
 
 	imageName := buildImageName(cfg.Mode, cfg.Prompt, timestamp, cfg.OutputFormat)
 	savedPath, err := saveImage(result.ImageB64, filepath.Join(imagesDir, imageName))
@@ -439,6 +481,8 @@ func runSingleConfig(ctx context.Context, cfg Config, cb Callbacks, imagesDir st
 		PreviewPath:   previewPath,
 		ThumbPath:     thumbPath,
 		RawPath:       rawPath,
+		RawText:       rawText,
+		ImageB64:      result.ImageB64,
 		RevisedPrompt: result.RevisedPrompt,
 		SourceEvent:   result.SourceEvent,
 	}, nil
@@ -461,25 +505,91 @@ func normalizeSourcePaths(paths []string) []string {
 	return out
 }
 
-func attachSourceImages(opts *client.Options, paths []string) error {
+func normalizeSourceImageDataURLs(urls []string) []string {
+	out := make([]string, 0, len(urls))
+	seen := map[string]struct{}{}
+	for _, raw := range urls {
+		url := strings.TrimSpace(raw)
+		if url == "" {
+			continue
+		}
+		if _, ok := seen[url]; ok {
+			continue
+		}
+		seen[url] = struct{}{}
+		out = append(out, url)
+	}
+	return out
+}
+
+func attachSourceImages(opts *client.Options, paths []string, dataURLs []string) error {
 	normalized := normalizeSourcePaths(paths)
-	if len(normalized) == 0 {
+	normalizedDataURLs := normalizeSourceImageDataURLs(dataURLs)
+	if len(normalized) == 0 && len(normalizedDataURLs) == 0 {
 		return fmt.Errorf("图生图模式需要至少一张源图")
 	}
+	opts.ImageDataURLs = nil
+	opts.ImagePaths = nil
 	if opts.APIMode == client.APIModeImages {
-		opts.ImagePaths = normalized
+		opts.ImagePaths = append([]string(nil), normalized...)
+		if len(normalizedDataURLs) == 0 {
+			return nil
+		}
+		tempPaths := make([]string, 0, len(normalizedDataURLs))
+		for _, dataURL := range normalizedDataURLs {
+			path, err := writeSourceDataURLToTemp(dataURL)
+			if err != nil {
+				return err
+			}
+			tempPaths = append(tempPaths, path)
+		}
+		opts.ImagePaths = append(opts.ImagePaths, tempPaths...)
 		return nil
 	}
-	dataURLs := make([]string, 0, len(normalized))
+	derivedDataURLs := make([]string, 0, len(normalized))
 	for _, path := range normalized {
 		dataURL, err := client.ImageFileToDataURL(path)
 		if err != nil {
 			return err
 		}
-		dataURLs = append(dataURLs, dataURL)
+		derivedDataURLs = append(derivedDataURLs, dataURL)
 	}
-	opts.ImageDataURLs = dataURLs
+	opts.ImageDataURLs = append(derivedDataURLs, normalizedDataURLs...)
 	return nil
+}
+
+func writeSourceDataURLToTemp(dataURL string) (string, error) {
+	idx := strings.Index(dataURL, ",")
+	if !strings.HasPrefix(dataURL, "data:") || idx < 0 {
+		return "", errors.New("not a data URL")
+	}
+	header := dataURL[5:idx]
+	payload := dataURL[idx+1:]
+	if !strings.Contains(header, "base64") {
+		return "", errors.New("data URL not base64")
+	}
+	raw, err := base64.StdEncoding.DecodeString(payload)
+	if err != nil {
+		return "", err
+	}
+	ext := ".png"
+	if strings.HasPrefix(header, "image/jpeg") {
+		ext = ".jpg"
+	} else if strings.HasPrefix(header, "image/webp") {
+		ext = ".webp"
+	}
+	f, err := os.CreateTemp("", "image-studio-edit-*"+ext)
+	if err != nil {
+		return "", err
+	}
+	if _, err := f.Write(raw); err != nil {
+		_ = f.Close()
+		return "", err
+	}
+	if err := f.Close(); err != nil {
+		return "", err
+	}
+	return f.Name(), nil
 }
 
 func buildImageName(mode client.Mode, prompt, timestamp, outputFormat string) string {

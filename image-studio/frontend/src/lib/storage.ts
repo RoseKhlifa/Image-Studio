@@ -1,7 +1,7 @@
 // IndexedDB + localStorage helpers for non-secret frontend persistence.
 
-import type { HistoryItem } from "../types/domain";
-import { base64ToBlob, blobToBase64 } from "./images";
+import type { HistoryItem } from "../types/domain.ts";
+import { base64ToBlob, blobToBase64 } from "./images.ts";
 
 const DB_NAME = "image-studio";
 const DB_VERSION = 2;

@@ -38,6 +38,9 @@ func decodeImageB64(imageB64 string) (image.Image, error) {
 }
 
 func decodeImageFile(path string) (image.Image, error) {
+	if imageB64, ok := readVirtualImageB64(path); ok {
+		return decodeImageB64(imageB64)
+	}
 	file, err := os.Open(strings.TrimSpace(path))
 	if err != nil {
 		return nil, err

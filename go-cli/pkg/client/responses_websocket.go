@@ -36,17 +36,18 @@ func (e *responsesWebSocketFallbackError) Unwrap() error {
 }
 
 type ResponsesWSRunStateSnapshot struct {
-	AttemptIndex       int
-	SocketEpoch        int
-	CreatedAt          time.Time
-	LastActivityAt     time.Time
-	RequestPayload     []byte
-	ResponseID         string
-	LatestEventType    string
+	AttemptIndex        int
+	SocketEpoch         int
+	CreatedAt           time.Time
+	LastActivityAt      time.Time
+	RequestPayload      []byte
+	ResponseID          string
+	LatestEventType     string
+	ReceivedBytes       int64
 	PartialPreviewCount int
-	HasFinalImage      bool
-	Cancelled          bool
-	Completed          bool
+	HasFinalImage       bool
+	Cancelled           bool
+	Completed           bool
 }
 
 type ProbeResponsesWebSocketOptions struct {
@@ -95,7 +96,6 @@ func requestResponsesWithWebSocketReplay(
 		}
 		ticker := time.NewTicker(time.Duration(StatusIntervalSecond) * time.Second)
 		defer ticker.Stop()
-		lastBytes := int64(0)
 		lastStage := "等待接口响应"
 		for {
 			select {
@@ -110,14 +110,14 @@ func requestResponsesWithWebSocketReplay(
 						lastStage = "模型处理中"
 					}
 				}
-				onProgress(lastStage, int(time.Since(startedAt).Seconds()), lastBytes)
+				onProgress(lastStage, int(time.Since(startedAt).Seconds()), snapshot.ReceivedBytes)
 			}
 		}
 	}()
 	if onLog != nil {
 		onLog("使用 Responses WebSocket mode 发起请求...")
 	}
-	result, err := requestResponsesOverWebSocket(ctx, baseURL, opts.APIKey, opts.Proxy, payload, rawSink, onPartial, snapshot)
+	result, err := requestResponsesOverWebSocket(ctx, baseURL, opts.APIKey, opts.Proxy, payload, rawSink, onPartial, snapshot, startedAt, onProgress)
 	var fallbackErr *responsesWebSocketFallbackError
 	if errors.As(err, &fallbackErr) {
 		if onLog != nil {
@@ -179,6 +179,8 @@ func requestResponsesOverWebSocket(
 	rawSink io.Writer,
 	onPartial func(PartialImage),
 	snapshot *ResponsesWSRunStateSnapshot,
+	startedAt time.Time,
+	onProgress func(stage string, elapsedSeconds int, bytesReceived int64),
 ) (ImageResult, error) {
 	if snapshot == nil {
 		snapshot = &ResponsesWSRunStateSnapshot{}
@@ -195,7 +197,7 @@ func requestResponsesOverWebSocket(
 				_, _ = io.WriteString(rawSink, fmt.Sprintf("--- websocket-reconnect-%d ---\n", reconnect))
 			}
 		}
-		result, err := requestResponsesOverWebSocketOnce(ctx, baseURL, apiKey, proxy, payload, rawSink, onPartial, snapshot)
+		result, err := requestResponsesOverWebSocketOnce(ctx, baseURL, apiKey, proxy, payload, rawSink, onPartial, snapshot, startedAt, onProgress)
 		if err == nil {
 			return result, nil
 		}
@@ -225,6 +227,8 @@ func requestResponsesOverWebSocketOnce(
 	rawSink io.Writer,
 	onPartial func(PartialImage),
 	snapshot *ResponsesWSRunStateSnapshot,
+	startedAt time.Time,
+	onProgress func(stage string, elapsedSeconds int, bytesReceived int64),
 ) (ImageResult, error) {
 	wsURL, err := responsesWebSocketURL(baseURL)
 	if err != nil {
@@ -290,10 +294,18 @@ func requestResponsesOverWebSocketOnce(
 			continue
 		}
 		_, _ = collector.Write(append([]byte("data: "), append(line, '\n')...))
+		snapshot.ReceivedBytes = collector.bytesReceived()
 		var ev Event
 		if err := decodeEvent(string(line), &ev); err == nil {
 			if evType, _ := ev["type"].(string); evType != "" {
 				snapshot.LatestEventType = evType
+				if onProgress != nil {
+					stage := SummarizeSSELine(`data: {"type":"` + evType + `"}`)
+					if stage == "" {
+						stage = "模型处理中"
+					}
+					onProgress(stage, int(time.Since(startedAt).Seconds()), snapshot.ReceivedBytes)
+				}
 				switch evType {
 				case "response.created":
 					if responseAny, ok := ev["response"].(map[string]any); ok {

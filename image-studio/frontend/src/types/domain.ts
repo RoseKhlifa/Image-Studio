@@ -193,6 +193,7 @@ export interface HistoryItem {
   imageId?: string;
   previewUrl?: string;
   fullUrl?: string;
+  previewPath?: string;
   thumbPath?: string;
   previewWidth?: number;
   previewHeight?: number;
@@ -225,6 +226,7 @@ export interface HistoryItem {
   previewSlotIndex?: number;
   elapsedSec?: number;     // generation duration in seconds
 
+  sourcePaths?: string[];
   savedPath?: string;
   rawPath?: string;
 }

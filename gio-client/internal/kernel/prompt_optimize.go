@@ -43,6 +43,16 @@ func OptimizePrompt(ctx context.Context, cfg Config) (string, error) {
 			"text": fmt.Sprintf("Original prompt:\n%s", prompt),
 		},
 	}
+	for _, dataURL := range cfg.SourceImageDataURLs {
+		dataURL = strings.TrimSpace(dataURL)
+		if dataURL == "" {
+			continue
+		}
+		content = append(content, map[string]any{
+			"type":      "input_image",
+			"image_url": dataURL,
+		})
+	}
 	for _, p := range cfg.SourcePaths {
 		dataURL, err := client.ImageFileToDataURL(p)
 		if err != nil {

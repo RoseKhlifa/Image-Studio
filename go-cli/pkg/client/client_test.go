@@ -144,6 +144,46 @@ func TestRequestAndExtractWithRetriesEmitsPartialImages(t *testing.T) {
 	}
 }
 
+func TestRequestAndExtractReportsProgressStageImmediately(t *testing.T) {
+	pngB64 := base64.StdEncoding.EncodeToString([]byte("\x89PNG\r\n\x1a\nfake"))
+	ev := func(m map[string]any) string {
+		b, _ := json.Marshal(m)
+		return "data: " + string(b)
+	}
+	lines := []string{
+		ev(map[string]any{"type": "response.created"}),
+		ev(map[string]any{
+			"type": "response.output_item.done",
+			"item": map[string]any{
+				"type":   "image_generation_call",
+				"result": pngB64,
+			},
+		}),
+	}
+	srv := startSSEServer(t, lines, http.StatusOK)
+	transport := &injectingTransport{inner: &NativeTransport{}, url: srv.URL}
+	var stages []string
+
+	res, err := RequestAndExtract(
+		context.Background(),
+		transport,
+		Options{APIKey: "sk-test", Prompt: "hello", BaseURL: "https://test.local"},
+		io.Discard,
+		func(stage string, _ int, _ int64) {
+			stages = append(stages, stage)
+		},
+	)
+	if err != nil {
+		t.Fatalf("RequestAndExtract: %v", err)
+	}
+	if res.ImageB64 != pngB64 {
+		t.Fatalf("image b64 mismatch")
+	}
+	if len(stages) == 0 || stages[0] != "请求已创建" {
+		t.Fatalf("stages=%v want immediate created stage", stages)
+	}
+}
+
 func TestRequestAndExtractWithRetriesRetriesWhenOnlyPartialPreviewArrives(t *testing.T) {
 	finalB64 := base64.StdEncoding.EncodeToString([]byte("\x89PNG\r\n\x1a\nfinal"))
 	hits := 0
@@ -318,7 +358,7 @@ func TestRequestAndExtractWithRetriesUsesConfiguredRetryCount(t *testing.T) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 		if hits <= 3 {
-			fmt.Fprint(w, `{"error":{"message":"Upstream request failed","type":"upstream_error","upstreamStatus":503}}`)
+			fmt.Fprint(w, `{"error":{"message":"Service temporarily unavailable","type":"server_error"}}`)
 			return
 		}
 		body, _ := json.Marshal(map[string]any{
@@ -362,6 +402,65 @@ func TestRequestAndExtractWithRetriesUsesConfiguredRetryCount(t *testing.T) {
 	}
 	if hits != 4 {
 		t.Fatalf("hits = %d, want 4", hits)
+	}
+}
+
+func TestRequestAndExtractWithRetriesSkipsOuterRetryWhenWorkerAlreadyRetried(t *testing.T) {
+	hits := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"error":{"message":"Upstream request failed","type":"upstream_error","upstreamStatus":503}}`)
+	}))
+	defer srv.Close()
+
+	original := RetryBackoffSeconds
+	RetryBackoffSeconds = 0
+	t.Cleanup(func() { RetryBackoffSeconds = original })
+
+	transport := &injectingTransport{inner: &NativeTransport{}, url: srv.URL}
+	dir := t.TempDir()
+
+	_, _, err := RequestAndExtractWithRetries(
+		context.Background(), transport,
+		Options{APIKey: "sk-test", Prompt: "p", Size: "1024x1024", Quality: "auto", BaseURL: "https://test.local", AutoRetryCount: 3},
+		dir, "20260611-100001",
+		nil, nil,
+	)
+	if err == nil {
+		t.Fatal("expected error when upstream already exhausted its own retries")
+	}
+	if hits != 1 {
+		t.Fatalf("hits = %d, want 1", hits)
+	}
+}
+
+func TestImagesAPIWithRetriesSkipsOuterRetryWhenWorkerAlreadyRetried(t *testing.T) {
+	hits := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":{"message":"Upstream request failed","type":"upstream_error","upstreamStatus":503}}`))
+	}))
+	defer srv.Close()
+
+	original := RetryBackoffSeconds
+	RetryBackoffSeconds = 0
+	t.Cleanup(func() { RetryBackoffSeconds = original })
+
+	_, _, err := RequestAndExtractWithRetries(
+		context.Background(), nil,
+		Options{APIKey: "sk-test", Prompt: "p", Size: "1024x1024", Quality: "auto", BaseURL: srv.URL, APIMode: APIModeImages, AutoRetryCount: 3},
+		t.TempDir(), "20260611-100002",
+		nil, nil,
+	)
+	if err == nil {
+		t.Fatal("expected error when Images API upstream already exhausted its own retries")
+	}
+	if hits != 1 {
+		t.Fatalf("hits = %d, want 1", hits)
 	}
 }
 
@@ -579,6 +678,56 @@ func TestRequestResponsesOverWebSocketSucceedsWhenFinalArrivesBeforeDisconnect(t
 	}
 	if result.ImageB64 != pngB64 {
 		t.Fatalf("result image mismatch")
+	}
+}
+
+func TestRequestResponsesWithWebSocketReplayReportsProgressStageImmediately(t *testing.T) {
+	pngB64 := base64.StdEncoding.EncodeToString([]byte("\x89PNG\r\n\x1a\nfake"))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+			t.Fatalf("expected websocket upgrade")
+		}
+		upgrader := websocket.Upgrader{}
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Fatalf("upgrade: %v", err)
+		}
+		defer conn.Close()
+		_, _, err = conn.ReadMessage()
+		if err != nil {
+			t.Fatalf("read: %v", err)
+		}
+		_ = conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"response.created","response":{"id":"resp_123"}}`))
+		_ = conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"response.output_item.done","item":{"type":"image_generation_call","result":"`+pngB64+`"}}`))
+		_ = conn.Close()
+	}))
+	defer srv.Close()
+
+	var stages []string
+	result, err := requestResponsesWithWebSocketReplay(
+		context.Background(),
+		Options{
+			APIKey:             "sk-test",
+			Prompt:             "hello",
+			BaseURL:            srv.URL,
+			ResponsesTransport: ResponsesTransportWebSocket,
+		},
+		io.Discard,
+		func(stage string, _ int, _ int64) {
+			stages = append(stages, stage)
+		},
+		nil,
+		1,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("requestResponsesWithWebSocketReplay: %v", err)
+	}
+	if result.ImageB64 != pngB64 {
+		t.Fatalf("result image mismatch")
+	}
+	if len(stages) == 0 || stages[0] != "请求已创建" {
+		t.Fatalf("stages=%v want immediate created stage", stages)
 	}
 }
 

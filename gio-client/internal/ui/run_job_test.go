@@ -1,11 +1,17 @@
 package ui
 
 import (
+	"bytes"
+	"encoding/base64"
+	"image"
+	"image/color"
+	"image/png"
 	"strings"
 	"testing"
 
 	"github.com/yuanhua/image-gptcodex/pkg/client"
 	"image-studio/gio-client/internal/kernel"
+	sharedCompat "image-studio/shared/compat"
 )
 
 func TestRequestedRunConcurrencyUsesLoopSetting(t *testing.T) {
@@ -74,5 +80,70 @@ func TestStartRunBlocksWhenConcurrencyLimitTooLow(t *testing.T) {
 	}
 	if !strings.Contains(app.logs[len(app.logs)-1], "并发限制 2") || !strings.Contains(app.logs[len(app.logs)-1], "本次需要 4 个") {
 		t.Fatalf("unexpected log: %q", app.logs[len(app.logs)-1])
+	}
+}
+
+func TestStartRunBlocksWhenLoopAutoSaveDirMissing(t *testing.T) {
+	app := &App{
+		api:             string(client.APIModeResponses),
+		loopEnabled:     true,
+		loopAutoSave:    true,
+		loopTotalCount:  10,
+		loopConcurrency: 2,
+	}
+	app.apiKeyInput.SetText("sk-test")
+	app.baseURLInput.SetText("https://example.com")
+	app.promptInput.SetText("hello")
+	app.loopAutoSaveDirInput.SetText("")
+
+	app.startRun()
+
+	if app.isRunning() {
+		t.Fatal("startRun should not enter running state when loop auto save dir is missing")
+	}
+	if len(app.logs) == 0 {
+		t.Fatal("expected missing auto save dir warning log")
+	}
+	if !strings.Contains(app.logs[len(app.logs)-1], "请先为循环出图配置自动另存为路径") {
+		t.Fatalf("unexpected log: %q", app.logs[len(app.logs)-1])
+	}
+}
+
+func TestHistoryItemByRawPathFindsMatchingItem(t *testing.T) {
+	items := []sharedCompat.HistoryItem{
+		{ID: "a", RawPath: "/tmp/a.txt"},
+		{ID: "b", RawPath: "/tmp/b.txt"},
+	}
+	got, ok := historyItemByRawPath(items, "/tmp/b.txt")
+	if !ok {
+		t.Fatal("expected raw path match")
+	}
+	if got.ID != "b" {
+		t.Fatalf("history item=%q want b", got.ID)
+	}
+}
+
+func TestLoadCanvasImmediatePreviewForStateUsesImageB64WhenPathsMissing(t *testing.T) {
+	img := image.NewNRGBA(image.Rect(0, 0, 2, 2))
+	fill := color.NRGBA{R: 0x44, G: 0x77, B: 0xaa, A: 0xff}
+	for y := 0; y < 2; y++ {
+		for x := 0; x < 2; x++ {
+			img.SetNRGBA(x, y, fill)
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatalf("encode png: %v", err)
+	}
+
+	app := &App{}
+	got := app.loadCanvasImmediatePreviewForState("", resultState{
+		Item: sharedCompat.HistoryItem{
+			ID:       "hist-1",
+			ImageB64: base64.StdEncoding.EncodeToString(buf.Bytes()),
+		},
+	})
+	if got == nil {
+		t.Fatal("expected inline preview image")
 	}
 }

@@ -26,6 +26,20 @@ import (
 
 func (a *App) startRun() {
 	a.syncLoopSettingsFromInputs()
+	if client.Mode(a.mode) == client.ModeEdit && len(a.sourcePaths()) == 0 {
+		snap := a.readSnapshot()
+		if strings.TrimSpace(snap.Result.SavedPath) == "" && strings.TrimSpace(snap.Result.Item.ImageB64) != "" {
+			if normalizeKernelRuntimeMode(a.kernelRuntimeMode) != "remote" {
+				if _, err := a.ensureCurrentResultSavedPathIfNeeded(); err != nil {
+					a.appendLog("当前结果未落盘，无法直接用作源图: " + err.Error())
+					return
+				}
+			} else if len(a.currentEditFallbackSourceDataURLs()) == 0 {
+				a.appendLog("当前结果未落盘，无法直接用作源图。")
+				return
+			}
+		}
+	}
 	cfg := a.currentConfig()
 	if strings.TrimSpace(cfg.APIKey) == "" || strings.TrimSpace(cfg.BaseURL) == "" {
 		return
@@ -36,6 +50,10 @@ func (a *App) startRun() {
 	}
 	if a.batchMode && strings.TrimSpace(a.batchInputDirInput.Text()) == "" && len(a.sourcePaths()) == 0 {
 		a.appendLog("请先为批处理选择输入目录或多张源图。")
+		return
+	}
+	if a.loopEnabled && a.loopAutoSave && strings.TrimSpace(a.loopAutoSaveDirInput.Text()) == "" {
+		a.appendLog("请先为循环出图配置自动另存为路径。")
 		return
 	}
 	total := normalizeBatchCount(a.batchCount)
@@ -141,6 +159,16 @@ func (a *App) startRunWithConfig(cfg kernel.Config, total int) {
 		return
 	}
 	total = normalizeBatchCount(total)
+	runConcurrency := total
+	if a.loopEnabled {
+		runConcurrency = normalizeLoopGenerationConcurrency(a.loopConcurrency)
+		if runConcurrency > total {
+			runConcurrency = total
+		}
+	}
+	if runConcurrency < 1 {
+		runConcurrency = 1
+	}
 	a.rememberPrompt(cfg.Prompt)
 	if err := gioCompat.SaveConfig(cfg); err != nil {
 		a.appendLog("兼容配置保存失败: " + err.Error())
@@ -151,12 +179,17 @@ func (a *App) startRunWithConfig(cfg kernel.Config, total int) {
 	a.cancel = cancel
 	a.lastRunConfig = cfg
 	a.lastRunBatchCount = total
+	a.lastRunConcurrency = runConcurrency
 	a.lastRunValid = true
 	a.lastErrorMessage = ""
 	a.status = fmt.Sprintf("正在提交 1/%d", total)
 	a.activePromptGroup = historyPromptGroup{}
 	a.batchResultIDs = nil
+	a.batchPreviewItems = nil
 	a.resultGridOpen = total > 1
+	a.canvasTool = canvasToolPan
+	a.resetCanvasMaskLocked()
+	a.resetCanvasAnnotationsLocked()
 	a.appendLogLocked(fmt.Sprintf("开始任务 1/%d: %s", total, shortPrompt(cfg.Prompt)))
 	a.mu.Unlock()
 	a.invalidateNow()
@@ -167,13 +200,7 @@ func (a *App) startRunWithConfig(cfg kernel.Config, total int) {
 		var once sync.Once
 		var firstErr atomic.Pointer[error]
 		var jobsDone atomic.Int32
-		concurrency := total
-		if a.loopEnabled {
-			concurrency = normalizeLoopGenerationConcurrency(a.loopConcurrency)
-			if concurrency > total {
-				concurrency = total
-			}
-		}
+		concurrency := runConcurrency
 		if concurrency < 1 {
 			concurrency = 1
 		}
@@ -183,6 +210,7 @@ func (a *App) startRunWithConfig(cfg kernel.Config, total int) {
 		}
 		jobSem := make(chan struct{}, concurrency)
 		var wg sync.WaitGroup
+		nextPreviewSlotIndex := 0
 		cancelAll := func() {
 			once.Do(func() {
 				cancel()
@@ -202,6 +230,8 @@ func (a *App) startRunWithConfig(cfg kernel.Config, total int) {
 				}
 				jobCfg := cfg
 				jobCfg.BatchIndex = i
+				jobCfg.PreviewSlotIndex = nextPreviewSlotIndex
+				nextPreviewSlotIndex = (nextPreviewSlotIndex + 1) % max(1, concurrency)
 				jobCfg.Prompt = augmentPromptWithStyle(cfg.Prompt, cfg.StyleTag)
 				jobCfg.PartialImages = effectivePartialImages
 				if a.batchMode && i < len(batchSources) {
@@ -218,18 +248,36 @@ func (a *App) startRunWithConfig(cfg kernel.Config, total int) {
 				}
 				jobLabel := fmt.Sprintf("%d/%d", i+1, total)
 				jobStarted := time.Now()
+				lastProgressStage := ""
 				res, err := a.runner.Run(ctx, jobCfg, kernel.Callbacks{
 					Log: func(line string) {
 						a.appendLog("[" + jobLabel + "] " + line)
 					},
 					Progress: func(stage string, elapsed int, bytes int64) {
+						stage = strings.TrimSpace(stage)
+						if stage != "" && stage != lastProgressStage {
+							lastProgressStage = stage
+							a.appendLog("[" + jobLabel + "] " + stage)
+						}
 						a.setStatus(fmt.Sprintf("%s · %s · %ds · %s", jobLabel, stage, elapsed, client.FormatBytes(bytes)))
 					},
 					Partial: func(partial client.PartialImage) {
 						a.setStatus(fmt.Sprintf("%s · 收到流式预览 #%d", jobLabel, partial.PartialImageIndex))
-						a.applyPartialPreview(partial)
+						a.applyPartialPreview(i, jobCfg.PreviewSlotIndex, partial)
 					},
 				})
+				previewOnlyRemote := normalizeKernelRuntimeMode(a.kernelRuntimeMode) == "remote"
+				if previewOnlyRemote && strings.TrimSpace(res.SavedPath) == "" && strings.TrimSpace(res.ImageB64) != "" {
+					res.SavedPath = registerVirtualImage(res.ImageB64, suggestedSaveNameForHistoryItem(sharedCompat.HistoryItem{
+						Prompt:       jobCfg.Prompt,
+						Mode:         string(jobCfg.Mode),
+						OutputFormat: jobCfg.OutputFormat,
+						CreatedAt:    time.Now().UnixMilli(),
+					}), jobCfg.OutputFormat)
+				}
+				if previewOnlyRemote && strings.TrimSpace(res.RawText) != "" {
+					res.RawPath = registerVirtualText(res.RawText, fmt.Sprintf("raw-response-%d-%d.txt", i+1, time.Now().UnixNano()))
+				}
 				if err != nil {
 					if errors.Is(err, context.Canceled) {
 						return
@@ -238,9 +286,12 @@ func (a *App) startRunWithConfig(cfg kernel.Config, total int) {
 						a.appendLog(fmt.Sprintf("[%s] 失败并跳过: %v", jobLabel, err))
 						completed := int(jobsDone.Add(1))
 						a.mu.Lock()
+						a.removeBatchPreviewItemLocked(jobCfg.PreviewSlotIndex)
 						if completed == total {
 							a.running = false
 							a.cancel = nil
+							a.lastRunConcurrency = 0
+							a.clearBatchPreviewItemsLocked()
 							a.status = fmt.Sprintf("完成 - %.1fs", time.Since(batchStarted).Seconds())
 						}
 						a.mu.Unlock()
@@ -256,12 +307,15 @@ func (a *App) startRunWithConfig(cfg kernel.Config, total int) {
 					return
 				}
 				elapsedSec := time.Since(jobStarted).Seconds()
-				if err := gioCompat.SaveConfigAndHistory(jobCfg, res, elapsedSec); err != nil {
+				if err := gioCompat.SaveConfigAndHistoryWithPreviewMode(jobCfg, res, elapsedSec, previewOnlyRemote); err != nil {
 					a.appendLog("兼容历史保存失败: " + err.Error())
 				}
 				compatState, _, _ := gioCompat.LoadState()
 				compatState = sharedCompat.Normalize(compatState)
-				selectedItem, hasSelected := historyItemBySavedPath(compatState.History, res.SavedPath)
+				selectedItem, hasSelected := historyItemByRawPath(compatState.History, res.RawPath)
+				if !hasSelected {
+					selectedItem, hasSelected = historyItemBySavedPath(compatState.History, res.SavedPath)
+				}
 				if !hasSelected {
 					selectedItem, hasSelected = newestHistoryItem(compatState.History)
 				}
@@ -282,25 +336,33 @@ func (a *App) startRunWithConfig(cfg kernel.Config, total int) {
 				if strings.TrimSpace(displayItem.RevisedPrompt) == "" {
 					displayItem.RevisedPrompt = res.RevisedPrompt
 				}
-				if strings.TrimSpace(displayItem.PreviewPath) == "" {
+				if !previewOnlyRemote && strings.TrimSpace(displayItem.PreviewPath) == "" {
 					displayItem.PreviewPath = res.PreviewPath
 				}
-				if strings.TrimSpace(displayItem.ThumbPath) == "" {
+				if !previewOnlyRemote && strings.TrimSpace(displayItem.ThumbPath) == "" {
 					displayItem.ThumbPath = res.ThumbPath
 				}
+				if strings.TrimSpace(displayItem.ImageB64) == "" {
+					displayItem.ImageB64 = strings.TrimSpace(res.ImageB64)
+				}
+				resultSavedPath := res.SavedPath
 				nextResult := resultState{
-					SavedPath:     res.SavedPath,
+					SavedPath:     resultSavedPath,
 					RawPath:       res.RawPath,
 					RevisedPrompt: res.RevisedPrompt,
 					SourceEvent:   res.SourceEvent,
 					Item:          displayItem,
-					HasItem:       hasSelected || strings.TrimSpace(displayItem.SavedPath) != "",
+					HasItem:       hasSelected || strings.TrimSpace(displayItem.SavedPath) != "" || strings.TrimSpace(displayItem.ImageB64) != "",
 				}
-				nextResult.Image = a.loadCanvasImmediatePreviewForState(res.SavedPath, nextResult)
+				nextResult.Image = a.loadCanvasImmediatePreviewForState(resultSavedPath, nextResult)
 				completed := int(jobsDone.Add(1))
+				openSavePromptAfterUnlock := false
+				openBatchSavePromptAfterUnlock := false
+				var batchSaveItems []sharedCompat.HistoryItem
 				a.mu.Lock()
 				a.status = fmt.Sprintf("完成 %s · %.1fs", jobLabel, time.Since(batchStarted).Seconds())
 				a.lastErrorMessage = ""
+				a.removeBatchPreviewItemLocked(jobCfg.PreviewSlotIndex)
 				nextResult.Rev = a.result.Rev + 1
 				a.result = nextResult
 				rev := a.result.Rev
@@ -310,36 +372,73 @@ func (a *App) startRunWithConfig(cfg kernel.Config, total int) {
 				if hasSelected {
 					a.selectedHistoryID = selectedItem.ID
 				}
+				nextBatchResultIDs := append([]string(nil), a.batchResultIDs...)
 				if total > 1 && hasSelected {
-					a.batchResultIDs = append(a.batchResultIDs, selectedItem.ID)
+					nextBatchResultIDs = append(nextBatchResultIDs, selectedItem.ID)
+					a.batchResultIDs = nextBatchResultIDs
 				}
-				if !a.savePromptSuppressed && res.SavedPath != "" && total == 1 {
-					a.savePromptVisible = true
-					a.savePromptSourcePath = res.SavedPath
-					a.savePromptPathInput.SetText(res.SavedPath)
+				if !a.savePromptSuppressed && total == 1 {
+					if previewOnlyRemote {
+						openSavePromptAfterUnlock = true
+					} else if res.SavedPath != "" {
+						a.savePromptVisible = true
+						a.savePromptSourcePath = res.SavedPath
+						a.savePromptSourceImageB64 = ""
+						a.savePromptSuggestedName = filepath.Base(res.SavedPath)
+						a.savePromptPathInput.SetText(res.SavedPath)
+					}
+				}
+				if !a.savePromptSuppressed && completed == total && total > 1 && !a.batchMode && !a.loopEnabled {
+					batchSaveItems = historyItemsByIDs(compatState.History, nextBatchResultIDs)
+					openBatchSavePromptAfterUnlock = len(batchSaveItems) > 0
 				}
 				a.appendLogLocked(fmt.Sprintf("生成完成 %s: %s", jobLabel, res.SavedPath))
 				if a.batchMode && i < len(batchSources) {
-					if saved, err := a.copyBatchResultIfNeeded(res.SavedPath, batchSources[i]); err == nil && strings.TrimSpace(saved) != "" {
+					saved := ""
+					var saveErr error
+					if previewOnlyRemote {
+						targetPath := batchResultTargetPath(batchSources[i], a.batchOutputDirInput.Text())
+						if targetPath != "" {
+							saved, saveErr = saveImageB64ToPath(res.ImageB64, filepath.Base(targetPath), targetPath)
+						}
+					} else {
+						saved, saveErr = a.copyBatchResultIfNeeded(res.SavedPath, batchSources[i])
+					}
+					if saveErr == nil && strings.TrimSpace(saved) != "" {
 						a.appendLogLocked(fmt.Sprintf("批处理已落盘 %s -> %s", filepath.Base(batchSources[i]), filepath.Base(saved)))
 					}
 				} else if a.loopEnabled && a.loopAutoSave && strings.TrimSpace(a.loopAutoSaveDirInput.Text()) != "" {
-					if saved, err := copyImageFile(res.SavedPath, a.loopAutoSaveDirInput.Text()); err == nil && strings.TrimSpace(saved) != "" {
+					saved := ""
+					var saveErr error
+					if previewOnlyRemote {
+						saved, saveErr = saveImageB64ToPath(res.ImageB64, suggestedSaveNameForHistoryItem(displayItem), a.loopAutoSaveDirInput.Text())
+					} else {
+						saved, saveErr = copyImageFile(res.SavedPath, a.loopAutoSaveDirInput.Text())
+					}
+					if saveErr == nil && strings.TrimSpace(saved) != "" {
 						a.appendLogLocked(fmt.Sprintf("循环结果已自动另存为 -> %s", filepath.Base(saved)))
 					}
 				}
 				if completed == total {
 					a.running = false
 					a.cancel = nil
+					a.lastRunConcurrency = 0
+					a.clearBatchPreviewItemsLocked()
 					a.status = fmt.Sprintf("完成 - %.1fs", time.Since(batchStarted).Seconds())
 				}
 				a.mu.Unlock()
+				if openSavePromptAfterUnlock {
+					a.openSavePromptForItem(displayItem)
+				}
+				if openBatchSavePromptAfterUnlock {
+					a.openBatchSavePrompt(batchSaveItems)
+				}
 				if completed == total {
 					a.maybePlayCompletionSound(completed, total)
 					a.maybeSendCompletionNotification(displayItem, completed, total)
 				}
 				a.invalidateNow()
-				a.startAsyncCurrentResultImageLoad(res.SavedPath, displayItem, res.SourceEvent, rev)
+				a.startAsyncCurrentResultImageLoad(resultSavedPath, displayItem, res.SourceEvent, rev)
 			}(i)
 		}
 		wg.Wait()
@@ -353,11 +452,17 @@ func (a *App) currentConfig() kernel.Config {
 	seed, _ := strconv.ParseInt(strings.TrimSpace(a.seedInput.Text()), 10, 64)
 	partial, _ := strconv.Atoi(strings.TrimSpace(a.partialImagesInput.Text()))
 	outputCompression, _ := strconv.Atoi(strings.TrimSpace(a.outputCompressionInput.Text()))
-	sourcePaths := a.sourcePaths()
-	if client.Mode(a.mode) == client.ModeEdit && len(sourcePaths) == 0 {
-		if current := strings.TrimSpace(a.readSnapshot().Result.SavedPath); current != "" {
-			sourcePaths = []string{current}
-		}
+	sourcePaths, sourceImageDataURLs := a.currentEditSourcesForConfig()
+	parentID := a.currentEditParentID()
+	prompt := a.currentCanvasAugmentedPrompt(a.promptInput.Text())
+	if client.Mode(a.mode) != client.ModeEdit {
+		sourcePaths = a.sourcePaths()
+		sourceImageDataURLs = nil
+		parentID = ""
+	}
+	maskB64 := ""
+	if client.Mode(a.mode) == client.ModeEdit {
+		maskB64 = a.currentCanvasMaskB64()
 	}
 	var fallback *kernel.FallbackProfileConfig
 	fallbackID := strings.TrimSpace(a.fallbackProfileID)
@@ -373,7 +478,7 @@ func (a *App) currentConfig() kernel.Config {
 		BaseURL:              a.baseURLInput.Text(),
 		TextModelID:          a.textModelInput.Text(),
 		ImageModelID:         a.imageModelInput.Text(),
-		Prompt:               a.promptInput.Text(),
+		Prompt:               prompt,
 		Mode:                 client.Mode(a.mode),
 		APIMode:              client.APIMode(a.api),
 		RequestPolicy:        client.RequestPolicy(a.policy),
@@ -396,14 +501,78 @@ func (a *App) currentConfig() kernel.Config {
 		AutoRetryCount:       a.autoRetryCount,
 		CompletionSound:      a.completionSound,
 		SourcePaths:          sourcePaths,
+		SourceImageDataURLs:  sourceImageDataURLs,
+		ParentID:             parentID,
 		OutputDir:            a.outputDirInput.Text(),
 		Seed:                 seed,
 		NegativePrompt:       a.negativePromptInput.Text(),
+		MaskB64:              maskB64,
 		PartialImages:        partial,
 		StyleTag:             a.styleTag,
 		FallbackProfileID:    fallbackID,
 		FallbackProfile:      fallback,
+		PreviewOnlyResult:    normalizeKernelRuntimeMode(a.kernelRuntimeMode) == "remote",
 	}
+}
+
+func (a *App) currentEditSourcesForConfig() ([]string, []string) {
+	sourcePaths := a.sourcePaths()
+	if len(sourcePaths) > 0 {
+		filePaths := make([]string, 0, len(sourcePaths))
+		dataURLs := make([]string, 0, len(sourcePaths))
+		for _, path := range sourcePaths {
+			path = strings.TrimSpace(path)
+			if path == "" {
+				continue
+			}
+			if dataURL, ok := virtualImageDataURL(path); ok {
+				dataURLs = append(dataURLs, dataURL)
+				continue
+			}
+			filePaths = append(filePaths, path)
+		}
+		if len(filePaths) > 0 || len(dataURLs) > 0 {
+			return filePaths, dataURLs
+		}
+	}
+	if current := strings.TrimSpace(a.readSnapshot().Result.SavedPath); current != "" {
+		if dataURL, ok := virtualImageDataURL(current); ok {
+			return nil, []string{dataURL}
+		}
+		return []string{current}, nil
+	}
+	if normalizeKernelRuntimeMode(a.kernelRuntimeMode) == "remote" {
+		return nil, a.currentEditFallbackSourceDataURLs()
+	}
+	return nil, nil
+}
+
+func (a *App) currentEditParentID() string {
+	if client.Mode(a.mode) != client.ModeEdit {
+		return ""
+	}
+	for _, path := range a.sourcePaths() {
+		path = strings.TrimSpace(path)
+		if path != "" {
+			return path
+		}
+	}
+	return strings.TrimSpace(a.readSnapshot().Result.SavedPath)
+}
+
+func (a *App) currentEditFallbackSourceDataURLs() []string {
+	snap := a.readSnapshot()
+	item := snap.Result.Item
+	imageB64 := strings.TrimSpace(item.ImageB64)
+	if imageB64 == "" {
+		return nil
+	}
+	format := "." + client.FileExtForFormat(strings.TrimSpace(item.OutputFormat))
+	mime := client.SupportedImageMime[format]
+	if strings.TrimSpace(mime) == "" {
+		mime = "image/png"
+	}
+	return []string{"data:" + mime + ";base64," + imageB64}
 }
 
 func resolveFallbackProfileConfig(state sharedCompat.State, fallbackProfileID string, readAPIKey func(string) (string, error)) *kernel.FallbackProfileConfig {
@@ -464,18 +633,17 @@ func (a *App) batchSourcePathsForRun() ([]string, error) {
 	return out, nil
 }
 
-func (a *App) copyBatchResultIfNeeded(savedPath string, sourcePath string) (string, error) {
-	savedPath = strings.TrimSpace(savedPath)
+func batchResultTargetPath(sourcePath string, batchOutputDir string) string {
 	sourcePath = strings.TrimSpace(sourcePath)
-	if savedPath == "" || sourcePath == "" {
-		return "", nil
+	if sourcePath == "" {
+		return ""
 	}
-	targetDir := strings.TrimSpace(a.batchOutputDirInput.Text())
+	targetDir := strings.TrimSpace(batchOutputDir)
 	if targetDir == "" {
 		targetDir = filepath.Dir(sourcePath)
 	}
 	if targetDir == "" {
-		return "", nil
+		return ""
 	}
 	base := filepath.Base(sourcePath)
 	targetName := "processed-" + base
@@ -490,6 +658,19 @@ func (a *App) copyBatchResultIfNeeded(savedPath string, sourcePath string) (stri
 				break
 			}
 		}
+	}
+	return dst
+}
+
+func (a *App) copyBatchResultIfNeeded(savedPath string, sourcePath string) (string, error) {
+	savedPath = strings.TrimSpace(savedPath)
+	sourcePath = strings.TrimSpace(sourcePath)
+	if savedPath == "" || sourcePath == "" {
+		return "", nil
+	}
+	dst := batchResultTargetPath(sourcePath, a.batchOutputDirInput.Text())
+	if dst == "" {
+		return "", nil
 	}
 	return copyImageFile(savedPath, dst)
 }

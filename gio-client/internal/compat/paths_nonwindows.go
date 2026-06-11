@@ -7,7 +7,13 @@ import (
 	"path/filepath"
 )
 
+var stableDataRootFunc = stableDataRootImpl
+
 func StableDataRoot() (string, error) {
+	return stableDataRootFunc()
+}
+
+func stableDataRootImpl() (string, error) {
 	cfg, err := os.UserConfigDir()
 	if err != nil {
 		return filepath.Join(".", "image-studio-output"), nil

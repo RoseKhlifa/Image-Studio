@@ -671,6 +671,8 @@ func (a *App) layoutTimelinePromptThumb(gtx layout.Context, item sharedCompat.Hi
 func (a *App) layoutHistoryTimelineRow(gtx layout.Context, item sharedCompat.HistoryItem, active bool, compareItemID string) layout.Dimensions {
 	rowBtn := a.historyButton("timeline-row:" + item.ID)
 	detailBtn := a.historyActionButton("timeline-detail:" + item.ID)
+	applyBtn := a.historyActionButton("timeline-apply:" + item.ID)
+	rerunBtn := a.historyActionButton("timeline-rerun:" + item.ID)
 	compareBtn := a.historyActionButton("timeline-compare:" + item.ID)
 	reuseBtn := a.historyActionButton("timeline-reuse:" + item.ID)
 	deleteBtn := a.historyActionButton("timeline-delete:" + item.ID)
@@ -686,6 +688,14 @@ func (a *App) layoutHistoryTimelineRow(gtx layout.Context, item sharedCompat.His
 	for detailBtn.Clicked(gtx) {
 		a.openResultDetail(item)
 		a.closeHistoryTimeline()
+	}
+	for applyBtn.Clicked(gtx) {
+		a.applyHistoryParams(item)
+		a.closeHistoryTimeline()
+	}
+	for rerunBtn.Clicked(gtx) {
+		a.closeHistoryTimeline()
+		a.regenerateFromHistoryItem(item)
 	}
 	for compareBtn.Clicked(gtx) {
 		if err := a.toggleCompareItem(item); err != nil && !isMissingPreview(err) {
@@ -782,18 +792,32 @@ func (a *App) layoutHistoryTimelineRow(gtx layout.Context, item sharedCompat.His
 							)
 						}),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle, Gap: gtx.Dp(unit.Dp(6))}.Layout(gtx,
+							return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(unit.Dp(6))}.Layout(gtx,
 								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-									return a.timelineActionButton(gtx, detailBtn, "查看", false)
+									return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle, Gap: gtx.Dp(unit.Dp(6))}.Layout(gtx,
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											return a.timelineActionButton(gtx, detailBtn, "查看", false)
+										}),
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											return a.timelineActionButton(gtx, applyBtn, "应用参数", false)
+										}),
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											return a.timelineActionButton(gtx, rerunBtn, "重新生成", false)
+										}),
+									)
 								}),
 								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-									return a.timelineActionButton(gtx, reuseBtn, "设为源图", false)
-								}),
-								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-									return a.compactButton(gtx, compareBtn, "对比", compareActive)
-								}),
-								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-									return a.compactButton(gtx, deleteBtn, "删除", false)
+									return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle, Gap: gtx.Dp(unit.Dp(6))}.Layout(gtx,
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											return a.timelineActionButton(gtx, reuseBtn, "设为源图", false)
+										}),
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											return a.compactButton(gtx, compareBtn, "对比", compareActive)
+										}),
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											return a.compactButton(gtx, deleteBtn, "删除", false)
+										}),
+									)
 								}),
 							)
 						}),

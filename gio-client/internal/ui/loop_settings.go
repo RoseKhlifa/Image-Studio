@@ -77,3 +77,44 @@ func (a *App) chooseLoopAutoSaveDir(logPrefix string) {
 	a.loopAutoSaveDirInput.SetText(dir)
 	a.loopAutoSave = true
 }
+
+func loopAutoSaveDirPlaceholder(currentOutputDir string) string {
+	currentOutputDir = strings.TrimSpace(currentOutputDir)
+	if currentOutputDir != "" {
+		return currentOutputDir
+	}
+	return "请输入或选择自动另存为目录"
+}
+
+func loopAutoSaveDirLabel(dir string) string {
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
+		return "待选路径"
+	}
+	parts := strings.FieldsFunc(dir, func(r rune) bool {
+		return r == '/' || r == '\\'
+	})
+	if len(parts) == 0 {
+		return dir
+	}
+	return parts[len(parts)-1]
+}
+
+func (a *App) loopSummaryText() string {
+	if !a.loopEnabled {
+		return "关闭"
+	}
+	parts := []string{
+		strconv.Itoa(normalizeLoopGenerationCount(a.loopTotalCount)) + " 张",
+		"并发 " + strconv.Itoa(normalizeLoopGenerationConcurrency(a.loopConcurrency)),
+	}
+	if a.loopLivePreview {
+		parts = append(parts, "实时预览开")
+	} else {
+		parts = append(parts, "实时预览关")
+	}
+	if a.loopAutoSave {
+		parts = append(parts, "自动另存为 · "+loopAutoSaveDirLabel(a.loopAutoSaveDirInput.Text()))
+	}
+	return strings.Join(parts, " · ")
+}

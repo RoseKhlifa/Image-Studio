@@ -30,11 +30,11 @@ func TestRequestImagesAPIWithPartialStreamsPreviews(t *testing.T) {
 
 	var partials []PartialImage
 	res, err := RequestImagesAPIWithPartial(context.Background(), Options{
-		APIKey:        "sk-test",
-		Prompt:        "cat",
-		BaseURL:       srv.URL,
-		APIMode:       APIModeImages,
-		PartialImages: 2,
+		APIKey:         "sk-test",
+		Prompt:         "cat",
+		BaseURL:        srv.URL,
+		APIMode:        APIModeImages,
+		PartialImages:  2,
 		UserIdentifier: "user-hash-123",
 	}, &bytes.Buffer{}, nil, func(partial PartialImage) {
 		partials = append(partials, partial)
@@ -202,6 +202,64 @@ func TestBuildEditsMultipartSetsMaskMimeType(t *testing.T) {
 	if !foundUser {
 		t.Fatal("expected user field in multipart body")
 	}
+}
+
+func TestBuildEditsMultipartDetectsJPEGMaskMimeType(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "source.png")
+	if err := os.WriteFile(src, fakePNG, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	jpegMask := base64.StdEncoding.EncodeToString([]byte{0xff, 0xd8, 0xff, 0xdb, 0x00, 0x43})
+
+	buf, contentType, err := buildEditsMultipart(
+		[]string{src},
+		jpegMask,
+		"edit this",
+		"gpt-image-2",
+		"1024x1024",
+		"auto",
+		"png",
+		"auto",
+		100,
+		"auto",
+		"low",
+		"",
+		"",
+		0,
+		RequestPolicyOpenAI,
+		DefaultPartialImages,
+		false,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, params, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader := multipart.NewReader(buf, params["boundary"])
+	for {
+		part, err := reader.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if part.FormName() == "mask" {
+			if got := part.Header.Get("Content-Type"); got != "image/jpeg" {
+				t.Fatalf("mask content-type = %q, want image/jpeg", got)
+			}
+			if got := part.FileName(); got != "mask.jpg" {
+				t.Fatalf("mask filename = %q, want mask.jpg", got)
+			}
+			return
+		}
+		_, _ = io.Copy(io.Discard, part)
+	}
+	t.Fatal("expected mask part in multipart body")
 }
 
 func TestBuildEditsMultipartOmitsMaskWhenEmpty(t *testing.T) {

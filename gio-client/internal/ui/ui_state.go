@@ -263,6 +263,19 @@ func historyItemBySavedPath(items []sharedCompat.HistoryItem, savedPath string) 
 	return sharedCompat.HistoryItem{}, false
 }
 
+func historyItemByRawPath(items []sharedCompat.HistoryItem, rawPath string) (sharedCompat.HistoryItem, bool) {
+	rawPath = strings.TrimSpace(rawPath)
+	if rawPath == "" {
+		return sharedCompat.HistoryItem{}, false
+	}
+	for _, item := range items {
+		if strings.TrimSpace(item.RawPath) == rawPath {
+			return item, true
+		}
+	}
+	return sharedCompat.HistoryItem{}, false
+}
+
 func historyItemByID(items []sharedCompat.HistoryItem, id string) (sharedCompat.HistoryItem, bool) {
 	id = strings.TrimSpace(id)
 	if id == "" {
@@ -355,6 +368,18 @@ func (a *App) sourceButton(id string) *widget.Clickable {
 	}
 	btn := new(widget.Clickable)
 	a.sourceButtons[id] = btn
+	return btn
+}
+
+func (a *App) savePromptSelectionButton(id string) *widget.Clickable {
+	if a.savePromptSelectionButtons == nil {
+		a.savePromptSelectionButtons = map[string]*widget.Clickable{}
+	}
+	if btn, ok := a.savePromptSelectionButtons[id]; ok {
+		return btn
+	}
+	btn := new(widget.Clickable)
+	a.savePromptSelectionButtons[id] = btn
 	return btn
 }
 
@@ -484,6 +509,10 @@ func (a *App) displayPathThumb(path string, maxDimension int) (image.Image, pain
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return nil, paint.ImageOp{}
+	}
+	if imageB64, ok := readVirtualImageB64(path); ok {
+		item := sharedCompat.HistoryItem{ImageB64: imageB64}
+		return a.displayHistoryThumb(item, maxDimension)
 	}
 	atomic.AddUint64(&thumbDisplayRequests, 1)
 	maxDimension = normalizeThumbCacheDimension(a.effectiveThumbMaxDimension(maxDimension))
@@ -2736,7 +2765,7 @@ func (a *App) useResultPrompt(text string) {
 	a.invalidateNow()
 }
 
-func (a *App) prefillControlsFromHistoryItem(item sharedCompat.HistoryItem) {
+func (a *App) prefillHistoryParameters(item sharedCompat.HistoryItem) {
 	if prompt := strings.TrimSpace(item.Prompt); prompt != "" {
 		a.promptInput.SetText(prompt)
 	}
@@ -2779,14 +2808,34 @@ func (a *App) prefillControlsFromHistoryItem(item sharedCompat.HistoryItem) {
 	if item.BatchIndex > 0 {
 		a.batchCount = normalizeBatchCount(item.BatchIndex + 1)
 	}
+}
+
+func (a *App) prefillControlsFromHistoryItem(item sharedCompat.HistoryItem) {
+	a.prefillHistoryParameters(item)
 	if strings.TrimSpace(item.Mode) == string(client.ModeEdit) {
 		if len(item.SourcePaths) > 0 {
 			a.setSourcePaths(item.SourcePaths)
+		} else if strings.TrimSpace(item.ParentID) != "" {
+			a.sourcePathsInput.SetText(strings.TrimSpace(item.ParentID))
+			a.sourceButtons = map[string]*widget.Clickable{}
 		} else if strings.TrimSpace(item.SavedPath) != "" {
 			a.sourcePathsInput.SetText(strings.TrimSpace(item.SavedPath))
 			a.sourceButtons = map[string]*widget.Clickable{}
 		}
 	}
+}
+
+func (a *App) applyHistoryParams(item sharedCompat.HistoryItem) {
+	a.prefillHistoryParameters(item)
+	a.appendLog("已应用此图的参数到控制台")
+	a.invalidateNow()
+}
+
+func (a *App) regenerateFromHistoryItem(item sharedCompat.HistoryItem) {
+	a.prefillHistoryParameters(item)
+	a.appendLog("已应用此图参数，开始重新生成")
+	a.invalidateNow()
+	a.startRun()
 }
 
 func (a *App) applyPreset(preset sharedCompat.Preset) {
@@ -2878,7 +2927,8 @@ func (a *App) rememberPrompt(text string) {
 }
 
 func (a *App) sourcePaths() []string {
-	return a.parseSourcePathsCached(a.sourcePathsInput.Text())
+	paths := a.parseSourcePathsCached(a.sourcePathsInput.Text())
+	return append([]string(nil), paths...)
 }
 
 func (a *App) parseSourcePathsCached(text string) []string {
@@ -2938,9 +2988,47 @@ func (a *App) appendSourcePath(path string) {
 	a.setSourcePaths(paths)
 }
 
-func (a *App) reuseHistoryItemAsSource(item sharedCompat.HistoryItem) {
-	if strings.TrimSpace(item.SavedPath) == "" {
+func (a *App) moveSourcePath(target string, delta int) {
+	target = strings.TrimSpace(target)
+	if target == "" || delta == 0 {
 		return
+	}
+	paths := a.sourcePaths()
+	index := -1
+	for idx, path := range paths {
+		if strings.TrimSpace(path) == target {
+			index = idx
+			break
+		}
+	}
+	if index < 0 {
+		return
+	}
+	nextIndex := index + delta
+	if nextIndex < 0 || nextIndex >= len(paths) {
+		return
+	}
+	paths[index], paths[nextIndex] = paths[nextIndex], paths[index]
+	a.setSourcePaths(paths)
+}
+
+func (a *App) reuseHistoryItemAsSource(item sharedCompat.HistoryItem) {
+	if normalizeKernelRuntimeMode(a.kernelRuntimeMode) == "remote" && strings.TrimSpace(item.SavedPath) == "" && strings.TrimSpace(item.ImageB64) != "" {
+		virtualPath := registerVirtualImage(item.ImageB64, suggestedSaveNameForHistoryItem(item), item.OutputFormat)
+		if strings.TrimSpace(virtualPath) == "" {
+			a.appendLog("加入源图失败: 当前结果没有可用图片数据")
+			return
+		}
+		a.appendSourcePath(virtualPath)
+		return
+	}
+	if strings.TrimSpace(item.SavedPath) == "" {
+		next, err := a.materializeHistoryItemForLocalPath(item)
+		if err != nil {
+			a.appendLog("加入源图失败: " + err.Error())
+			return
+		}
+		item = next
 	}
 	a.appendSourcePath(item.SavedPath)
 }
@@ -3038,6 +3126,20 @@ func (a *App) startPromptOptimize() {
 	if a.isRunning() {
 		return
 	}
+	if client.Mode(a.mode) == client.ModeEdit && len(a.sourcePaths()) == 0 {
+		snap := a.readSnapshot()
+		if strings.TrimSpace(snap.Result.SavedPath) == "" && strings.TrimSpace(snap.Result.Item.ImageB64) != "" {
+			if normalizeKernelRuntimeMode(a.kernelRuntimeMode) != "remote" {
+				if _, err := a.ensureCurrentResultSavedPathIfNeeded(); err != nil {
+					a.appendLog("优化提示词失败: 当前结果未落盘，无法直接作为参考图: " + err.Error())
+					return
+				}
+			} else if len(a.currentEditFallbackSourceDataURLs()) == 0 {
+				a.appendLog("优化提示词失败: 当前结果没有可用参考图。")
+				return
+			}
+		}
+	}
 	cfg := a.currentConfig()
 	if normalizeKernelRuntimeMode(a.kernelRuntimeMode) == "remote" && cfg.ProxyMode != client.ProxyModeSystem {
 		a.appendLog("优化提示词失败: 当前远程内核不能控制代理,请切回本地内核或使用 Android 原生运行")
@@ -3131,12 +3233,32 @@ func (a *App) replaceCurrentResultWithPath(path string, sourceEvent string) erro
 	if path == "" {
 		return errors.New("变换输出路径为空")
 	}
-	if _, err := os.Stat(path); err != nil {
-		return err
+	if !isVirtualImagePath(path) {
+		if _, err := os.Stat(path); err != nil {
+			return err
+		}
+	}
+	updateSources := sourceEvent == "rotate" || sourceEvent == "flip" || sourceEvent == "crop"
+	nextSourcePaths := []string(nil)
+	if updateSources {
+		existing := a.sourcePaths()
+		if len(existing) > 0 {
+			nextSourcePaths = append([]string{path}, existing[1:]...)
+		} else {
+			nextSourcePaths = []string{path}
+		}
 	}
 	a.mu.Lock()
 	item := a.result.Item
 	item.SavedPath = path
+	if isVirtualImagePath(path) {
+		if imageB64, ok := readVirtualImageB64(path); ok {
+			item.ImageB64 = imageB64
+		}
+		item.PreviewPath = ""
+		item.ThumbPath = ""
+		item.PreviewOnly = true
+	}
 	if item.ID == "" {
 		item.ID = "derived:" + strconv.FormatInt(time.Now().UnixNano(), 10)
 	}
@@ -3153,8 +3275,15 @@ func (a *App) replaceCurrentResultWithPath(path string, sourceEvent string) erro
 	a.compare = resultState{Rev: a.compare.Rev + 1}
 	a.compareSplitSlider.Value = 0.5
 	a.selectedHistoryID = ""
+	if updateSources {
+		a.mode = string(client.ModeEdit)
+		a.batchMode = false
+	}
 	a.pruneImageCacheLocked()
 	a.mu.Unlock()
+	if updateSources {
+		a.setSourcePaths(nextSourcePaths)
+	}
 	a.invalidateNow()
 	a.startAsyncCurrentResultImageLoad(path, item, sourceEvent, rev)
 	return nil
@@ -3162,6 +3291,12 @@ func (a *App) replaceCurrentResultWithPath(path string, sourceEvent string) erro
 
 func (a *App) startCurrentImageTransform(action string, sourceEvent string, transform func(path string) (string, error)) {
 	currentPath := strings.TrimSpace(a.readSnapshot().Result.SavedPath)
+	if currentPath == "" {
+		next, err := a.ensureCurrentResultSavedPathIfNeeded()
+		if err == nil {
+			currentPath = strings.TrimSpace(next)
+		}
+	}
 	if currentPath == "" {
 		return
 	}
@@ -3383,6 +3518,32 @@ func (a *App) openResultDetail(item sharedCompat.HistoryItem) {
 	a.activeResultDetail = item
 	a.mu.Unlock()
 	a.invalidateNow()
+}
+
+func (a *App) OpenResultDetailByIDOrSavedPath(id string, savedPath string) bool {
+	id = strings.TrimSpace(id)
+	savedPath = strings.TrimSpace(savedPath)
+	a.mu.Lock()
+	history := append([]sharedCompat.HistoryItem(nil), a.history...)
+	current := a.result.Item
+	a.mu.Unlock()
+	if item, ok := historyItemByID(history, id); ok {
+		a.openResultDetail(item)
+		return true
+	}
+	if item, ok := historyItemBySavedPath(history, savedPath); ok {
+		a.openResultDetail(item)
+		return true
+	}
+	if id != "" && strings.TrimSpace(current.ID) == id {
+		a.openResultDetail(current)
+		return true
+	}
+	if savedPath != "" && strings.TrimSpace(current.SavedPath) == savedPath {
+		a.openResultDetail(current)
+		return true
+	}
+	return false
 }
 
 func (a *App) closeResultDetail() {

@@ -1,4 +1,4 @@
-import { LoadCompatibilityState, SaveCompatibilityState } from "../platform/runtime/host";
+import { LoadCompatibilityState, SaveCompatibilityState } from "../platform/runtime/host.ts";
 import type {
   BatchProcessConfig,
   BackgroundValue,
@@ -17,9 +17,9 @@ import type {
   ProxyMode,
   ThemeMode,
   UpstreamProfile,
-} from "../types/domain";
-import { ACTIVE_PROFILE_LS_KEY, PROFILES_LS_KEY, tryParseProfile } from "./profiles";
-import { normalizeProxyMode, persistProxyConfig } from "./proxy";
+} from "../types/domain.ts";
+import { ACTIVE_PROFILE_LS_KEY, PROFILES_LS_KEY, tryParseProfile } from "./profiles.ts";
+import { normalizeProxyMode, persistProxyConfig } from "./proxy.ts";
 import {
   normalizeCustomAspectRatios,
   persistCustomAspectRatios,
@@ -29,16 +29,16 @@ import {
   persistHistoryFullImages,
   persistHistoryItems,
   pruneHistoryStorage,
-} from "./storage";
+} from "./storage.ts";
 import {
   normalizeCompletionSoundConfig,
   persistCompletionSoundConfig,
-} from "./completionSound";
+} from "./completionSound.ts";
 import {
   normalizeCompletionNotificationConfig,
   persistCompletionNotificationConfig,
-} from "./completionNotification";
-import { normalizePromptTemplates } from "./promptTemplates";
+} from "./completionNotification.ts";
+import { normalizePromptTemplates } from "./promptTemplates.ts";
 import { normalizeAutoRetryCount } from "../../../../shared/kernel/requestModel.js";
 
 const SCHEMA_VERSION = 1;
@@ -357,6 +357,7 @@ function toSerializableHistoryItem(raw: unknown): HistoryItem | null {
     imageId: stringOrUndefined(item.imageId),
     previewUrl: stringOrUndefined(item.previewUrl),
     fullUrl: stringOrUndefined(item.fullUrl),
+    previewPath: stringOrUndefined(item.previewPath),
     thumbPath: stringOrUndefined(item.thumbPath),
     previewWidth: numberOrUndefined(item.previewWidth),
     previewHeight: numberOrUndefined(item.previewHeight),
@@ -383,6 +384,7 @@ function toSerializableHistoryItem(raw: unknown): HistoryItem | null {
     batchIndex: numberOrUndefined(item.batchIndex),
     previewSlotIndex: numberOrUndefined(item.previewSlotIndex),
     elapsedSec: numberOrUndefined(item.elapsedSec),
+    sourcePaths: cleanStringList(item.sourcePaths, 32),
     savedPath: stringOrUndefined(item.savedPath),
     rawPath: stringOrUndefined(item.rawPath),
   };
@@ -393,6 +395,7 @@ function historyFingerprint(item: HistoryItem) {
     id: item.id,
     imageId: item.imageId,
     savedPath: item.savedPath,
+    previewPath: item.previewPath,
     thumbPath: item.thumbPath,
     rawPath: item.rawPath,
     prompt: item.prompt,
@@ -413,6 +416,7 @@ function historyFingerprint(item: HistoryItem) {
     batchIndex: item.batchIndex,
     previewSlotIndex: item.previewSlotIndex,
     elapsedSec: item.elapsedSec,
+    sourcePaths: item.sourcePaths,
     imageB64: item.imageB64,
   };
 }

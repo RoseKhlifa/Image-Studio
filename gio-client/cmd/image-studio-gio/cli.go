@@ -35,6 +35,9 @@ func runCLICommand(args []string, stdout io.Writer, stderr io.Writer) (bool, int
 	case "import-token":
 		code, err := runImportTokenCommand(args[1:], stdout, stderr)
 		return true, code, err
+	case "open-result":
+		code, err := runOpenResultCommand(args[1:], stdout, stderr)
+		return true, code, err
 	default:
 		return false, 0, nil
 	}
@@ -85,6 +88,24 @@ func runImportTokenCommand(args []string, stdout io.Writer, stderr io.Writer) (i
 		return 1, fetchErr
 	}
 	return 0, writeJSON(stdout, payload)
+}
+
+func runOpenResultCommand(args []string, stdout io.Writer, stderr io.Writer) (int, error) {
+	fs := flag.NewFlagSet("open-result", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	resultID := fs.String("id", "", "history item id")
+	savedPath := fs.String("path", "", "saved image path")
+	if err := fs.Parse(args); err != nil {
+		return 2, err
+	}
+	if fs.NArg() != 0 {
+		return 2, fmt.Errorf("unexpected arguments: %s", strings.Join(fs.Args(), " "))
+	}
+	if err := promptipc.SendOpenResult(*resultID, *savedPath); err != nil {
+		return 1, err
+	}
+	_, writeErr := io.WriteString(stdout, "result detail request sent to running instance\n")
+	return 0, writeErr
 }
 
 func promptImportMessageFromArgs(args []string) promptipc.Message {
