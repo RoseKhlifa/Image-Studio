@@ -142,6 +142,7 @@ type HistoryItem struct {
 	Moderation        string   `json:"moderation,omitempty"`
 	StyleTag          string   `json:"styleTag,omitempty"`
 	BatchIndex        int      `json:"batchIndex,omitempty"`
+	PreviewSlotIndex  int      `json:"previewSlotIndex,omitempty"`
 	ElapsedSec        float64  `json:"elapsedSec,omitempty"`
 	SourcePaths       []string `json:"sourcePaths,omitempty"`
 	SavedPath         string   `json:"savedPath,omitempty"`

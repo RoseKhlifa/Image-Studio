@@ -58,15 +58,17 @@ func TestMaybeSendCompletionNotificationRequiresBackgroundAndPermission(t *testi
 	}
 	calls := make(chan string, 1)
 	orig := showSystemNotificationFunc
-	showSystemNotificationFunc = func(title string, body string) error {
-		calls <- title + "\n" + body
+	showSystemNotificationFunc = func(title string, body string, action notificationOpenResultAction) error {
+		calls <- title + "\n" + body + "\n" + action.ResultID + "\n" + action.SavedPath
 		return nil
 	}
 	defer func() { showSystemNotificationFunc = orig }()
 
 	item := sharedCompat.HistoryItem{
+		ID:            "history-1",
 		Prompt:        "生成一张雪山海报",
 		RevisedPrompt: "cinematic snow mountain poster",
+		SavedPath:     "/tmp/snow.png",
 		Mode:          "generate",
 	}
 	app.maybeSendCompletionNotification(item, 1, 1)
@@ -80,8 +82,8 @@ func TestMaybeSendCompletionNotificationRequiresBackgroundAndPermission(t *testi
 	app.maybeSendCompletionNotification(item, 1, 1)
 	select {
 	case got := <-calls:
-		if got != "Image Studio · 已完成\ncinematic snow mountain poster" {
-			t.Fatalf("notification=%q want title/body pair", got)
+		if got != "Image Studio · 已完成\ncinematic snow mountain poster\nhistory-1\n/tmp/snow.png" {
+			t.Fatalf("notification=%q want title/body/action payload", got)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for completion notification")

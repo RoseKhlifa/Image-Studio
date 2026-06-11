@@ -566,9 +566,14 @@ func buildEditsMultipart(
 	if strings.TrimSpace(maskB64) != "" {
 		raw, err := base64.StdEncoding.DecodeString(maskB64)
 		if err == nil && len(raw) > 0 {
+			maskMimeType := detectImageMimeTypeFromBytes(raw)
+			if strings.TrimSpace(maskMimeType) == "" {
+				maskMimeType = "image/png"
+			}
+			maskExt := imageExtensionForMimeType(maskMimeType)
 			h := make(textproto.MIMEHeader)
-			h.Set("Content-Disposition", `form-data; name="mask"; filename="mask.png"`)
-			h.Set("Content-Type", "image/png")
+			h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="mask"; filename="mask.%s"`, maskExt))
+			h.Set("Content-Type", maskMimeType)
 			fw, err := w.CreatePart(h)
 			if err != nil {
 				return nil, "", err

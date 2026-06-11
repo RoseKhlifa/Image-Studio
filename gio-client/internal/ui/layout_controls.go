@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"image"
 	"image/color"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -1304,14 +1303,8 @@ func (a *App) layoutGeneralSettingsModal(gtx layout.Context, snap snapshot) layo
 	currentResultThumbPresent := false
 	currentResultManagedPreviewReady := false
 	currentResultCanvasTarget := a.effectiveCanvasMaxDimension()
-	if item := snap.Result.Item; strings.TrimSpace(item.SavedPath) != "" {
-		currentResultSavedPresent = headlessPathReady(item.SavedPath)
-		currentResultPreviewPresent = headlessPathReady(item.PreviewPath)
-		currentResultThumbPresent = headlessPathReady(item.ThumbPath)
-		if previewPath, err := managedSourcePreviewPath(item.SavedPath, currentResultCanvasTarget); err == nil {
-			currentResultManagedPreviewReady = headlessPathReady(previewPath)
-		}
-	}
+	currentResultSavedPresent, currentResultPreviewPresent, currentResultThumbPresent, currentResultManagedPreviewReady, _ =
+		currentResultDiagnosticsState(snap.Result, currentResultCanvasTarget)
 	currentResultCanvasSummary := fmt.Sprintf(
 		"当前结果 原图/预览/缩略图 %t/%t/%t · 受管画布预览 %t · 目标 %dpx",
 		currentResultSavedPresent,
@@ -1699,9 +1692,10 @@ func (a *App) layoutGeneralSettingsModal(gtx layout.Context, snap snapshot) layo
 					if dir := strings.TrimSpace(a.loopAutoSaveDirInput.Text()); dir != "" {
 						loopAutoSaveSummary = "当前复制目录: " + dir
 					} else {
-						loopAutoSaveSummary = "已开启自动另存为,目录为空时会沿用当前输出目录"
+						loopAutoSaveSummary = "已开启自动另存为,提交前需要补全目录"
 					}
 				}
+				autoSavePlaceholder := loopAutoSaveDirPlaceholder(currentOutputDir)
 				rows := []layout.FlexChild{
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(unit.Dp(6))}.Layout(gtx, loopRows...)
@@ -1720,7 +1714,7 @@ func (a *App) layoutGeneralSettingsModal(gtx layout.Context, snap snapshot) layo
 						return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(unit.Dp(6))}.Layout(gtx, loopAutoSaveRows...)
 					}),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return a.technicalField(gtx, "自动另存为目录", &a.loopAutoSaveDirInput, "留空 = 沿用当前输出目录", unit.Dp(42))
+						return a.technicalField(gtx, "自动另存为目录", &a.loopAutoSaveDirInput, autoSavePlaceholder, unit.Dp(42))
 					}),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(unit.Dp(6))}.Layout(gtx,
@@ -1740,7 +1734,7 @@ func (a *App) layoutGeneralSettingsModal(gtx layout.Context, snap snapshot) layo
 						return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(unit.Dp(6))}.Layout(gtx, loopPreviewRows...)
 					}),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return a.label(gtx, "开启后会按这里的总张数和并发持续补位生成；常规出图张数只在普通模式下生效。"+loopAutoSaveSummary+"。", unit.Sp(10), fluent.textDim, font.Normal)
+						return a.label(gtx, "开启后会按这里的总张数和并发持续补位生成；常规出图张数只在普通模式下生效。"+loopAutoSaveSummary+"。开启自动另存为时会优先带入当前输出目录。", unit.Sp(10), fluent.textDim, font.Normal)
 					}),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						return a.label(gtx, "关闭实时预览后不会在画布显示过程图，可以明显降低内存占用。", unit.Sp(10), fluent.textDim, font.Normal)
@@ -3018,14 +3012,14 @@ func (a *App) layoutSettingsEditorPane(gtx layout.Context, snap snapshot) layout
 func (a *App) composeSummary(snap snapshot) string {
 	activeAspect := deriveAspectPreset(a.size, a.customAspectRatios)
 	activeResolution := normalizeResolutionChoice(deriveResolutionPreset(a.size), a.api, a.policy, a.imageModelInput.Text())
-	currentSaved := strings.TrimSpace(snap.Result.SavedPath)
 	sourcePaths := a.sourcePaths()
+	hasImplicitCurrentSource := hasImplicitEditSource(snap, sourcePaths)
 	sourceLabel := "文生图"
 	if a.mode == string(client.ModeEdit) {
 		count := len(sourcePaths)
 		if count > 0 {
 			sourceLabel = fmt.Sprintf("%d 张源图", count)
-		} else if currentSaved != "" {
+		} else if hasImplicitCurrentSource {
 			sourceLabel = "画板图作源图"
 		} else {
 			sourceLabel = "未添加源图"
@@ -3047,7 +3041,9 @@ func (a *App) composeSummary(snap snapshot) string {
 		a.mode,
 		runModeLabel,
 		strconv.Itoa(len(sourcePaths)),
-		currentSaved,
+		strconv.FormatBool(hasImplicitCurrentSource),
+		snap.Result.Item.ID,
+		strconv.FormatBool(strings.TrimSpace(snap.Result.Item.ImageB64) != ""),
 	}, "\x00")
 	a.mu.Lock()
 	if a.composeSummaryCacheKey == key {
@@ -3077,8 +3073,8 @@ func (a *App) layoutComposeCard(gtx layout.Context, snap snapshot) layout.Dimens
 	defer a.recordLayoutTiming(layoutTimingComposeCard, time.Now())
 	activeAspect := deriveAspectPreset(a.size, a.customAspectRatios)
 	activeResolution := normalizeResolutionChoice(deriveResolutionPreset(a.size), a.api, a.policy, a.imageModelInput.Text())
-	currentSaved := strings.TrimSpace(snap.Result.SavedPath)
 	sourcePaths := a.sourcePaths()
+	hasImplicitCurrentSource := hasImplicitEditSource(snap, sourcePaths)
 	summary := a.composeSummary(snap)
 
 	return a.elevatedBorderedSurface(gtx, fluent.surfaceElevated, fluentCardRadius, fluent.border, image.Pt(0, 1), func(gtx layout.Context) layout.Dimensions {
@@ -3133,7 +3129,7 @@ func (a *App) layoutComposeCard(gtx layout.Context, snap snapshot) layout.Dimens
 						layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 							return a.composeSectionCard(gtx, func(gtx layout.Context) layout.Dimensions {
-								return a.layoutSourceInputSection(gtx, sourcePaths, currentSaved)
+								return a.layoutSourceInputSection(gtx, snap, sourcePaths, hasImplicitCurrentSource)
 							})
 						}),
 					)
@@ -3260,7 +3256,17 @@ func (a *App) layoutStyleSection(gtx layout.Context) layout.Dimensions {
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
 }
 
-func (a *App) layoutSourceInputSection(gtx layout.Context, sourcePaths []string, currentSaved string) layout.Dimensions {
+func hasImplicitEditSource(snap snapshot, sourcePaths []string) bool {
+	if len(sourcePaths) > 0 {
+		return false
+	}
+	if strings.TrimSpace(snap.Result.SavedPath) != "" {
+		return true
+	}
+	return strings.TrimSpace(snap.Result.Item.ImageB64) != ""
+}
+
+func (a *App) layoutSourceInputSection(gtx layout.Context, snap snapshot, sourcePaths []string, hasImplicitCurrentSource bool) layout.Dimensions {
 	for a.composeSourceModeButtons[0].Clicked(gtx) {
 		a.batchMode = false
 	}
@@ -3300,9 +3306,23 @@ func (a *App) layoutSourceInputSection(gtx layout.Context, sourcePaths []string,
 	}
 	for _, path := range sourcePaths {
 		path := path
-		btn := a.sourceButton("panel-remove:" + path)
-		for btn.Clicked(gtx) {
+		removeBtn := a.sourceButton("panel-remove:" + path)
+		for removeBtn.Clicked(gtx) {
 			a.removeSourcePath(path)
+		}
+		previewBtn := a.sourceButton("panel-preview:" + path)
+		for previewBtn.Clicked(gtx) {
+			if err := a.viewSourcePathOnCanvas(path); err != nil {
+				a.appendLog("预览参考图失败: " + err.Error())
+			}
+		}
+		moveLeftBtn := a.sourceButton("panel-left:" + path)
+		for moveLeftBtn.Clicked(gtx) {
+			a.moveSourcePath(path, -1)
+		}
+		moveRightBtn := a.sourceButton("panel-right:" + path)
+		for moveRightBtn.Clicked(gtx) {
+			a.moveSourcePath(path, 1)
 		}
 	}
 
@@ -3327,7 +3347,7 @@ func (a *App) layoutSourceInputSection(gtx layout.Context, sourcePaths []string,
 		layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
 	}
 
-	if len(sourcePaths) == 0 && currentSaved != "" {
+	if len(sourcePaths) == 0 && hasImplicitCurrentSource {
 		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return a.borderedSurface(gtx, fluent.surface2, fluentControlRadius, fluent.border, func(gtx layout.Context) layout.Dimensions {
 				return layout.UniformInset(unit.Dp(10)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
@@ -3341,28 +3361,13 @@ func (a *App) layoutSourceInputSection(gtx layout.Context, sourcePaths []string,
 	for _, path := range sourcePaths {
 		path := path
 		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			btn := a.sourceButton("panel-remove:" + path)
-			return a.borderedSurface(gtx, fluent.surface, fluentControlRadius, fluent.border, func(gtx layout.Context) layout.Dimensions {
-				return layout.Inset{Top: 8, Bottom: 8, Left: 10, Right: 10}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-					return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							idx := indexOfSourcePath(path, sourcePaths) + 1
-							if idx <= 0 {
-								return layout.Dimensions{}
-							}
-							return layout.Inset{Right: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-								return a.label(gtx, strconv.Itoa(idx)+".", unit.Sp(10), fluent.textDim, font.Medium)
-							})
-						}),
-						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-							return a.singleLineLabel(gtx, filepath.Base(path), unit.Sp(11), fluent.text, font.Medium)
-						}),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return a.ghostIconButton(gtx, btn, uiIconClose, false)
-						}),
-					)
-				})
-			})
+			removeBtn := a.sourceButton("panel-remove:" + path)
+			previewBtn := a.sourceButton("panel-preview:" + path)
+			moveLeftBtn := a.sourceButton("panel-left:" + path)
+			moveRightBtn := a.sourceButton("panel-right:" + path)
+			index := indexOfSourcePath(path, sourcePaths)
+			active := strings.TrimSpace(snap.Result.SavedPath) == strings.TrimSpace(path) || strings.TrimSpace(snap.Result.Item.SavedPath) == strings.TrimSpace(path)
+			return a.layoutSourceQueueItemRow(gtx, path, index, active, previewBtn, moveLeftBtn, moveRightBtn, removeBtn, len(sourcePaths))
 		}))
 		children = append(children, layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout))
 	}
@@ -3511,27 +3516,18 @@ func (a *App) layoutBatchSourceQueueSection(gtx layout.Context, sourcePaths []st
 			path := displayPaths[idx]
 			children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				btn := a.sourceButton("batch-remove:" + path)
+				previewBtn := a.sourceButton("batch-preview:" + path)
+				for previewBtn.Clicked(gtx) {
+					if err := a.viewSourcePathOnCanvas(path); err != nil {
+						a.appendLog("预览批处理源图失败: " + err.Error())
+					}
+				}
 				removeEnabled := len(sourcePaths) > 0
-				return a.borderedSurface(gtx, fluent.surface, fluentControlRadius, fluent.border, func(gtx layout.Context) layout.Dimensions {
-					return layout.Inset{Top: 8, Bottom: 8, Left: 10, Right: 10}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								return layout.Inset{Right: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-									return a.label(gtx, strconv.Itoa(idx+1)+".", unit.Sp(10), fluent.textDim, font.Medium)
-								})
-							}),
-							layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-								return a.singleLineLabel(gtx, filepath.Base(path), unit.Sp(11), fluent.text, font.Medium)
-							}),
-							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								if !removeEnabled {
-									return layout.Dimensions{}
-								}
-								return a.ghostIconButton(gtx, btn, uiIconClose, false)
-							}),
-						)
-					})
-				})
+				active := strings.TrimSpace(a.readSnapshot().Result.SavedPath) == strings.TrimSpace(path)
+				if removeEnabled {
+					return a.layoutSourceQueueItemRow(gtx, path, idx, active, previewBtn, nil, nil, btn, 0)
+				}
+				return a.layoutSourceQueueItemRow(gtx, path, idx, active, previewBtn, nil, nil, nil, 0)
 			}))
 			children = append(children, layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout))
 		}
@@ -3641,6 +3637,79 @@ func (a *App) layoutBatchSourceQueueSection(gtx layout.Context, sourcePaths []st
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
 }
 
+func (a *App) layoutSourceQueueItemRow(
+	gtx layout.Context,
+	path string,
+	index int,
+	active bool,
+	previewBtn *widget.Clickable,
+	moveLeftBtn *widget.Clickable,
+	moveRightBtn *widget.Clickable,
+	removeBtn *widget.Clickable,
+	total int,
+) layout.Dimensions {
+	img, imgOp := a.displayPathThumb(path, gtx.Dp(unit.Dp(40)))
+	return a.borderedSurface(gtx, fluent.surface, fluentControlRadius, fluent.border, func(gtx layout.Context) layout.Dimensions {
+		return layout.Inset{Top: 8, Bottom: 8, Left: 10, Right: 10}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return layout.Inset{Right: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return a.label(gtx, strconv.Itoa(index+1)+".", unit.Sp(10), fluent.textDim, font.Medium)
+					})
+				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return a.surfaceButton(
+						gtx,
+						previewBtn,
+						chooseColor(active, fluent.accentSoft, fluent.surface2),
+						fluent.surface2,
+						chooseColor(active, accentAlpha(0x2a), fluent.border),
+						unit.Dp(8),
+						layout.Inset{Top: 4, Bottom: 4, Left: 4, Right: 4},
+						func(gtx layout.Context) layout.Dimensions {
+							return a.imageThumbCoverWithOp(gtx, img, imgOp, unit.Dp(40), unit.Dp(40), unit.Dp(6))
+						},
+					)
+				}),
+				layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
+				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					color := fluent.text
+					if active {
+						color = fluent.accent
+					}
+					return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(unit.Dp(2))}.Layout(gtx,
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return a.singleLineLabel(gtx, sourcePathDisplayName(path), unit.Sp(11), color, font.Medium)
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return a.singleLineLabel(gtx, path, unit.Sp(9), fluent.textDim, font.Normal)
+						}),
+					)
+				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					actions := make([]layout.FlexChild, 0, 4)
+					if moveLeftBtn != nil && index > 0 {
+						actions = append(actions, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return a.compactIconButton(gtx, moveLeftBtn, uiIconChevronLeft, false)
+						}))
+					}
+					if moveRightBtn != nil && total > 0 && index < total-1 {
+						actions = append(actions, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return a.compactIconButton(gtx, moveRightBtn, uiIconChevronRight, false)
+						}))
+					}
+					if removeBtn != nil {
+						actions = append(actions, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return a.ghostIconButton(gtx, removeBtn, uiIconClose, false)
+						}))
+					}
+					return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(unit.Dp(4))}.Layout(gtx, actions...)
+				}),
+			)
+		})
+	})
+}
+
 func indexOfSourcePath(path string, sourcePaths []string) int {
 	for idx, value := range sourcePaths {
 		if value == path {
@@ -3705,6 +3774,7 @@ func (a *App) layoutBatchCountSection(gtx layout.Context) layout.Dimensions {
 }
 
 func (a *App) layoutLoopSection(gtx layout.Context) layout.Dimensions {
+	autoSavePlaceholder := loopAutoSaveDirPlaceholder(a.outputDirInput.Text())
 	for a.composeLoopButtons[0].Clicked(gtx) {
 		a.loopEnabled = true
 	}
@@ -3725,6 +3795,9 @@ func (a *App) layoutLoopSection(gtx layout.Context) layout.Dimensions {
 	}
 	for a.chooseLoopAutoSaveDirButton.Clicked(gtx) {
 		a.chooseLoopAutoSaveDir("选择循环自动另存为目录失败: ")
+	}
+	for a.useLoopOutputDirButton.Clicked(gtx) {
+		a.useCurrentOutputDirForLoopAutoSave()
 	}
 	for idx, value := range []int{4, 8, 10, 20, 50} {
 		value := value
@@ -3787,11 +3860,7 @@ func (a *App) layoutLoopSection(gtx layout.Context) layout.Dimensions {
 					return a.label(gtx, "循环出图", unit.Sp(11), fluent.textMuted, font.SemiBold)
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					stateLabel := "关闭"
-					if a.loopEnabled {
-						stateLabel = fmt.Sprintf("%d 张 / %d 并发", normalizeLoopGenerationCount(a.loopTotalCount), normalizeLoopGenerationConcurrency(a.loopConcurrency))
-					}
-					return a.metaBadge(gtx, stateLabel, true)
+					return a.metaBadge(gtx, a.loopSummaryText(), true)
 				}),
 			)
 		}),
@@ -3811,13 +3880,25 @@ func (a *App) layoutLoopSection(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(unit.Dp(6))}.Layout(gtx, previewRows...)
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return a.technicalField(gtx, "自动另存为目录", &a.loopAutoSaveDirInput, "留空 = 关闭自动另存为", unit.Dp(42))
+			return a.technicalField(gtx, "自动另存为目录", &a.loopAutoSaveDirInput, autoSavePlaceholder, unit.Dp(42))
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return a.compactIconTextButton(gtx, &a.chooseLoopAutoSaveDirButton, uiIconFolder, "选择自动另存为目录", false)
+			currentOutputDir := strings.TrimSpace(a.outputDirInput.Text())
+			return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(unit.Dp(6))}.Layout(gtx,
+				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					return a.compactIconTextButton(gtx, &a.chooseLoopAutoSaveDirButton, uiIconFolder, "选择自动另存为目录", false)
+				}),
+				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					label := "使用当前输出目录"
+					if currentOutputDir == "" {
+						label = "当前输出目录未设置"
+					}
+					return a.compactIconTextButton(gtx, &a.useLoopOutputDirButton, uiIconSave, label, false)
+				}),
+			)
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return a.label(gtx, "开启后提交按钮会按这里的总张数和并发持续补位生成。自动另存为与实时预览开关都已接到执行路径。", unit.Sp(10), fluent.textDim, font.Normal)
+			return a.label(gtx, "开启后提交按钮会按这里的总张数和并发持续补位生成。自动另存为与实时预览开关都已接到执行路径；若开启自动另存为但目录为空，提交前会提示补全路径。", unit.Sp(10), fluent.textDim, font.Normal)
 		}),
 	)
 }

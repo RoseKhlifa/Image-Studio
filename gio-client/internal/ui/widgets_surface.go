@@ -712,6 +712,44 @@ func (a *App) toolbarStaticTextButton(
 	})
 }
 
+func (a *App) toolbarColorButton(
+	gtx layout.Context,
+	btn *widget.Clickable,
+	swatch color.NRGBA,
+	selected bool,
+) layout.Dimensions {
+	bg := rgba(0xffffff, 0x00)
+	hoverBg := fluent.toolHoverBg
+	border := rgba(0xffffff, 0x00)
+	if selected {
+		bg = fluent.accentSoft
+		hoverBg = accentAlpha(0x28)
+		border = accentAlpha(0x24)
+	}
+	return fixedWidth(gtx, unit.Dp(28), func(gtx layout.Context) layout.Dimensions {
+		return fixedHeight(gtx, unit.Dp(28), func(gtx layout.Context) layout.Dimensions {
+			return a.surfaceButton(
+				gtx,
+				btn,
+				bg,
+				hoverBg,
+				border,
+				fluentControlRadius,
+				layout.Inset{},
+				func(gtx layout.Context) layout.Dimensions {
+					return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return fixedWidth(gtx, unit.Dp(14), func(gtx layout.Context) layout.Dimensions {
+							return fixedHeight(gtx, unit.Dp(14), func(gtx layout.Context) layout.Dimensions {
+								return a.surface(gtx, swatch, unit.Dp(7), layout.Spacer{}.Layout)
+							})
+						})
+					})
+				},
+			)
+		})
+	})
+}
+
 func (a *App) compactIconButton(
 	gtx layout.Context,
 	btn *widget.Clickable,

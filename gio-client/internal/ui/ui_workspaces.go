@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"image"
 	"strconv"
 	"strings"
 	"time"
@@ -107,10 +108,22 @@ func (a *App) buildWorkspaceSnapshot() workspaceState {
 		ResultHasItem:       a.result.HasItem,
 		SelectedHistoryID:   a.selectedHistoryID,
 		BatchResultIDs:      append([]string(nil), a.batchResultIDs...),
+		BatchPreviewItems:   append([]sharedCompat.HistoryItem(nil), a.batchPreviewItemsSnapshotLocked()...),
 		ResultGridOpen:      a.resultGridOpen,
 		CompareHistoryID:    a.compare.Item.ID,
 		CompareSplit:        a.compareSplitSlider.Value,
 	}
+}
+
+func (a *App) resetCanvasWorkspaceTransientStateLocked() {
+	a.canvasViewScale = 1
+	a.canvasViewOffset = image.Point{}
+	a.canvasViewDragging = false
+	a.canvasViewLastDragPos = image.Point{}
+	a.canvasSpacePan = false
+	a.canvasViewKey = canvasViewStateKey(a.result)
+	a.resetCanvasMaskLocked()
+	a.resetCanvasAnnotationsLocked()
 }
 
 func (a *App) saveActiveWorkspaceSnapshot() {
@@ -168,7 +181,8 @@ func (a *App) applyWorkspace(ws workspaceState) {
 	a.selectedHistoryID = ws.SelectedHistoryID
 	a.activePromptGroup = historyPromptGroup{}
 	a.batchResultIDs = append([]string(nil), ws.BatchResultIDs...)
-	a.resultGridOpen = ws.ResultGridOpen && len(ws.BatchResultIDs) > 1
+	a.batchPreviewItems = batchPreviewItemsMap(ws.BatchPreviewItems)
+	a.resultGridOpen = ws.ResultGridOpen && (len(ws.BatchResultIDs) > 1 || batchGridTotalSlots(nil, ws.BatchPreviewItems, 0) > 1 || (a.running && a.lastRunBatchCount > 1))
 	a.promptHelperOpen = false
 	a.promptButtons = map[string]*widget.Clickable{}
 	a.settingsModalOpen = false
@@ -205,6 +219,7 @@ func (a *App) applyWorkspace(ws workspaceState) {
 	}
 	workspaceID := a.activeWorkspaceID
 	a.mu.Lock()
+	a.resetCanvasWorkspaceTransientStateLocked()
 	a.pruneImageCacheLocked()
 	a.mu.Unlock()
 	a.invalidateNow()

@@ -18,7 +18,13 @@ const (
 	windowsRegistrySchemaVersion = uint32(1)
 )
 
+var stableDataRootFunc = stableDataRootImpl
+
 func StableDataRoot() (string, error) {
+	return stableDataRootFunc()
+}
+
+func stableDataRootImpl() (string, error) {
 	if root, err := readWindowsRegistryDataRoot(); err == nil && strings.TrimSpace(root) != "" {
 		if err := os.MkdirAll(root, 0o700); err != nil {
 			return "", err

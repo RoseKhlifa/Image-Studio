@@ -32,6 +32,7 @@ func (a *App) layout(gtx layout.Context) layout.Dimensions {
 	for a.clearLogButton.Clicked(gtx) {
 		a.clearLogs()
 	}
+	a.handleCanvasKeyboardShortcuts(gtx, snap)
 
 	paint.FillShape(gtx.Ops, fluent.bg, clip.Rect{Max: gtx.Constraints.Max}.Op())
 	if !a.reducedEffects && gtx.Constraints.Max.X > 0 && gtx.Constraints.Max.Y > 0 {
@@ -109,6 +110,9 @@ func (a *App) layout(gtx layout.Context) layout.Dimensions {
 	}
 	if a.customAspectRatioManagerOpen {
 		a.layoutCustomAspectRatioManagerModal(gtx)
+	}
+	if a.canvasAnnotationTextPromptOpen {
+		a.layoutCanvasAnnotationTextPrompt(gtx)
 	}
 	if snap.ActiveResultDetail.ID != "" || snap.ActiveResultDetail.SavedPath != "" {
 		a.layoutResultDetailModal(gtx, snap)

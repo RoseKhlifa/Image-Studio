@@ -12,15 +12,18 @@ import (
 )
 
 type Message struct {
-	Type  string `json:"type"`
-	Token string `json:"token,omitempty"`
+	Type      string `json:"type"`
+	Token     string `json:"token,omitempty"`
+	ResultID  string `json:"resultID,omitempty"`
+	SavedPath string `json:"savedPath,omitempty"`
 }
 
 const (
-	MessageTypePing    = "ping"
-	MessageTypeRaise   = "raise"
-	MessageTypeToken   = "token"
-	MessageTypeInvalid = "invalid"
+	MessageTypePing       = "ping"
+	MessageTypeRaise      = "raise"
+	MessageTypeToken      = "token"
+	MessageTypeInvalid    = "invalid"
+	MessageTypeOpenResult = "open-result"
 )
 
 type Server struct {
@@ -103,6 +106,19 @@ func SendToken(token string) error {
 
 func SendInvalid() error {
 	return Send(Message{Type: MessageTypeInvalid})
+}
+
+func SendOpenResult(resultID string, savedPath string) error {
+	resultID = strings.TrimSpace(resultID)
+	savedPath = strings.TrimSpace(savedPath)
+	if resultID == "" && savedPath == "" {
+		return errors.New("result target is empty")
+	}
+	return Send(Message{
+		Type:      MessageTypeOpenResult,
+		ResultID:  resultID,
+		SavedPath: savedPath,
+	})
 }
 
 func (s *Server) serve(handler func(Message)) {

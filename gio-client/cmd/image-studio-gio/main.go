@@ -27,6 +27,9 @@ func main() {
 		switch msg.Type {
 		case promptipc.MessageTypeRaise:
 			appUI.RaiseWindow()
+		case promptipc.MessageTypeOpenResult:
+			appUI.RaiseWindow()
+			appUI.OpenResultDetailByIDOrSavedPath(msg.ResultID, msg.SavedPath)
 		case promptipc.MessageTypeToken:
 			appUI.HandlePromptImportToken(msg.Token)
 		case promptipc.MessageTypeInvalid:

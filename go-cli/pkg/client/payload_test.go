@@ -357,6 +357,18 @@ func TestBuildPayloadIncludesMaskWhenSet(t *testing.T) {
 	}
 }
 
+func TestBuildPayloadDetectsMaskMimeTypeFromBase64(t *testing.T) {
+	jpegMask := base64.StdEncoding.EncodeToString([]byte{0xff, 0xd8, 0xff, 0xdb, 0x00, 0x43})
+	raw, _ := BuildPayload(Options{Prompt: "x", MaskB64: jpegMask})
+	v := mustDecodePayload(t, raw)
+	tool := v["tools"].([]any)[0].(map[string]any)
+	mask := tool["input_image_mask"].(map[string]any)
+	want := "data:image/jpeg;base64," + jpegMask
+	if mask["image_url"] != want {
+		t.Fatalf("input_image_mask.image_url = %v, want %s", mask["image_url"], want)
+	}
+}
+
 func TestImageFileToDataURLEncodesPNG(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "source.png")

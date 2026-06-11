@@ -117,21 +117,24 @@ func TestUpsertConfigPreservesActiveProfileIdentity(t *testing.T) {
 
 func TestHistoryItemFromRunUsesWebViewCompatibleFields(t *testing.T) {
 	item := HistoryItemFromRun(kernel.Config{
-		Prompt:         "cat",
-		Mode:           client.ModeEdit,
-		Size:           "1024x1536",
-		Quality:        "high",
-		OutputFormat:   "png",
-		Seed:           42,
-		NegativePrompt: "blur",
-		SourcePaths:    []string{"/tmp/images/src-a.png", "/tmp/images/src-b.png"},
+		Prompt:           "cat",
+		Mode:             client.ModeEdit,
+		Size:             "1024x1536",
+		Quality:          "high",
+		OutputFormat:     "png",
+		Seed:             42,
+		NegativePrompt:   "blur",
+		BatchIndex:       2,
+		PreviewSlotIndex: 1,
+		ParentID:         "/tmp/images/src-a.png",
+		SourcePaths:      []string{"/tmp/images/src-a.png", "/tmp/images/src-b.png"},
 	}, kernel.Result{
 		SavedPath:     "/tmp/images/cat.png",
 		PreviewPath:   "/tmp/images/previews/cat.png",
 		ThumbPath:     "/tmp/images/thumbs/cat.png",
 		RawPath:       "/tmp/log/raw.txt",
 		RevisedPrompt: "cat revised",
-	}, 1.25)
+	}, 1.25, false)
 	if item.ID == "" || item.CreatedAt == 0 {
 		t.Fatalf("missing identity fields: %#v", item)
 	}
@@ -143,6 +146,102 @@ func TestHistoryItemFromRunUsesWebViewCompatibleFields(t *testing.T) {
 	}
 	if len(item.SourcePaths) != 2 || item.SourcePaths[0] != "/tmp/images/src-a.png" || item.SourcePaths[1] != "/tmp/images/src-b.png" {
 		t.Fatalf("source paths not mapped: %#v", item.SourcePaths)
+	}
+	if item.ParentID != "/tmp/images/src-a.png" {
+		t.Fatalf("parent id = %q want /tmp/images/src-a.png", item.ParentID)
+	}
+	if item.BatchIndex != 2 || item.PreviewSlotIndex != 1 {
+		t.Fatalf("batch metadata not mapped: batch=%d previewSlot=%d", item.BatchIndex, item.PreviewSlotIndex)
+	}
+}
+
+func TestHistoryItemFromRunPreviewOnlyRemoteKeepsRawAndDefersSavedPaths(t *testing.T) {
+	item := HistoryItemFromRun(kernel.Config{
+		Prompt:       "cat",
+		Mode:         client.ModeGenerate,
+		OutputFormat: "png",
+	}, kernel.Result{
+		SavedPath:     "/tmp/images/cat.png",
+		PreviewPath:   "/tmp/images/previews/cat.png",
+		ThumbPath:     "/tmp/images/thumbs/cat.png",
+		RawPath:       "/tmp/log/raw.txt",
+		RevisedPrompt: "cat revised",
+		ImageB64:      "aW1n",
+	}, 1.25, true)
+	if item.SavedPath != "/tmp/images/cat.png" || item.PreviewPath != "" || item.ThumbPath != "" {
+		t.Fatalf("preview-only item should keep virtual/local savedPath but defer preview/thumb paths: %#v", item)
+	}
+	if item.RawPath != "/tmp/log/raw.txt" || item.RevisedPrompt != "cat revised" || !item.PreviewOnly {
+		t.Fatalf("preview-only metadata not preserved: %#v", item)
+	}
+}
+
+func TestSaveConfigAndHistoryWithPreviewModeStoresHistoryFullAndHydratesImageB64(t *testing.T) {
+	root := t.TempDir()
+	origStable := stableDataRootFunc
+	stableDataRootFunc = func() (string, error) { return root, nil }
+	defer func() { stableDataRootFunc = origStable }()
+
+	cfg := kernel.Config{
+		Prompt:       "cat",
+		Mode:         client.ModeGenerate,
+		OutputFormat: "png",
+		OutputDir:    filepath.Join(root, "images"),
+	}
+	result := kernel.Result{
+		RawPath:       "/tmp/log/raw.txt",
+		RevisedPrompt: "cat revised",
+		ImageB64:      "aW1n",
+	}
+	if err := SaveConfigAndHistoryWithPreviewMode(cfg, result, 1.5, true); err != nil {
+		t.Fatalf("SaveConfigAndHistoryWithPreviewMode: %v", err)
+	}
+	state, _, err := LoadState()
+	if err != nil {
+		t.Fatalf("LoadState: %v", err)
+	}
+	if len(state.History) != 1 {
+		t.Fatalf("history len=%d want 1", len(state.History))
+	}
+	if got := state.History[0].ImageB64; got != "aW1n" {
+		t.Fatalf("history imageB64=%q want aW1n", got)
+	}
+	if got := len(state.HistoryFull); got != 1 {
+		t.Fatalf("historyFull len=%d want 1", got)
+	}
+	if state.HistoryFull[0].ImageB64 != "aW1n" {
+		t.Fatalf("historyFull image=%q want aW1n", state.HistoryFull[0].ImageB64)
+	}
+}
+
+func TestSaveStatePrunesHistoryFullForNonPreviewOnlyHistory(t *testing.T) {
+	root := t.TempDir()
+	origStable := stableDataRootFunc
+	stableDataRootFunc = func() (string, error) { return root, nil }
+	defer func() { stableDataRootFunc = origStable }()
+
+	state := shared.State{
+		History: []shared.HistoryItem{
+			{ID: "saved-1", SavedPath: "/tmp/saved-1.png"},
+			{ID: "preview-1", PreviewOnly: true},
+		},
+		HistoryFull: []shared.HistoryFullItem{
+			{ID: "saved-1", ImageB64: "b2xk"},
+			{ID: "preview-1", ImageB64: "bmV3"},
+		},
+	}
+	if err := SaveState(state); err != nil {
+		t.Fatalf("SaveState: %v", err)
+	}
+	loaded, _, err := LoadState()
+	if err != nil {
+		t.Fatalf("LoadState: %v", err)
+	}
+	if got := len(loaded.HistoryFull); got != 1 {
+		t.Fatalf("historyFull len=%d want 1", got)
+	}
+	if loaded.HistoryFull[0].ID != "preview-1" || loaded.HistoryFull[0].ImageB64 != "bmV3" {
+		t.Fatalf("unexpected historyFull entry: %#v", loaded.HistoryFull[0])
 	}
 }
 

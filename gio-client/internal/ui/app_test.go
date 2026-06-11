@@ -12,7 +12,9 @@ import (
 	"testing"
 	"time"
 
+	"gioui.org/f32"
 	"github.com/yuanhua/image-gptcodex/pkg/client"
+	"image-studio/gio-client/internal/kernel"
 	sharedCompat "image-studio/shared/compat"
 )
 
@@ -242,6 +244,113 @@ func TestCurrentConfigIncludesResponsesTransportAndReasoning(t *testing.T) {
 	}
 	if cfg.ReasoningEffort != "high" {
 		t.Fatalf("reasoning effort=%q want high", cfg.ReasoningEffort)
+	}
+}
+
+func TestCurrentConfigEnablesPreviewOnlyResultForRemoteKernel(t *testing.T) {
+	app := &App{
+		kernelRuntimeMode: "remote",
+	}
+	cfg := app.currentConfig()
+	if !cfg.PreviewOnlyResult {
+		t.Fatal("remote kernel should enable preview-only result mode")
+	}
+
+	app.kernelRuntimeMode = "local"
+	cfg = app.currentConfig()
+	if cfg.PreviewOnlyResult {
+		t.Fatal("local kernel should not enable preview-only result mode")
+	}
+}
+
+func TestCurrentConfigUsesPreviewOnlyResultAsDataURLForRemoteEditFallback(t *testing.T) {
+	app := &App{
+		mode:              string(client.ModeEdit),
+		kernelRuntimeMode: "remote",
+		result: resultState{
+			Item: sharedCompat.HistoryItem{
+				OutputFormat: "png",
+				ImageB64:     base64.StdEncoding.EncodeToString([]byte("image-bytes")),
+			},
+		},
+	}
+	cfg := app.currentConfig()
+	if len(cfg.SourcePaths) != 0 {
+		t.Fatalf("source paths=%v want empty for remote preview-only fallback", cfg.SourcePaths)
+	}
+	if len(cfg.SourceImageDataURLs) != 1 || !strings.HasPrefix(cfg.SourceImageDataURLs[0], "data:image/png;base64,") {
+		t.Fatalf("source image data urls=%v want one png data URL", cfg.SourceImageDataURLs)
+	}
+}
+
+func TestCurrentConfigKeepsMixedFileAndVirtualEditSourcesInRemoteMode(t *testing.T) {
+	app := &App{
+		mode:              string(client.ModeEdit),
+		kernelRuntimeMode: "remote",
+	}
+	virtualPath := registerVirtualImage(base64.StdEncoding.EncodeToString([]byte("image-bytes")), "preview.png", "png")
+	app.sourcePathsInput.SetText("/tmp/a.png\n" + virtualPath)
+
+	cfg := app.currentConfig()
+
+	if len(cfg.SourcePaths) != 1 || cfg.SourcePaths[0] != "/tmp/a.png" {
+		t.Fatalf("source paths=%v want [/tmp/a.png]", cfg.SourcePaths)
+	}
+	if len(cfg.SourceImageDataURLs) != 1 || !strings.HasPrefix(cfg.SourceImageDataURLs[0], "data:image/png;base64,") {
+		t.Fatalf("source image data urls=%v want one png data URL", cfg.SourceImageDataURLs)
+	}
+	if cfg.ParentID != "/tmp/a.png" {
+		t.Fatalf("parentID=%q want /tmp/a.png", cfg.ParentID)
+	}
+}
+
+func TestCurrentConfigUsesVirtualSavedPathAsImplicitEditSource(t *testing.T) {
+	app := &App{
+		mode:              string(client.ModeEdit),
+		kernelRuntimeMode: "local",
+	}
+	virtualPath := registerVirtualImage(testPNGBase64(t, color.NRGBA{R: 0x44, G: 0x77, B: 0xaa, A: 0xff}), "implicit-source.png", "png")
+	app.result = resultState{
+		SavedPath: virtualPath,
+		Item: sharedCompat.HistoryItem{
+			ID:           "virtual-current",
+			SavedPath:    virtualPath,
+			OutputFormat: "png",
+		},
+		HasItem: true,
+	}
+
+	cfg := app.currentConfig()
+
+	if len(cfg.SourcePaths) != 0 {
+		t.Fatalf("source paths=%v want empty for implicit virtual current result", cfg.SourcePaths)
+	}
+	if len(cfg.SourceImageDataURLs) != 1 || !strings.HasPrefix(cfg.SourceImageDataURLs[0], "data:image/png;base64,") {
+		t.Fatalf("source image data urls=%v want one png data URL", cfg.SourceImageDataURLs)
+	}
+	if cfg.ParentID != virtualPath {
+		t.Fatalf("parentID=%q want %q", cfg.ParentID, virtualPath)
+	}
+}
+
+func TestCurrentConfigAugmentsPromptFromCanvasAnnotations(t *testing.T) {
+	app := &App{
+		mode: "edit",
+		result: resultState{
+			Image: image.NewNRGBA(image.Rect(0, 0, 100, 100)),
+		},
+		canvasAnnotations: []canvasAnnotation{
+			{ID: "a", Rect: image.Rect(0, 0, 20, 20)},
+		},
+	}
+	app.promptInput.SetText("focus prompt")
+
+	cfg := app.currentConfig()
+	if !strings.Contains(cfg.Prompt, "focus prompt") {
+		t.Fatalf("prompt=%q want original prompt included", cfg.Prompt)
+	}
+	if !strings.Contains(cfg.Prompt, "标注区域") || !strings.Contains(cfg.Prompt, "上左部") {
+		t.Fatalf("prompt=%q want augmented annotation region", cfg.Prompt)
 	}
 }
 
@@ -622,6 +731,62 @@ func TestWorkspaceRenameUpdatesState(t *testing.T) {
 	}
 }
 
+func TestWorkspaceSwitchClearsCanvasTransientState(t *testing.T) {
+	app := New()
+	app.result = resultState{
+		Item: sharedCompat.HistoryItem{
+			ID:       "hist-1",
+			ImageB64: testPNGBase64(t, color.NRGBA{R: 0x55, G: 0x88, B: 0xcc, A: 0xff}),
+		},
+		HasItem: true,
+	}
+	app.canvasTool = canvasToolMask
+	app.canvasMaskStrokes = []canvasMaskStroke{{
+		Points:   []f32.Point{f32.Pt(0.1, 0.1), f32.Pt(0.2, 0.2)},
+		SizeNorm: 0.1,
+	}}
+	app.canvasAnnotations = []canvasAnnotation{{
+		ID:    "ann-1",
+		Kind:  canvasAnnotationKindRect,
+		Rect:  image.Rect(0, 0, 20, 20),
+		Color: rgb(0xff4d4d),
+	}}
+	app.canvasSelectedAnnotationID = "ann-1"
+	app.canvasViewScale = 2
+	app.canvasViewOffset = image.Pt(12, 18)
+
+	first := app.activeWorkspaceID
+	app.createWorkspace()
+
+	if len(app.canvasMaskStrokes) != 0 {
+		t.Fatalf("mask strokes should clear on new workspace, got %d", len(app.canvasMaskStrokes))
+	}
+	if len(app.canvasAnnotations) != 0 {
+		t.Fatalf("annotations should clear on new workspace, got %d", len(app.canvasAnnotations))
+	}
+	if app.canvasSelectedAnnotationID != "" {
+		t.Fatalf("selected annotation=%q want cleared", app.canvasSelectedAnnotationID)
+	}
+	if app.canvasViewScale != 1 || app.canvasViewOffset != (image.Point{}) {
+		t.Fatalf("canvas view=(%f,%v) want reset", app.canvasViewScale, app.canvasViewOffset)
+	}
+
+	app.switchWorkspace(first)
+
+	if app.result.Item.ID != "hist-1" {
+		t.Fatalf("result item=%q want hist-1 restored", app.result.Item.ID)
+	}
+	if len(app.canvasMaskStrokes) != 0 {
+		t.Fatalf("mask strokes should remain cleared after workspace switch, got %d", len(app.canvasMaskStrokes))
+	}
+	if len(app.canvasAnnotations) != 0 {
+		t.Fatalf("annotations should remain cleared after workspace switch, got %d", len(app.canvasAnnotations))
+	}
+	if app.canvasViewScale != 1 || app.canvasViewOffset != (image.Point{}) {
+		t.Fatalf("canvas view after switch=(%f,%v) want reset", app.canvasViewScale, app.canvasViewOffset)
+	}
+}
+
 func TestDisplayedWorkspaceNameUsesPromptForDefaultActiveWorkspace(t *testing.T) {
 	app := New()
 	app.promptInput.SetText("夜色城市概念海报")
@@ -979,6 +1144,44 @@ func TestSourcePathsCacheRefreshesAfterTextChanges(t *testing.T) {
 	}
 }
 
+func TestMoveSourcePathReordersPaths(t *testing.T) {
+	app := &App{}
+	app.sourcePathsInput.SetText("a.png\nb.png\nc.png")
+
+	app.moveSourcePath("b.png", -1)
+	first := app.sourcePaths()
+	if len(first) != 3 || first[0] != "b.png" || first[1] != "a.png" || first[2] != "c.png" {
+		t.Fatalf("after move left=%v want [b.png a.png c.png]", first)
+	}
+
+	app.moveSourcePath("b.png", 1)
+	second := app.sourcePaths()
+	if len(second) != 3 || second[0] != "a.png" || second[1] != "b.png" || second[2] != "c.png" {
+		t.Fatalf("after move right=%v want [a.png b.png c.png]", second)
+	}
+
+	app.moveSourcePath("a.png", -1)
+	third := app.sourcePaths()
+	if len(third) != 3 || third[0] != "a.png" || third[1] != "b.png" || third[2] != "c.png" {
+		t.Fatalf("out-of-range move should no-op, got %v", third)
+	}
+}
+
+func TestApplyCanvasZoomClampsAndMovesInExpectedDirection(t *testing.T) {
+	if got := applyCanvasZoom(1, -120); got <= 1 {
+		t.Fatalf("zoom in should increase scale, got %f", got)
+	}
+	if got := applyCanvasZoom(1, 120); got >= 1 {
+		t.Fatalf("zoom out should decrease scale, got %f", got)
+	}
+	if got := applyCanvasZoom(0.01, 120); got < 0.05 {
+		t.Fatalf("zoom should clamp to min, got %f", got)
+	}
+	if got := applyCanvasZoom(100, -120); got > 8 {
+		t.Fatalf("zoom should clamp to max, got %f", got)
+	}
+}
+
 func TestComposeSummaryRefreshesAfterRelevantChanges(t *testing.T) {
 	app := &App{
 		size:       "1024x1024",
@@ -1000,6 +1203,112 @@ func TestComposeSummaryRefreshesAfterRelevantChanges(t *testing.T) {
 	}
 	if first == second {
 		t.Fatalf("compose summary did not refresh after relevant changes")
+	}
+}
+
+func TestComposeSummaryTreatsPreviewOnlyCurrentResultAsImplicitEditSource(t *testing.T) {
+	app := &App{
+		mode:              "edit",
+		size:              "1024x1024",
+		quality:           "high",
+		kernelRuntimeMode: "remote",
+	}
+	app.result = resultState{
+		Item: sharedCompat.HistoryItem{
+			ID:       "preview-1",
+			ImageB64: base64.StdEncoding.EncodeToString([]byte("image-bytes")),
+		},
+		HasItem: true,
+	}
+
+	summary := app.composeSummary(snapshot{Result: app.result})
+	if !strings.Contains(summary, "画板图作源图") {
+		t.Fatalf("summary=%q want implicit-current-image source label", summary)
+	}
+}
+
+func TestCanTransformCurrentResultRequiresSavedPath(t *testing.T) {
+	if canTransformCurrentResult(snapshot{}) {
+		t.Fatal("empty snapshot should not allow transforms")
+	}
+	if canTransformCurrentResult(snapshot{
+		Result: resultState{
+			HasItem: true,
+			Item: sharedCompat.HistoryItem{
+				ImageB64: base64.StdEncoding.EncodeToString([]byte("image-bytes")),
+			},
+		},
+	}) {
+		t.Fatal("preview-only result without savedPath should not allow transforms")
+	}
+	if !canTransformCurrentResult(snapshot{
+		Result: resultState{
+			HasItem:   true,
+			SavedPath: "/tmp/image.png",
+		},
+	}) {
+		t.Fatal("saved result should allow transforms")
+	}
+	virtualPath := registerVirtualImage(base64.StdEncoding.EncodeToString([]byte("virtual-image")), "virtual.png", "png")
+	if !canTransformCurrentResult(snapshot{
+		Result: resultState{
+			HasItem:   true,
+			SavedPath: virtualPath,
+		},
+	}) {
+		t.Fatal("virtual saved result should allow transforms")
+	}
+}
+
+func TestReplaceCurrentResultWithPathSupportsVirtualImagePath(t *testing.T) {
+	app := &App{
+		result: resultState{
+			Item: sharedCompat.HistoryItem{
+				ID:       "preview-1",
+				ImageB64: base64.StdEncoding.EncodeToString([]byte("old-image")),
+			},
+		},
+	}
+	virtualPath := registerVirtualImage(base64.StdEncoding.EncodeToString([]byte("new-image")), "rotated.png", "png")
+
+	if err := app.replaceCurrentResultWithPath(virtualPath, "rotate"); err != nil {
+		t.Fatalf("replaceCurrentResultWithPath: %v", err)
+	}
+	snap := app.readSnapshot()
+	if snap.Result.SavedPath != virtualPath {
+		t.Fatalf("savedPath=%q want %q", snap.Result.SavedPath, virtualPath)
+	}
+	if snap.Result.Item.ImageB64 != base64.StdEncoding.EncodeToString([]byte("new-image")) {
+		t.Fatalf("imageB64=%q want updated virtual image data", snap.Result.Item.ImageB64)
+	}
+}
+
+func TestReplaceCurrentResultWithPathPromotesTransformResultToFirstEditSource(t *testing.T) {
+	app := &App{
+		mode:      string(client.ModeGenerate),
+		batchMode: true,
+		result: resultState{
+			Item: sharedCompat.HistoryItem{
+				ID:       "preview-1",
+				ImageB64: base64.StdEncoding.EncodeToString([]byte("old-image")),
+			},
+		},
+	}
+	app.sourcePathsInput.SetText("/tmp/a.png\n/tmp/b.png")
+	virtualPath := registerVirtualImage(base64.StdEncoding.EncodeToString([]byte("new-image")), "rotated.png", "png")
+
+	if err := app.replaceCurrentResultWithPath(virtualPath, "rotate"); err != nil {
+		t.Fatalf("replaceCurrentResultWithPath: %v", err)
+	}
+	if app.mode != string(client.ModeEdit) {
+		t.Fatalf("mode=%q want edit", app.mode)
+	}
+	if app.batchMode {
+		t.Fatal("batchMode should reset to false after promoting transformed result")
+	}
+	paths := app.sourcePaths()
+	if len(paths) != 2 || paths[0] != virtualPath || paths[1] != "/tmp/b.png" {
+		t.Fatalf("source paths=%v want [%s /tmp/b.png]", paths, virtualPath)
 	}
 }
 
@@ -1142,8 +1451,18 @@ func TestApplyPartialPreviewReplacesCanvasImageWhileRunning(t *testing.T) {
 		t.Fatalf("read partial fixture: %v", err)
 	}
 
-	app := &App{running: true}
-	app.applyPartialPreview(client.PartialImage{
+	app := &App{
+		running: true,
+		lastRunConfig: kernel.Config{
+			Prompt:       "preview prompt",
+			Mode:         client.ModeEdit,
+			Size:         "1024x1536",
+			Quality:      "high",
+			OutputFormat: "png",
+			ParentID:     "/tmp/source-parent.png",
+		},
+	}
+	app.applyPartialPreview(0, 0, client.PartialImage{
 		ImageB64:          base64.StdEncoding.EncodeToString(data),
 		RevisedPrompt:     "partial rev",
 		PartialImageIndex: 0,
@@ -1158,7 +1477,75 @@ func TestApplyPartialPreviewReplacesCanvasImageWhileRunning(t *testing.T) {
 	if app.result.RevisedPrompt != "partial rev" {
 		t.Fatalf("revisedPrompt=%q want partial rev", app.result.RevisedPrompt)
 	}
+	if !app.result.HasItem {
+		t.Fatal("partial preview should expose transient item metadata")
+	}
+	if app.result.Item.Prompt != "preview prompt" || app.result.Item.Mode != "edit" || app.result.Item.ParentID != "/tmp/source-parent.png" {
+		t.Fatalf("partial preview item metadata = %#v", app.result.Item)
+	}
+	if app.result.Item.ImageB64 == "" || !app.result.Item.PreviewOnly {
+		t.Fatalf("partial preview item should keep inline image and previewOnly flag: %#v", app.result.Item)
+	}
 	assertImagePixelColor(t, app.result.Image, fill)
+}
+
+func TestApplyPartialPreviewStoresBatchSlotWithoutReplacingCanvas(t *testing.T) {
+	img := image.NewNRGBA(image.Rect(0, 0, 2, 2))
+	fill := color.NRGBA{R: 0xaa, G: 0xbb, B: 0xcc, A: 0xff}
+	for y := 0; y < 2; y++ {
+		for x := 0; x < 2; x++ {
+			img.SetNRGBA(x, y, fill)
+		}
+	}
+	tmp := filepath.Join(t.TempDir(), "batch-partial.png")
+	writeImagePNG(t, tmp, img)
+	data, err := os.ReadFile(tmp)
+	if err != nil {
+		t.Fatalf("read batch partial fixture: %v", err)
+	}
+
+	app := &App{
+		running:           true,
+		lastRunBatchCount: 4,
+		result: resultState{
+			SourceEvent: "history",
+		},
+		lastRunConfig: kernel.Config{
+			Prompt:       "preview prompt",
+			Mode:         client.ModeGenerate,
+			Size:         "1024x1024",
+			Quality:      "high",
+			OutputFormat: "png",
+		},
+	}
+	app.applyPartialPreview(2, 1, client.PartialImage{
+		ImageB64:          base64.StdEncoding.EncodeToString(data),
+		RevisedPrompt:     "batch partial",
+		PartialImageIndex: 0,
+	})
+
+	if app.result.Image != nil {
+		t.Fatal("batch partial preview should not replace current canvas image")
+	}
+	if app.result.SourceEvent != "history" {
+		t.Fatalf("sourceEvent=%q want history preserved", app.result.SourceEvent)
+	}
+	if !app.resultGridOpen {
+		t.Fatal("batch partial preview should keep result grid open")
+	}
+	if len(app.batchPreviewItems) != 1 {
+		t.Fatalf("batchPreviewItems=%d want 1", len(app.batchPreviewItems))
+	}
+	item, ok := app.batchPreviewItems[1]
+	if !ok {
+		t.Fatalf("missing batch preview slot 1: %#v", app.batchPreviewItems)
+	}
+	if item.BatchIndex != 2 || item.PreviewSlotIndex != 1 || item.RevisedPrompt != "batch partial" || !item.PreviewOnly {
+		t.Fatalf("unexpected batch preview item: %#v", item)
+	}
+	if item.ImageB64 == "" {
+		t.Fatalf("batch preview item should retain inline image data: %#v", item)
+	}
 }
 
 func TestPromptInputMetricsRefreshesAfterTextChanges(t *testing.T) {
@@ -1176,6 +1563,24 @@ func TestPromptInputMetricsRefreshesAfterTextChanges(t *testing.T) {
 	}
 	if trimmed1 == trimmed2 {
 		t.Fatalf("prompt metrics did not refresh after text changes")
+	}
+}
+
+func TestOpenRawResponseModalReadsVirtualText(t *testing.T) {
+	app := &App{}
+	path := registerVirtualText("hello raw response", "raw.txt")
+
+	app.openRawResponseModal(path)
+
+	snap := app.readSnapshot()
+	if snap.RawResponseModalPath != path {
+		t.Fatalf("raw response path=%q want %q", snap.RawResponseModalPath, path)
+	}
+	if snap.RawResponseModalError != "" {
+		t.Fatalf("raw response error=%q want empty", snap.RawResponseModalError)
+	}
+	if snap.RawResponseModalText != "hello raw response" {
+		t.Fatalf("raw response text=%q want %q", snap.RawResponseModalText, "hello raw response")
 	}
 }
 
@@ -1403,6 +1808,47 @@ func TestPrefillControlsFromHistoryItemRestoresSourcePaths(t *testing.T) {
 	})
 	if got := app.sourcePaths(); len(got) != 2 || got[0] != "/tmp/a.png" || got[1] != "/tmp/b.png" {
 		t.Fatalf("sourcePaths=%v want [/tmp/a.png /tmp/b.png]", got)
+	}
+}
+
+func TestPrefillControlsFromHistoryItemFallsBackToParentIDBeforeSavedPath(t *testing.T) {
+	app := New()
+	app.prefillControlsFromHistoryItem(sharedCompat.HistoryItem{
+		Mode:      "edit",
+		ParentID:  "/tmp/source-parent.png",
+		SavedPath: "/tmp/result.png",
+	})
+	if got := app.sourcePaths(); len(got) != 1 || got[0] != "/tmp/source-parent.png" {
+		t.Fatalf("sourcePaths=%v want [/tmp/source-parent.png]", got)
+	}
+}
+
+func TestApplyHistoryParamsDoesNotRestoreSourcePaths(t *testing.T) {
+	app := New()
+	app.sourcePathsInput.SetText("/tmp/current.png")
+	app.applyHistoryParams(sharedCompat.HistoryItem{
+		Prompt:       "history prompt",
+		Mode:         "edit",
+		Size:         "1536x1024",
+		Quality:      "high",
+		SavedPath:    "/tmp/fallback.png",
+		SourcePaths:  []string{"/tmp/a.png", "/tmp/b.png"},
+		OutputFormat: "png",
+	})
+	if got := app.promptInput.Text(); got != "history prompt" {
+		t.Fatalf("prompt=%q want history prompt", got)
+	}
+	if app.mode != "edit" {
+		t.Fatalf("mode=%q want edit", app.mode)
+	}
+	if app.size != "1536x1024" {
+		t.Fatalf("size=%q want 1536x1024", app.size)
+	}
+	if app.quality != "high" {
+		t.Fatalf("quality=%q want high", app.quality)
+	}
+	if got := app.sourcePaths(); len(got) != 1 || got[0] != "/tmp/current.png" {
+		t.Fatalf("sourcePaths=%v want existing source path unchanged", got)
 	}
 }
 

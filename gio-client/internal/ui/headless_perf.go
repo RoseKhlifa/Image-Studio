@@ -185,21 +185,23 @@ func BuildHeadlessResultPerfReport(items []sharedCompat.HistoryItem) HeadlessRes
 	_ = reducedApp.loadCanvasDisplayImageForState(report.SavedPath, state)
 	report.ReducedWarmMs = durationMillis(time.Since(start))
 
-	if managedPreviewPath, err := managedSourcePreviewPath(report.SavedPath, report.CanvasTargetPx); err == nil {
-		report.ManagedPreviewPath = managedPreviewPath
-		deadline := time.Now().Add(2 * time.Second)
-		for time.Now().Before(deadline) {
-			if headlessPathReady(managedPreviewPath) {
-				report.ManagedPreviewReady = true
-				break
+	if !isVirtualImagePath(report.SavedPath) {
+		if managedPreviewPath, err := managedSourcePreviewPath(report.SavedPath, report.CanvasTargetPx); err == nil {
+			report.ManagedPreviewPath = managedPreviewPath
+			deadline := time.Now().Add(2 * time.Second)
+			for time.Now().Before(deadline) {
+				if headlessPathReady(managedPreviewPath) {
+					report.ManagedPreviewReady = true
+					break
+				}
+				time.Sleep(20 * time.Millisecond)
 			}
-			time.Sleep(20 * time.Millisecond)
-		}
-		if report.ManagedPreviewReady {
-			managedApp := &App{imageCache: map[string]cachedImage{}}
-			start = time.Now()
-			_ = managedApp.loadCanvasDisplayImageForState(report.SavedPath, state)
-			report.ManagedPreviewMs = durationMillis(time.Since(start))
+			if report.ManagedPreviewReady {
+				managedApp := &App{imageCache: map[string]cachedImage{}}
+				start = time.Now()
+				_ = managedApp.loadCanvasDisplayImageForState(report.SavedPath, state)
+				report.ManagedPreviewMs = durationMillis(time.Since(start))
+			}
 		}
 	}
 
@@ -255,6 +257,12 @@ func headlessPathReady(path string) bool {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return false
+	}
+	if imageB64, ok := readVirtualImageB64(path); ok {
+		return strings.TrimSpace(imageB64) != ""
+	}
+	if text, ok := readVirtualText(path); ok {
+		return strings.TrimSpace(text) != ""
 	}
 	info, err := os.Stat(path)
 	return err == nil && !info.IsDir()

@@ -33,6 +33,7 @@ var (
 	uiIconClose          = mustIcon(widget.NewIcon(mdicons.NavigationClose))
 	uiIconRotateLeft     = mustIcon(widget.NewIcon(mdicons.ImageRotateLeft))
 	uiIconRotateRight    = mustIcon(widget.NewIcon(mdicons.ImageRotateRight))
+	uiIconCrop           = mustIcon(widget.NewIcon(mdicons.ImageCrop))
 	uiIconFlip           = mustIcon(widget.NewIcon(mdicons.ImageFlip))
 	uiIconBrush          = mustIcon(widget.NewIcon(mdicons.ImageBrush))
 	uiIconAnnotate       = mustIcon(widget.NewIcon(mdicons.ImageCropSquare))
@@ -52,6 +53,8 @@ var (
 	uiIconExpand         = mustIcon(widget.NewIcon(mdicons.NavigationExpandMore))
 	uiIconFullscreen     = mustIcon(widget.NewIcon(mdicons.NavigationFullscreen))
 	uiIconFullscreenExit = mustIcon(widget.NewIcon(mdicons.NavigationFullscreenExit))
+	uiIconChevronLeft    = mustIcon(widget.NewIcon(mdicons.NavigationChevronLeft))
+	uiIconChevronRight   = mustIcon(widget.NewIcon(mdicons.NavigationChevronRight))
 )
 
 func mustIcon(ic *widget.Icon, err error) *widget.Icon {

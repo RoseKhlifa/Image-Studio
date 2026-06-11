@@ -86,7 +86,7 @@ func BuildPayload(opts Options) ([]byte, error) {
 	}
 	if opts.MaskB64 != "" {
 		tool["input_image_mask"] = map[string]any{
-			"image_url": imageDataURLFromBase64(opts.MaskB64, "image/png"),
+			"image_url": imageDataURLFromBase64(opts.MaskB64, ""),
 		}
 	}
 	if includeExtended && opts.Seed != 0 {
@@ -199,12 +199,12 @@ func parseSizeValue(size string) (width int, height int, ok bool) {
 
 func normalizeOpenAIImageSize(width, height int) (int, int, bool) {
 	const (
-		minSide     = 64
-		maxSide     = 3840
-		maxPixels   = 3840 * 2160
-		maxAspect   = 3.0
-		alignment   = 16
-		minAspect   = 1.0 / maxAspect
+		minSide   = 64
+		maxSide   = 3840
+		maxPixels = 3840 * 2160
+		maxAspect = 3.0
+		alignment = 16
+		minAspect = 1.0 / maxAspect
 	)
 	if width <= 0 || height <= 0 {
 		return 0, 0, false
@@ -457,9 +457,64 @@ func imageDataURLFromBase64(raw, mime string) string {
 	}
 	cleanMime := strings.TrimSpace(mime)
 	if cleanMime == "" {
+		cleanMime = detectImageMimeTypeFromBase64(encoded)
+	}
+	if cleanMime == "" {
 		cleanMime = "image/png"
 	}
 	return fmt.Sprintf("data:%s;base64,%s", cleanMime, encoded)
+}
+
+func detectImageMimeTypeFromBase64(raw string) string {
+	encoded := strings.TrimSpace(raw)
+	if encoded == "" {
+		return ""
+	}
+	decoded, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return ""
+	}
+	return detectImageMimeTypeFromBytes(decoded)
+}
+
+func detectImageMimeTypeFromBytes(data []byte) string {
+	if len(data) >= 8 &&
+		data[0] == 0x89 &&
+		data[1] == 0x50 &&
+		data[2] == 0x4e &&
+		data[3] == 0x47 &&
+		data[4] == 0x0d &&
+		data[5] == 0x0a &&
+		data[6] == 0x1a &&
+		data[7] == 0x0a {
+		return "image/png"
+	}
+	if len(data) >= 3 && data[0] == 0xff && data[1] == 0xd8 && data[2] == 0xff {
+		return "image/jpeg"
+	}
+	if len(data) >= 12 &&
+		data[0] == 0x52 &&
+		data[1] == 0x49 &&
+		data[2] == 0x46 &&
+		data[3] == 0x46 &&
+		data[8] == 0x57 &&
+		data[9] == 0x45 &&
+		data[10] == 0x42 &&
+		data[11] == 0x50 {
+		return "image/webp"
+	}
+	return ""
+}
+
+func imageExtensionForMimeType(mime string) string {
+	switch strings.ToLower(strings.TrimSpace(mime)) {
+	case "image/jpeg":
+		return "jpg"
+	case "image/webp":
+		return "webp"
+	default:
+		return "png"
+	}
 }
 
 func normalizeRequestPolicy(policy RequestPolicy) RequestPolicy {

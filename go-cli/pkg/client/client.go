@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -89,6 +90,10 @@ loop:
 				continue
 			}
 			lastStage = stage
+			if onProgress != nil {
+				elapsed := int(time.Since(startedAt).Seconds())
+				onProgress(lastStage, elapsed, collector.bytesReceived())
+			}
 		case <-ticker.C:
 			if onProgress != nil {
 				elapsed := int(time.Since(startedAt).Seconds())
@@ -145,6 +150,20 @@ func RequestAndExtractWithRetriesAndPartial(
 		return imagesAPIWithRetries(ctx, opts, outputDir, timestamp, onLog, onProgress, onPartial)
 	}
 	return responsesAPIWithRetries(ctx, transport, opts, outputDir, timestamp, onLog, onProgress, onPartial)
+}
+
+func RequestAndExtractWithRetriesAndPartialInMemory(
+	ctx context.Context,
+	transport Transport,
+	opts Options,
+	onLog func(string),
+	onProgress func(stage string, elapsed int, bytes int64),
+	onPartial func(PartialImage),
+) (ImageResult, string, error) {
+	if opts.APIMode == APIModeImages {
+		return imagesAPIWithRetriesInMemory(ctx, opts, onLog, onProgress, onPartial)
+	}
+	return responsesAPIWithRetriesInMemory(ctx, transport, opts, onLog, onProgress, onPartial)
 }
 
 func effectiveMaxAttempts(opts Options) int {
@@ -230,7 +249,7 @@ func responsesAPIWithRetries(
 		if errors.Is(reqErr, ErrNoImageInResponse) {
 			lastErr = reqErr
 			reason := DescribeProblem(raw)
-			if autoRetryEnabled && attempt < maxAttempts && IsRetryable(raw) {
+			if autoRetryEnabled && !workerAlreadyRetried(raw) && attempt < maxAttempts && IsRetryable(raw) {
 				onLog(reason)
 				onLog(fmt.Sprintf("这是可重试错误,%d 秒后自动重试...", RetryBackoffSeconds))
 				if !sleepCtx(ctx, time.Duration(RetryBackoffSeconds)*time.Second) {
@@ -245,7 +264,7 @@ func responsesAPIWithRetries(
 
 		// Transport-level error (network / native HTTP failure). Retry up to MaxAttempts.
 		lastErr = reqErr
-		if autoRetryEnabled && attempt < maxAttempts {
+		if autoRetryEnabled && !workerAlreadyRetried(raw) && attempt < maxAttempts {
 			onLog(fmt.Sprintf("%v", reqErr))
 			onLog(fmt.Sprintf("%d 秒后自动重试...", RetryBackoffSeconds))
 			if !sleepCtx(ctx, time.Duration(RetryBackoffSeconds)*time.Second) {
@@ -260,6 +279,88 @@ func responsesAPIWithRetries(
 		return ImageResult{}, lastPath, fmt.Errorf("多次请求后仍未成功:%w", lastErr)
 	}
 	return ImageResult{}, lastPath, fmt.Errorf("多次请求后仍未成功")
+}
+
+func responsesAPIWithRetriesInMemory(
+	ctx context.Context,
+	transport Transport,
+	opts Options,
+	onLog func(string),
+	onProgress func(stage string, elapsed int, bytes int64),
+	onPartial func(PartialImage),
+) (ImageResult, string, error) {
+	if onLog == nil {
+		onLog = func(string) {}
+	}
+
+	var lastErr error
+	var lastRaw string
+	autoRetryEnabled := true
+	if opts.AutoRetryEnabled != nil && !*opts.AutoRetryEnabled {
+		autoRetryEnabled = false
+	}
+	maxAttempts := effectiveMaxAttempts(opts)
+	sizeRepairTried := false
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		onLog(fmt.Sprintf("第 %d/%d 次请求...", attempt, maxAttempts))
+
+		var (
+			buf    bytes.Buffer
+			result ImageResult
+			reqErr error
+		)
+		if normalizeResponsesTransport(opts.ResponsesTransport) == ResponsesTransportWebSocket {
+			result, reqErr = requestResponsesWithWebSocketReplay(ctx, opts, &buf, onProgress, onPartial, attempt, onLog)
+		} else {
+			result, reqErr = RequestAndExtractWithPartial(ctx, transport, opts, &buf, onProgress, onPartial)
+		}
+		raw := buf.String()
+		lastRaw = raw
+
+		if reqErr == nil {
+			return result, raw, nil
+		}
+
+		if !sizeRepairTried {
+			if repairedOpts, repaired, reason := repairSizeRetryOptions(opts, raw, reqErr); repaired {
+				sizeRepairTried = true
+				opts = repairedOpts
+				onLog(reason)
+				continue
+			}
+		}
+
+		if errors.Is(reqErr, ErrNoImageInResponse) {
+			lastErr = reqErr
+			reason := DescribeProblem(raw)
+			if autoRetryEnabled && !workerAlreadyRetried(raw) && attempt < maxAttempts && IsRetryable(raw) {
+				onLog(reason)
+				onLog(fmt.Sprintf("这是可重试错误,%d 秒后自动重试...", RetryBackoffSeconds))
+				if !sleepCtx(ctx, time.Duration(RetryBackoffSeconds)*time.Second) {
+					return ImageResult{}, lastRaw, ctx.Err()
+				}
+				continue
+			}
+			return ImageResult{}, raw, fmt.Errorf("%s", reason)
+		}
+
+		lastErr = reqErr
+		if autoRetryEnabled && !workerAlreadyRetried(raw) && attempt < maxAttempts {
+			onLog(fmt.Sprintf("%v", reqErr))
+			onLog(fmt.Sprintf("%d 秒后自动重试...", RetryBackoffSeconds))
+			if !sleepCtx(ctx, time.Duration(RetryBackoffSeconds)*time.Second) {
+				return ImageResult{}, lastRaw, ctx.Err()
+			}
+			continue
+		}
+		return ImageResult{}, raw, reqErr
+	}
+
+	if lastErr != nil {
+		return ImageResult{}, lastRaw, fmt.Errorf("多次请求后仍未成功:%w", lastErr)
+	}
+	return ImageResult{}, lastRaw, fmt.Errorf("多次请求后仍未成功")
 }
 
 func sleepCtx(ctx context.Context, d time.Duration) bool {
@@ -333,7 +434,7 @@ func imagesAPIWithRetries(
 		lastErr = reqErr
 		// Images API has no SSE / no partial — only retry on transport-level
 		// errors and Cloudflare 5xx HTML pages.
-		if autoRetryEnabled && attempt < maxAttempts && (IsRetryable(raw) || isTransportishError(reqErr)) {
+		if autoRetryEnabled && !workerAlreadyRetried(raw) && attempt < maxAttempts && (IsRetryable(raw) || isTransportishError(reqErr)) {
 			onLog(fmt.Sprintf("%v", reqErr))
 			onLog(fmt.Sprintf("%d 秒后自动重试...", RetryBackoffSeconds))
 			if !sleepCtx(ctx, time.Duration(RetryBackoffSeconds)*time.Second) {
@@ -346,6 +447,62 @@ func imagesAPIWithRetries(
 	}
 
 	return ImageResult{}, lastPath, fmt.Errorf("多次请求后仍未成功:%w", lastErr)
+}
+
+func imagesAPIWithRetriesInMemory(
+	ctx context.Context,
+	opts Options,
+	onLog func(string),
+	onProgress func(stage string, elapsed int, bytes int64),
+	onPartial func(PartialImage),
+) (ImageResult, string, error) {
+	if onLog == nil {
+		onLog = func(string) {}
+	}
+
+	var lastErr error
+	var lastRaw string
+	autoRetryEnabled := true
+	if opts.AutoRetryEnabled != nil && !*opts.AutoRetryEnabled {
+		autoRetryEnabled = false
+	}
+	maxAttempts := effectiveMaxAttempts(opts)
+	sizeRepairTried := false
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		onLog(fmt.Sprintf("[Images API] 第 %d/%d 次请求...", attempt, maxAttempts))
+
+		var buf bytes.Buffer
+		result, reqErr := RequestImagesAPIWithPartial(ctx, opts, &buf, onProgress, onPartial)
+		raw := buf.String()
+		lastRaw = raw
+
+		if reqErr == nil {
+			return result, raw, nil
+		}
+
+		if !sizeRepairTried {
+			if repairedOpts, repaired, reason := repairSizeRetryOptions(opts, raw, reqErr); repaired {
+				sizeRepairTried = true
+				opts = repairedOpts
+				onLog(reason)
+				continue
+			}
+		}
+
+		lastErr = reqErr
+		if autoRetryEnabled && !workerAlreadyRetried(raw) && attempt < maxAttempts && (IsRetryable(raw) || isTransportishError(reqErr)) {
+			onLog(fmt.Sprintf("%v", reqErr))
+			onLog(fmt.Sprintf("%d 秒后自动重试...", RetryBackoffSeconds))
+			if !sleepCtx(ctx, time.Duration(RetryBackoffSeconds)*time.Second) {
+				return ImageResult{}, lastRaw, ctx.Err()
+			}
+			continue
+		}
+		return ImageResult{}, raw, reqErr
+	}
+
+	return ImageResult{}, lastRaw, fmt.Errorf("多次请求后仍未成功:%w", lastErr)
 }
 
 func repairSizeRetryOptions(opts Options, raw string, reqErr error) (Options, bool, string) {

@@ -117,6 +117,11 @@ func (a *App) persistManagedCanvasPreviewVariants(savedPath string, primaryTarge
 
 func (a *App) loadCanvasImmediatePreviewForState(savedPath string, item resultState) image.Image {
 	historyItem := item.Item
+	if strings.TrimSpace(historyItem.ImageB64) != "" {
+		if img, err := decodeImageB64(historyItem.ImageB64); err == nil {
+			return downscaleToMaxDimension(img, historyThumbFallbackMaxDimension)
+		}
+	}
 	if previewPath := strings.TrimSpace(historyItem.PreviewPath); previewPath != "" {
 		if img, err := a.imageForPathThumb(previewPath, historyPreviewPathMaxDimension); err == nil {
 			return img

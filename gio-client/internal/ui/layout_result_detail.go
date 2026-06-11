@@ -31,11 +31,35 @@ func (a *App) layoutResultDetailModal(gtx layout.Context, snap snapshot) layout.
 		a.useResultPrompt(item.RevisedPrompt)
 	}
 	for a.resultDetailSaveAsButton.Clicked(gtx) {
-		a.openSavePromptForPath(item.SavedPath)
+		a.openSavePromptForItem(item)
 	}
 	for a.resultDetailUseSourceButton.Clicked(gtx) {
 		a.reuseHistoryItemAsSource(item)
 		a.appendLog("已将历史结果加入源图: " + shortPrompt(item.Prompt))
+	}
+	for a.resultDetailApplyParamsButton.Clicked(gtx) {
+		a.applyHistoryParams(item)
+		a.closeResultDetail()
+	}
+	for a.resultDetailRegenerateButton.Clicked(gtx) {
+		a.closeResultDetail()
+		a.regenerateFromHistoryItem(item)
+	}
+	for a.resultDetailCompareButton.Clicked(gtx) {
+		if err := a.toggleCompareItem(item); err != nil && !isMissingPreview(err) {
+			a.appendLog("载入对比图失败: " + err.Error())
+		} else if compareItemActive(item.ID, snap.Compare.Item.ID) {
+			a.appendLog("已退出对比图")
+		} else {
+			a.appendLog("已设为对比图")
+		}
+	}
+	for a.resultDetailOpenRawButton.Clicked(gtx) {
+		raw := strings.TrimSpace(item.RawPath)
+		if raw == "" {
+			continue
+		}
+		a.openRawResponseModal(raw)
 	}
 	for a.resultDetailCopyPromptButton.Clicked(gtx) {
 		copyResultDetailText(gtx, item.Prompt)
@@ -47,10 +71,17 @@ func (a *App) layoutResultDetailModal(gtx layout.Context, snap snapshot) layout.
 	}
 	for a.resultDetailOpenPathButton.Clicked(gtx) {
 		path := strings.TrimSpace(item.SavedPath)
+		if path == "" || isVirtualImagePath(path) {
+			path = strings.TrimSpace(a.outputDirInput.Text())
+		}
 		if path == "" {
 			continue
 		}
-		if err := openPath(filepath.Dir(path)); err != nil {
+		target := path
+		if strings.TrimSpace(item.SavedPath) != "" && !isVirtualImagePath(item.SavedPath) {
+			target = filepath.Dir(path)
+		}
+		if err := openPath(target); err != nil {
 			a.appendLog("打开文件夹失败: " + err.Error())
 		}
 	}
@@ -96,17 +127,24 @@ func (a *App) layoutResultDetailPreview(gtx layout.Context, item sharedCompat.Hi
 					})
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					if strings.TrimSpace(item.SavedPath) == "" {
+					if !canSaveHistoryItem(item) {
 						return layout.Dimensions{}
 					}
-					return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(unit.Dp(6))}.Layout(gtx,
+					children := []layout.FlexChild{
 						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 							return a.compactIconTextButton(gtx, &a.resultDetailSaveAsButton, uiIconSave, "另存为", false)
 						}),
-						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-							return a.compactIconTextButton(gtx, &a.resultDetailOpenPathButton, uiIconFolder, "打开文件夹", false)
-						}),
-					)
+					}
+					openDirLabel := "打开输出目录"
+					if strings.TrimSpace(item.SavedPath) != "" && !isVirtualImagePath(item.SavedPath) {
+						openDirLabel = "打开文件夹"
+					}
+					if strings.TrimSpace(item.SavedPath) != "" || strings.TrimSpace(a.outputDirInput.Text()) != "" {
+						children = append(children, layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+							return a.compactIconTextButton(gtx, &a.resultDetailOpenPathButton, uiIconFolder, openDirLabel, false)
+						}))
+					}
+					return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(unit.Dp(6))}.Layout(gtx, children...)
 				}),
 			)
 		})
@@ -130,11 +168,9 @@ func (a *App) layoutResultDetailSections(gtx layout.Context, item sharedCompat.H
 			return a.layoutResultDetailTextSection(gtx, "负向提示词", item.NegativePrompt)
 		})
 	}
-	if strings.TrimSpace(item.SavedPath) != "" {
-		sections = append(sections, func(gtx layout.Context) layout.Dimensions {
-			return a.layoutResultDetailFileSection(gtx, item)
-		})
-	}
+	sections = append(sections, func(gtx layout.Context) layout.Dimensions {
+		return a.layoutResultDetailFileSection(gtx, item)
+	})
 	return a.settingsList.Layout(gtx, len(sections), func(gtx layout.Context, index int) layout.Dimensions {
 		return layout.Inset{Bottom: unit.Dp(12)}.Layout(gtx, sections[index])
 	})
@@ -179,6 +215,18 @@ func (a *App) layoutResultDetailMeta(gtx layout.Context, item sharedCompat.Histo
 						return layout.Dimensions{}
 					}
 					return a.detailKVRow(gtx, "耗时", detailValue(item.ElapsedSec)+"s", false, true)
+				},
+				func(gtx layout.Context) layout.Dimensions {
+					return layout.Inset{Top: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(unit.Dp(6))}.Layout(gtx,
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								return a.compactIconTextButton(gtx, &a.resultDetailApplyParamsButton, uiIconCheck, "应用参数", false)
+							}),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								return a.compactIconTextButton(gtx, &a.resultDetailRegenerateButton, uiIconRefresh, "重新生成", true)
+							}),
+						)
+					})
 				},
 			)
 			return a.settingsList.Layout(gtx, len(rows), func(gtx layout.Context, index int) layout.Dimensions {
@@ -236,6 +284,7 @@ func (a *App) layoutResultDetailTextSection(gtx layout.Context, title string, te
 }
 
 func (a *App) layoutResultDetailFileSection(gtx layout.Context, item sharedCompat.HistoryItem) layout.Dimensions {
+	compareActive := compareItemActive(item.ID, a.readSnapshot().Compare.Item.ID)
 	return a.elevatedBorderedSurface(gtx, fluent.surfaceElevated, fluentCardRadius, fluent.border, image.Pt(0, 1), func(gtx layout.Context) layout.Dimensions {
 		return layout.UniformInset(unit.Dp(12)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(unit.Dp(8))}.Layout(gtx,
@@ -245,16 +294,40 @@ func (a *App) layoutResultDetailFileSection(gtx layout.Context, item sharedCompa
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					return a.borderedSurface(gtx, fluent.surface2, fluentCardRadius, fluent.border, func(gtx layout.Context) layout.Dimensions {
 						return layout.UniformInset(unit.Dp(10)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-							return a.label(gtx, strings.TrimSpace(item.SavedPath), unit.Sp(11), fluent.textMuted, font.Normal)
+							path := strings.TrimSpace(item.SavedPath)
+							if path == "" {
+								return a.label(gtx, "(本次未落盘 / 路径丢失)", unit.Sp(11), fluent.textDim, font.Normal)
+							}
+							return a.label(gtx, path, unit.Sp(11), fluent.textMuted, font.Normal)
 						})
 					})
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(unit.Dp(6))}.Layout(gtx,
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					if strings.TrimSpace(item.SavedPath) == "" && strings.TrimSpace(item.RawPath) == "" && !canSaveHistoryItem(item) {
+						return layout.Dimensions{}
+					}
+					children := make([]layout.FlexChild, 0, 5)
+					if strings.TrimSpace(item.SavedPath) != "" {
+						children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 							return a.compactIconTextButton(gtx, &a.resultDetailCopyPathButton, uiIconCopy, "复制路径", false)
-						}),
-					)
+						}))
+					}
+					if canSaveHistoryItem(item) {
+						children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return a.compactIconTextButton(gtx, &a.resultDetailUseSourceButton, uiIconSource, "设为源图", false)
+						}))
+					}
+					if strings.TrimSpace(item.ID) != "" || strings.TrimSpace(item.SavedPath) != "" {
+						children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return a.compactIconTextButton(gtx, &a.resultDetailCompareButton, uiIconCompare, chooseCompareButtonLabel(compareActive), compareActive)
+						}))
+					}
+					if strings.TrimSpace(item.RawPath) != "" {
+						children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return a.compactIconTextButton(gtx, &a.resultDetailOpenRawButton, uiIconList, "查看 Raw", false)
+						}))
+					}
+					return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(unit.Dp(6))}.Layout(gtx, children...)
 				}),
 			)
 		})
