@@ -10,10 +10,13 @@ import {
   aspectPresetLabel,
   availableResolutionPresets,
   buildReferenceAspectRatio,
+  buildReferenceResolutionSizeSelection,
   deriveExactSizeSelection,
   deriveAspectPreset,
   deriveResolutionPreset,
+  formatSizeValue,
   listAspectPresetOptions,
+  normalizeResolutionSelection,
   normalizeSizeSelection,
   supportsCustomAspectRatios,
   supportsPreciseSizeControl,
@@ -41,7 +44,7 @@ export function AndroidPhoneComposePanel({
   const {
     apiKey, mode, prompt, background, imageStyle, inputFidelity, moderation, negativePrompt, outputCompression, size, quality, seed, styleTag,
     userIdentifier, partialImages,
-    outputFormat, batchCount, loopGeneration, sources, currentImage, errorMessage, errorCanRetry, errorRawPath,
+    outputFormat, batchCount, editAutoAspectResolution, loopGeneration, sources, currentImage, errorMessage, errorCanRetry, errorRawPath,
     isRunning, lastPayload, isOptimizingPrompt, apiMode, requestPolicy, baseURL, profiles, imageModelID,
     customAspectRatios,
     setField, clearError, pushToast, selectSourceImage,
@@ -83,11 +86,32 @@ export function AndroidPhoneComposePanel({
   const exactSize = deriveExactSizeSelection(normalizedSize, capabilityInput, sizingAspectRatios);
   const derivedAspect = deriveAspectPreset(normalizedSize, sizingAspectRatios);
   const derivedResolution = deriveResolutionPreset(normalizedSize);
+  const normalizedEditAutoAspectResolution = normalizeResolutionSelection(editAutoAspectResolution || "1k", capabilityInput);
+  const effectiveEditAutoAspectResolution = normalizedEditAutoAspectResolution === "auto"
+    ? "1k"
+    : normalizedEditAutoAspectResolution;
+  const manualEditAutoAspectActive = mode === "edit" && editAutoAspectResolution !== "";
+  const editAutoAspectComputedSizeLabel = manualEditAutoAspectActive && referenceDimensions
+    ? formatSizeValue(buildReferenceResolutionSizeSelection(
+        effectiveEditAutoAspectResolution,
+        referenceDimensions,
+        capabilityInput,
+        customAspectRatios,
+      ))
+    : null;
   const activeAspect = exactSize ? null : derivedAspect;
   const activeResolution = exactSize ? null : derivedResolution;
   const availableResolutions = availableResolutionPresets(capabilityInput);
-  const activeAspectLabel = exactSize ? "精确尺寸" : aspectPresetLabel(derivedAspect, sizingAspectRatios);
-  const activeResolutionLabel = exactSize ? exactSize.label : (derivedResolution === "auto" ? "自动" : derivedResolution.toUpperCase());
+  const activeAspectLabel = manualEditAutoAspectActive
+    ? "按源图自动适配"
+    : exactSize
+      ? "精确尺寸"
+      : aspectPresetLabel(derivedAspect, sizingAspectRatios);
+  const activeResolutionLabel = manualEditAutoAspectActive
+    ? effectiveEditAutoAspectResolution.toUpperCase()
+    : exactSize
+      ? exactSize.label
+      : (derivedResolution === "auto" ? "自动" : derivedResolution.toUpperCase());
   const activeQualityLabel = qualityOptions.find((item) => item.value === normalizedQuality)?.label ?? normalizedQuality;
   const editSourceLabel = sources.length > 0 ? `${sources.length} 张已添加` : currentImage?.savedPath ? "使用当前画板" : "未添加";
   const settingsExpanded = parametersOpen || advancedOpen;
@@ -115,6 +139,14 @@ export function AndroidPhoneComposePanel({
       sizingAspectRatios,
       referenceAspectPreset,
     ));
+  };
+
+  const handleEditAutoAspectToggle = (enabled: boolean) => {
+    setField("editAutoAspectResolution", enabled ? effectiveEditAutoAspectResolution : "");
+  };
+
+  const handleEditAutoAspectResolutionSelect = (resolution: typeof effectiveEditAutoAspectResolution) => {
+    setField("editAutoAspectResolution", resolution);
   };
 
   const handleModeChange = (next: Mode) => {
@@ -312,6 +344,7 @@ export function AndroidPhoneComposePanel({
           aspectOptions={aspectOptions}
           activeResolution={activeResolution}
           activeResolutionLabel={activeResolutionLabel}
+          editAutoAspectComputedSizeLabel={editAutoAspectComputedSizeLabel}
           exactSizeLabel={exactSize?.label ?? null}
           activeQualityLabel={activeQualityLabel}
           activeStyleLabel={activeStyleLabel}
@@ -319,9 +352,14 @@ export function AndroidPhoneComposePanel({
           allowPreciseSizeControl={allowPreciseSizeControl}
           availableResolutions={availableResolutions}
           batchCount={batchCount}
+          effectiveEditAutoAspectResolution={effectiveEditAutoAspectResolution}
+          handleEditAutoAspectResolutionSelect={handleEditAutoAspectResolutionSelect}
+          handleEditAutoAspectToggle={handleEditAutoAspectToggle}
           handleAspectSelect={handleAspectSelect}
           handleResolutionSelect={handleResolutionSelect}
           imageModelID={imageModelID}
+          manualEditAutoAspectActive={manualEditAutoAspectActive}
+          mode={mode}
           onOpenCustomAspectRatioModal={openCustomAspectRatioModal}
           onOpenCustomSizeModal={openCustomSizeModal}
           apiMode={apiMode}

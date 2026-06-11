@@ -121,6 +121,7 @@ import {
   apiModeLabel,
   defaultBatchProcessConfig,
   defaultLoopGenerationConfig,
+  normalizeAutoAspectResolutionPreset,
   normalizeBatchCount,
   normalizeBatchProcessConcurrency,
   normalizeBatchProcessConfig,
@@ -145,6 +146,7 @@ import {
   deriveResolutionPreset,
   formatSizeValue,
   isBuiltInAspectRatio,
+  normalizeResolutionSelection,
   normalizeSizeSelection,
   supportsPreciseSizeControl,
 } from "../components/panel/sizeCapabilities";
@@ -704,6 +706,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   promptTemplates: [],
   batchCount: 1,
   editSourceMode: "manual",
+  editAutoAspectResolution: "",
   batchProcess: defaultBatchProcessConfig(),
   loopGeneration: defaultLoopGenerationConfig(),
   presets: [],
@@ -942,6 +945,8 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       ? normalizeBatchCount(value)
       : key === "batchProcess"
         ? normalizeBatchProcessConfig(value)
+      : key === "editAutoAspectResolution"
+        ? normalizeAutoAspectResolutionPreset(value)
       : key === "background"
         ? normalizeBackgroundValue(value)
         : key === "outputCompression"
@@ -1006,6 +1011,12 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         workspaces: get().workspaces.map((w) => (
           w.id === get().activeWorkspaceId ? { ...w, editSourceMode: value } : w
         )),
+      });
+    } else if (key === "editAutoAspectResolution") {
+      set({
+        workspaces: patchWorkspaceRuntime(get().workspaces, get().activeWorkspaceId, {
+          editAutoAspectResolution: normalizedValue as StudioState["editAutoAspectResolution"],
+        }),
       });
     } else if (key === "batchProcess") {
       const value = normalizedValue as StudioState["batchProcess"];
@@ -1264,11 +1275,39 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       augmentedPrompt = `${augmentedPrompt}, ${styleSuffix}`;
     }
 
-    const resolvedSize = normalizeSizeSelection(s.size, {
+    const normalizedBaseSize = normalizeSizeSelection(s.size, {
       apiMode: s.apiMode,
       requestPolicy: s.requestPolicy,
       imageModelID: s.imageModelID,
     }, s.customAspectRatios);
+    const normalizedEditAutoAspectResolution = normalizeResolutionSelection(
+      s.editAutoAspectResolution || "1k",
+      {
+        apiMode: s.apiMode,
+        requestPolicy: s.requestPolicy,
+        imageModelID: s.imageModelID,
+      },
+    );
+    const effectiveEditAutoAspectResolution = normalizedEditAutoAspectResolution === "auto"
+      ? "1k"
+      : normalizedEditAutoAspectResolution;
+    const editReferenceDimensions = s.sources[0]?.previewWidth && s.sources[0]?.previewHeight
+      ? { width: s.sources[0].previewWidth, height: s.sources[0].previewHeight }
+      : s.currentImage?.previewWidth && s.currentImage?.previewHeight
+        ? { width: s.currentImage.previewWidth, height: s.currentImage.previewHeight }
+        : null;
+    const resolvedSize = s.mode === "edit" && !batchProcessEnabled && s.editAutoAspectResolution !== ""
+      ? buildReferenceResolutionSizeSelection(
+          effectiveEditAutoAspectResolution,
+          editReferenceDimensions,
+          {
+            apiMode: s.apiMode,
+            requestPolicy: s.requestPolicy,
+            imageModelID: s.imageModelID,
+          },
+          s.customAspectRatios,
+        )
+      : normalizedBaseSize;
     const resolvedQuality = normalizeQualitySelection(s.quality, s.imageModelID);
     const streamPreviewDisableReason = getStreamPreviewDisableReason({
       enabled: s.protectStreamPreview,
@@ -1357,7 +1396,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     const snapshotBase = {
       workspaceId,
       apiMode: s.apiMode,
-      size: s.size,
+      size: resolvedSize,
       quality: resolvedQuality,
       outputFormat: s.outputFormat,
       sources: s.sources,
@@ -1545,6 +1584,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         batchCount: workspaceState.batchCount,
         selectedPresetId: workspaceState.selectedPresetId ?? null,
         editSourceMode: workspaceState.editSourceMode,
+        editAutoAspectResolution: normalizeAutoAspectResolutionPreset(workspaceState.editAutoAspectResolution),
         batchProcess: normalizeBatchProcessConfig(workspaceState.batchProcess),
         loopGeneration: normalizeLoopGenerationConfig(workspaceState.loopGeneration),
         presets: preview.presets ?? [],
@@ -1814,6 +1854,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       batchCount: 1,
       selectedPresetId: null,
       editSourceMode: "manual",
+      editAutoAspectResolution: "",
       batchProcess: defaultBatchProcessConfig(),
       loopGeneration: defaultLoopGenerationConfig(),
       sources: [],
@@ -1860,6 +1901,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       activeWorkspaceId: wsId,
       selectedPresetId: initialWorkspace.selectedPresetId ?? null,
       editSourceMode: initialWorkspace.editSourceMode,
+      editAutoAspectResolution: normalizeAutoAspectResolutionPreset(initialWorkspace.editAutoAspectResolution),
       batchProcess: normalizeBatchProcessConfig(initialWorkspace.batchProcess),
       loopGeneration: normalizeLoopGenerationConfig(initialWorkspace.loopGeneration),
       // Android 走首页 hero 引导，不用启动即弹设置；桌面仍保留首次引导。

@@ -60,7 +60,8 @@ export type ThemeMode = "system" | "light" | "dark";
 export type CompletionSoundMode = "default" | "custom";
 export type EditSourceMode = "manual" | "batch";
 export type BatchProcessOutputMode = "source_dir" | "custom_dir";
-export type BatchProcessAutoAspectResolution = "" | "256" | "512" | "1k" | "2k" | "4k";
+export type AutoAspectResolutionPreset = "" | "256" | "512" | "1k" | "2k" | "4k";
+export type BatchProcessAutoAspectResolution = AutoAspectResolutionPreset;
 export type SystemNotificationPermissionState = "default" | "granted" | "denied" | "unsupported";
 
 export interface CompletionSoundConfig {
@@ -289,6 +290,7 @@ export interface Workspace {
   batchCount: number;
   selectedPresetId?: string | null;
   editSourceMode: EditSourceMode;
+  editAutoAspectResolution?: AutoAspectResolutionPreset;
   batchProcess: BatchProcessConfig;
   loopGeneration: LoopGenerationConfig;
   sources: SourceImage[];
@@ -328,6 +330,7 @@ export interface Preset {
   imageStyle?: ImageStyleValue;
   moderation?: ModerationValue;
   styleTag?: string;
+  editAutoAspectResolution?: AutoAspectResolutionPreset;
   kernelRuntimeMode?: KernelRuntimeMode;
   batchCount: number;
 }

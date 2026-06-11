@@ -73,6 +73,50 @@ func (a *App) viewSourcePathOnCanvas(path string) error {
 	return nil
 }
 
+func (a *App) importImagePathAsEditSource(path string) error {
+	item, err := sourceCanvasItemFromPath(path)
+	if err != nil {
+		return err
+	}
+	state := resultState{
+		SavedPath:   item.SavedPath,
+		SourceEvent: "import",
+		Item:        item,
+		HasItem:     true,
+	}
+	state.Image = a.loadSourceImmediatePreview(item.SavedPath, state)
+	a.mu.Lock()
+	a.mode = string(client.ModeEdit)
+	a.batchMode = false
+	state.Rev = a.result.Rev + 1
+	a.result = state
+	a.selectedHistoryID = ""
+	a.status = "已导入本地图片"
+	rev := a.result.Rev
+	a.pruneImageCacheLocked()
+	a.mu.Unlock()
+	existing := a.sourcePaths()
+	alreadyIn := false
+	for _, candidate := range existing {
+		if strings.TrimSpace(candidate) == strings.TrimSpace(path) {
+			alreadyIn = true
+			break
+		}
+	}
+	if !alreadyIn {
+		if len(existing) == 0 {
+			a.setSourcePaths([]string{path})
+		} else {
+			a.appendSourcePath(path)
+		}
+	}
+	a.clearCompare()
+	a.resetCanvasView()
+	a.invalidateNow()
+	a.startAsyncCurrentResultImageLoad(item.SavedPath, item, state.SourceEvent, rev)
+	return nil
+}
+
 func (a *App) compareSourcePathOnCanvas(path string) error {
 	item, err := sourceCanvasItemFromPath(path)
 	if err != nil {

@@ -1,4 +1,4 @@
-import type { APIMode, BatchProcessConfig, EditSourceMode, QualityValue, RequestPolicy, SourceImage } from "../../types/domain";
+import type { APIMode, AutoAspectResolutionPreset, BatchProcessConfig, EditSourceMode, Mode, QualityValue, RequestPolicy, SourceImage } from "../../types/domain";
 import {
   type AspectPreset,
   type AspectPresetOption,
@@ -31,11 +31,16 @@ export function MacComposePanel({
   sources,
   currentImage,
   editSourceMode,
+  editAutoAspectComputedSizeLabel,
+  editAutoAspectResolution,
+  effectiveEditAutoAspectResolution,
   apiMode,
   requestPolicy,
   imageModelID,
   setField,
   handleAspectSelect,
+  handleEditAutoAspectResolutionSelect,
+  handleEditAutoAspectToggle,
   handleResolutionSelect,
   onOpenCustomAspectRatioModal,
   onOpenCustomSizeModal,
@@ -68,15 +73,20 @@ export function MacComposePanel({
   chooseBatchInputDir: () => void;
   chooseBatchInputFiles: () => void;
   chooseBatchOutputDir: () => void;
-  mode: string;
+  mode: Mode;
   sources: SourceImage[];
   currentImage: { savedPath?: string } | null;
   editSourceMode: EditSourceMode;
+  editAutoAspectComputedSizeLabel?: string | null;
+  editAutoAspectResolution: AutoAspectResolutionPreset;
+  effectiveEditAutoAspectResolution: Exclude<ResolutionPreset, "auto">;
   apiMode: APIMode;
   requestPolicy: RequestPolicy;
   imageModelID: string;
   setField: (key: string, value: any) => void;
   handleAspectSelect: (aspect: AspectPreset) => void;
+  handleEditAutoAspectResolutionSelect: (resolution: Exclude<ResolutionPreset, "auto">) => void;
+  handleEditAutoAspectToggle: (enabled: boolean) => void;
   handleResolutionSelect: (resolution: ResolutionPreset) => void;
   onOpenCustomAspectRatioModal: () => void;
   onOpenCustomSizeModal: () => void;
@@ -112,13 +122,19 @@ export function MacComposePanel({
             aspectOptions={aspectOptions}
             activeResolution={activeResolution}
             batchAutoAspectActive={mode === "edit" && editSourceMode === "batch" && batchProcess.autoAspectResolution !== ""}
+            manualEditAutoAspectActive={mode === "edit" && editSourceMode === "manual" && editAutoAspectResolution !== ""}
+            editAutoAspectComputedSizeLabel={editAutoAspectComputedSizeLabel}
+            effectiveEditAutoAspectResolution={effectiveEditAutoAspectResolution}
             exactSizeLabel={exactSizeLabel}
             allowCustomAspectRatios={allowCustomAspectRatios}
             allowPreciseSizeControl={allowPreciseSizeControl}
             apiMode={apiMode}
             availableResolutions={availableResolutions}
             batchCount={batchCount}
+            mode={mode}
             handleAspectSelect={handleAspectSelect}
+            handleEditAutoAspectResolutionSelect={handleEditAutoAspectResolutionSelect}
+            handleEditAutoAspectToggle={handleEditAutoAspectToggle}
             handleResolutionSelect={handleResolutionSelect}
             imageModelID={imageModelID}
             onOpenCustomAspectRatioModal={onOpenCustomAspectRatioModal}

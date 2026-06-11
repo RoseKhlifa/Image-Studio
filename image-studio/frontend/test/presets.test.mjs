@@ -16,6 +16,7 @@ function makeState(overrides = {}) {
     moderation: "low",
     batchCount: 4,
     styleTag: "anime",
+    editAutoAspectResolution: "",
     ...overrides,
   };
 }
@@ -77,4 +78,28 @@ test("nextDefaultPresetName fills the first available 配置序号", () => {
     ]),
     "配置2",
   );
+});
+
+test("preset snapshots preserve ordinary img2img auto-aspect sizing mode", () => {
+  const current = makeState({ editAutoAspectResolution: "2k" });
+  const preset = presets.buildPresetFromSnapshot("源图适配", "auto-source", current);
+  const applied = presets.buildPresetPatch(preset, makeState());
+
+  assert.equal(preset.editAutoAspectResolution, "2k");
+  assert.equal(applied.editAutoAspectResolution, "2k");
+  assert.equal(presets.findMatchingPresetId([preset], current), "auto-source");
+  assert.equal(presets.findMatchingPresetId([preset], makeState({ editAutoAspectResolution: "" })), null);
+});
+
+test("legacy presets without auto-aspect mode clear ordinary img2img override", () => {
+  const legacyPatch = presets.buildPresetPatch({
+    id: "legacy",
+    name: "旧预设",
+    size: "1024x1024",
+    quality: "medium",
+    negativePrompt: "",
+    batchCount: 1,
+  }, makeState({ editAutoAspectResolution: "4k" }));
+
+  assert.equal(legacyPatch.editAutoAspectResolution, "");
 });

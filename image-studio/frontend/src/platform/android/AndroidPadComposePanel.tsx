@@ -19,10 +19,13 @@ import {
   aspectPresetLabel,
   availableResolutionPresets,
   buildReferenceAspectRatio,
+  buildReferenceResolutionSizeSelection,
   deriveExactSizeSelection,
   deriveAspectPreset,
   deriveResolutionPreset,
+  formatSizeValue,
   listAspectPresetOptions,
+  normalizeResolutionSelection,
   normalizeSizeSelection,
   supportsCustomAspectRatios,
   supportsPreciseSizeControl,
@@ -41,7 +44,7 @@ export function AndroidPadComposePanel({
   const {
     apiKey, mode, prompt, background, imageStyle, inputFidelity, moderation, negativePrompt, outputCompression, size, quality, seed, styleTag, outputFormat,
     userIdentifier, partialImages,
-    batchCount, loopGeneration, sources, currentImage, isRunning, isOptimizingPrompt, apiMode, requestPolicy, baseURL, imageModelID,
+    batchCount, editAutoAspectResolution, loopGeneration, sources, currentImage, isRunning, isOptimizingPrompt, apiMode, requestPolicy, baseURL, imageModelID,
     profiles, customAspectRatios, setField, selectSourceImage, removeSource, clearSources, viewSourceOnCanvas,
     compareSourceOnCanvas,
     openCustomAspectRatioModal, openCustomSizeModal,
@@ -84,11 +87,32 @@ export function AndroidPadComposePanel({
   const exactSize = deriveExactSizeSelection(normalizedSize, capabilityInput, sizingAspectRatios);
   const derivedAspect = deriveAspectPreset(normalizedSize, sizingAspectRatios);
   const derivedResolution = deriveResolutionPreset(normalizedSize);
+  const normalizedEditAutoAspectResolution = normalizeResolutionSelection(editAutoAspectResolution || "1k", capabilityInput);
+  const effectiveEditAutoAspectResolution = normalizedEditAutoAspectResolution === "auto"
+    ? "1k"
+    : normalizedEditAutoAspectResolution;
+  const manualEditAutoAspectActive = mode === "edit" && editAutoAspectResolution !== "";
+  const editAutoAspectComputedSizeLabel = manualEditAutoAspectActive && referenceDimensions
+    ? formatSizeValue(buildReferenceResolutionSizeSelection(
+        effectiveEditAutoAspectResolution,
+        referenceDimensions,
+        capabilityInput,
+        customAspectRatios,
+      ))
+    : null;
   const activeAspect = exactSize ? null : derivedAspect;
   const activeResolution = exactSize ? null : derivedResolution;
   const availableResolutions = availableResolutionPresets(capabilityInput);
-  const activeAspectLabel = exactSize ? "精确尺寸" : aspectPresetLabel(derivedAspect, sizingAspectRatios);
-  const activeResolutionLabel = exactSize ? exactSize.label : (derivedResolution === "auto" ? "自动" : derivedResolution.toUpperCase());
+  const activeAspectLabel = manualEditAutoAspectActive
+    ? "按源图自动适配"
+    : exactSize
+      ? "精确尺寸"
+      : aspectPresetLabel(derivedAspect, sizingAspectRatios);
+  const activeResolutionLabel = manualEditAutoAspectActive
+    ? effectiveEditAutoAspectResolution.toUpperCase()
+    : exactSize
+      ? exactSize.label
+      : (derivedResolution === "auto" ? "自动" : derivedResolution.toUpperCase());
   const activeQualityLabel = qualityOptions.find((item) => item.value === normalizedQuality)?.label ?? normalizedQuality;
   const editSourceLabel = sources.length > 0 ? `${sources.length} 张已添加` : currentImage?.savedPath ? "使用当前画板" : "未添加";
 
@@ -115,6 +139,14 @@ export function AndroidPadComposePanel({
       sizingAspectRatios,
       referenceAspectPreset,
     ));
+  };
+
+  const handleEditAutoAspectToggle = (enabled: boolean) => {
+    setField("editAutoAspectResolution", enabled ? effectiveEditAutoAspectResolution : "");
+  };
+
+  const handleEditAutoAspectResolutionSelect = (resolution: typeof effectiveEditAutoAspectResolution) => {
+    setField("editAutoAspectResolution", resolution);
   };
 
   const handleModeChange = (next: Mode) => {
@@ -277,6 +309,7 @@ export function AndroidPadComposePanel({
             aspectOptions={aspectOptions}
             activeResolution={activeResolution}
             activeResolutionLabel={activeResolutionLabel}
+            editAutoAspectComputedSizeLabel={editAutoAspectComputedSizeLabel}
             exactSizeLabel={exactSize?.label ?? null}
             activeQualityLabel={activeQualityLabel}
             activeStyleLabel={activeStyleLabel}
@@ -285,10 +318,15 @@ export function AndroidPadComposePanel({
             availableResolutions={availableResolutions}
             apiMode={apiMode}
             batchCount={batchCount}
+            effectiveEditAutoAspectResolution={effectiveEditAutoAspectResolution}
+            handleEditAutoAspectResolutionSelect={handleEditAutoAspectResolutionSelect}
+            handleEditAutoAspectToggle={handleEditAutoAspectToggle}
             handleAspectSelect={handleAspectSelect}
             handleResolutionSelect={handleResolutionSelect}
             imageModelID={imageModelID}
             isMediumPad={isMediumPad}
+            manualEditAutoAspectActive={manualEditAutoAspectActive}
+            mode={mode}
             needsUpstreamSetup={needsUpstreamSetup}
             onOpenCustomAspectRatioModal={openCustomAspectRatioModal}
             onOpenCustomSizeModal={openCustomSizeModal}

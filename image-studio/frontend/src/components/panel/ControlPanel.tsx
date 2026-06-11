@@ -22,11 +22,14 @@ import {
   availableResolutionPresets,
   buildAspectSizeSelection,
   buildReferenceAspectRatio,
+  buildReferenceResolutionSizeSelection,
   buildResolutionSizeSelection,
   deriveExactSizeSelection,
   deriveAspectPreset,
   deriveResolutionPreset,
+  formatSizeValue,
   listAspectPresetOptions,
+  normalizeResolutionSelection,
   normalizeSizeSelection,
   supportsCustomAspectRatios,
   supportsPreciseSizeControl,
@@ -40,7 +43,7 @@ export function ControlPanel({
   const {
     apiKey, mode, prompt, background, imageStyle, inputFidelity, moderation, negativePrompt, outputCompression, size, quality, seed, styleTag,
     userIdentifier, partialImages,
-    outputFormat, batchCount, editSourceMode, batchProcess, loopGeneration,
+    outputFormat, batchCount, editSourceMode, editAutoAspectResolution, batchProcess, loopGeneration,
     sources, currentImage,
     errorMessage, errorCanRetry, errorRawPath, isRunning, lastPayload, isTestingKey, isOptimizingPrompt,
     apiMode, requestPolicy, baseURL, profiles, imageModelID,
@@ -96,10 +99,29 @@ export function ControlPanel({
   const exactSize = deriveExactSizeSelection(normalizedSize, capabilityInput, sizingAspectRatios);
   const derivedAspect = deriveAspectPreset(normalizedSize, sizingAspectRatios);
   const derivedResolution = deriveResolutionPreset(normalizedSize);
+  const normalizedEditAutoAspectResolution = normalizeResolutionSelection(editAutoAspectResolution || "1k", capabilityInput);
+  const effectiveEditAutoAspectResolution = normalizedEditAutoAspectResolution === "auto"
+    ? "1k"
+    : normalizedEditAutoAspectResolution;
+  const manualEditAutoAspectActive = mode === "edit" && editSourceMode === "manual" && editAutoAspectResolution !== "";
+  const editAutoAspectComputedSizeLabel = manualEditAutoAspectActive && referenceDimensions
+    ? formatSizeValue(buildReferenceResolutionSizeSelection(
+        effectiveEditAutoAspectResolution,
+        referenceDimensions,
+        capabilityInput,
+        customAspectRatios,
+      ))
+    : null;
   const activeAspect = exactSize ? null : derivedAspect;
   const activeResolution = exactSize ? null : derivedResolution;
-  const activeAspectLabel = exactSize ? "精确尺寸" : aspectPresetLabel(derivedAspect, sizingAspectRatios);
-  const activeResolutionLabel = exactSize
+  const activeAspectLabel = manualEditAutoAspectActive
+    ? "按源图自动适配"
+    : exactSize
+      ? "精确尺寸"
+      : aspectPresetLabel(derivedAspect, sizingAspectRatios);
+  const activeResolutionLabel = manualEditAutoAspectActive
+    ? effectiveEditAutoAspectResolution.toUpperCase()
+    : exactSize
     ? exactSize.label
     : (RESOLUTION_PRESETS.find((item) => item.value === derivedResolution)?.label ?? derivedResolution);
   const activeQualityLabel = qualityOptions.find((item) => item.value === normalizedQuality)?.label ?? normalizedQuality;
@@ -148,6 +170,17 @@ export function ControlPanel({
       sizingAspectRatios,
       referenceAspectPreset,
     ));
+  }
+
+  function handleEditAutoAspectToggle(enabled: boolean) {
+    setField(
+      "editAutoAspectResolution",
+      enabled ? effectiveEditAutoAspectResolution : "",
+    );
+  }
+
+  function handleEditAutoAspectResolutionSelect(resolution: typeof effectiveEditAutoAspectResolution) {
+    setField("editAutoAspectResolution", resolution);
   }
 
   async function chooseBatchOutputDir() {
@@ -252,7 +285,12 @@ export function ControlPanel({
           clearSources={clearSources}
           currentImageSavedPath={currentImage?.savedPath ?? null}
           editSourceMode={editSourceMode}
+          editAutoAspectResolution={editAutoAspectResolution}
+          effectiveEditAutoAspectResolution={effectiveEditAutoAspectResolution}
+          editAutoAspectComputedSizeLabel={editAutoAspectComputedSizeLabel}
           handleAspectSelect={handleAspectSelect}
+          handleEditAutoAspectResolutionSelect={handleEditAutoAspectResolutionSelect}
+          handleEditAutoAspectToggle={handleEditAutoAspectToggle}
           handleResolutionSelect={handleResolutionSelect}
           imageModelID={imageModelID}
           allowCustomAspectRatios={allowCustomAspectRatios}
@@ -297,7 +335,12 @@ export function ControlPanel({
           clearSources={clearSources}
           currentImageSavedPath={currentImage?.savedPath ?? null}
           editSourceMode={editSourceMode}
+          editAutoAspectResolution={editAutoAspectResolution}
+          effectiveEditAutoAspectResolution={effectiveEditAutoAspectResolution}
+          editAutoAspectComputedSizeLabel={editAutoAspectComputedSizeLabel}
           handleAspectSelect={handleAspectSelect}
+          handleEditAutoAspectResolutionSelect={handleEditAutoAspectResolutionSelect}
+          handleEditAutoAspectToggle={handleEditAutoAspectToggle}
           handleResolutionSelect={handleResolutionSelect}
           imageModelID={imageModelID}
           allowCustomAspectRatios={allowCustomAspectRatios}
@@ -342,11 +385,16 @@ export function ControlPanel({
           sources={sources}
           currentImage={currentImage}
           editSourceMode={editSourceMode}
+          editAutoAspectResolution={editAutoAspectResolution}
+          effectiveEditAutoAspectResolution={effectiveEditAutoAspectResolution}
+          editAutoAspectComputedSizeLabel={editAutoAspectComputedSizeLabel}
           apiMode={apiMode}
           requestPolicy={requestPolicy}
           imageModelID={imageModelID}
           setField={setField as any}
           handleAspectSelect={handleAspectSelect}
+          handleEditAutoAspectResolutionSelect={handleEditAutoAspectResolutionSelect}
+          handleEditAutoAspectToggle={handleEditAutoAspectToggle}
           handleResolutionSelect={handleResolutionSelect}
           allowCustomAspectRatios={allowCustomAspectRatios}
           allowPreciseSizeControl={allowPreciseSizeControl}
