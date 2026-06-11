@@ -14,13 +14,19 @@ export function MacComposeStyleAndSize({
   aspectOptions,
   activeResolution,
   batchAutoAspectActive = false,
+  manualEditAutoAspectActive = false,
+  editAutoAspectComputedSizeLabel,
+  effectiveEditAutoAspectResolution,
   exactSizeLabel,
   allowCustomAspectRatios,
   allowPreciseSizeControl,
   apiMode,
   availableResolutions,
   batchCount,
+  mode,
   handleAspectSelect,
+  handleEditAutoAspectResolutionSelect,
+  handleEditAutoAspectToggle,
   handleResolutionSelect,
   imageModelID,
   onOpenCustomAspectRatioModal,
@@ -37,13 +43,19 @@ export function MacComposeStyleAndSize({
   aspectOptions: AspectPresetOption[];
   activeResolution: ResolutionPreset | null;
   batchAutoAspectActive?: boolean;
+  manualEditAutoAspectActive?: boolean;
+  editAutoAspectComputedSizeLabel?: string | null;
+  effectiveEditAutoAspectResolution: Exclude<ResolutionPreset, "auto">;
   exactSizeLabel?: string | null;
   allowCustomAspectRatios: boolean;
   allowPreciseSizeControl: boolean;
   apiMode: APIMode;
   availableResolutions: ResolutionPreset[];
   batchCount: number;
+  mode: "generate" | "edit";
   handleAspectSelect: (aspect: AspectPreset) => void;
+  handleEditAutoAspectResolutionSelect: (resolution: Exclude<ResolutionPreset, "auto">) => void;
+  handleEditAutoAspectToggle: (enabled: boolean) => void;
   handleResolutionSelect: (resolution: ResolutionPreset) => void;
   imageModelID: string;
   onOpenCustomAspectRatioModal: () => void;
@@ -56,6 +68,12 @@ export function MacComposeStyleAndSize({
   Seg: (props: { children: React.ReactNode }) => React.ReactNode;
   SegItem: (props: { active: boolean; onClick: () => void; children: React.ReactNode }) => React.ReactNode;
 }) {
+  const hideRegularSizeControls = batchAutoAspectActive || manualEditAutoAspectActive;
+  const editAutoResolutionOptions = RESOLUTION_PRESETS.filter(
+    (item): item is { value: Exclude<ResolutionPreset, "auto">; label: string } =>
+      item.value !== "auto" && availableResolutions.includes(item.value),
+  );
+
   return (
     <>
       <div>
@@ -83,7 +101,50 @@ export function MacComposeStyleAndSize({
         </div>
       </div>
 
-      {!batchAutoAspectActive ? (
+      {mode === "edit" ? (
+        <div>
+          <div className="mb-2 text-[12px] text-zinc-500">源图尺寸策略</div>
+          <Seg>
+            <SegItem active={!manualEditAutoAspectActive} onClick={() => handleEditAutoAspectToggle(false)}>
+              沿用当前比例
+            </SegItem>
+            <SegItem active={manualEditAutoAspectActive} onClick={() => handleEditAutoAspectToggle(true)}>
+              按源图比例自动适配
+            </SegItem>
+          </Seg>
+          {manualEditAutoAspectActive ? (
+            <>
+              <div className="mt-2 grid grid-cols-5 gap-2.5">
+                {editAutoResolutionOptions.map((item) => (
+                  <button
+                    key={item.value}
+                    type="button"
+                    onClick={() => handleEditAutoAspectResolutionSelect(item.value)}
+                    className={`rounded-[14px] border px-2 py-2.5 text-[12px] font-semibold transition-colors ${
+                      effectiveEditAutoAspectResolution === item.value
+                        ? "border-[color:var(--accent)]/35 bg-white text-[var(--accent)] shadow-sm dark:bg-zinc-900"
+                        : "border-black/[0.08] bg-white/70 text-zinc-600 hover:border-[color:var(--accent)]/30 hover:text-zinc-900 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-zinc-300"
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-1.5 text-[10px] leading-relaxed text-zinc-500 dark:text-zinc-400">
+                {editAutoAspectComputedSizeLabel
+                  ? `当前会按源图比例自动换算，目标分辨率档位 ${effectiveEditAutoAspectResolution.toUpperCase()}，实际提交尺寸 ${editAutoAspectComputedSizeLabel}。`
+                  : `开启后会按当前源图比例自动换算尺寸，并统一使用 ${effectiveEditAutoAspectResolution.toUpperCase()} 分辨率档位。`}
+              </p>
+            </>
+          ) : (
+            <p className="mt-1.5 text-[10px] leading-relaxed text-zinc-500 dark:text-zinc-400">
+              关闭后使用下面的普通比例和分辨率预设。
+            </p>
+          )}
+        </div>
+      ) : null}
+
+      {!hideRegularSizeControls ? (
         <>
           <div>
             <div className="mb-2 flex items-center justify-between">
@@ -163,7 +224,9 @@ export function MacComposeStyleAndSize({
         </>
       ) : (
         <div className="rounded-[14px] border border-[color:var(--accent)]/16 bg-[var(--accent-soft)]/55 px-3 py-2 text-[11px] leading-5 text-zinc-600 dark:text-zinc-300">
-          当前批处理已开启“按源图比例自动适配”，本批任务的比例与分辨率由“批处理图生图”区统一控制。这里的普通比例/分辨率预设已暂时隐藏，避免出现两套尺寸入口。
+          {batchAutoAspectActive
+            ? "当前批处理已开启“按源图比例自动适配”，本批任务的比例与分辨率由“批处理图生图”区统一控制。这里的普通比例/分辨率预设已暂时隐藏，避免出现两套尺寸入口。"
+            : "当前普通图生图已开启“按源图比例自动适配”，比例会跟随源图自动计算，分辨率由上面的源图尺寸策略统一控制。这里的普通比例/分辨率预设已暂时隐藏，避免出现两套尺寸入口。"}
         </div>
       )}
 

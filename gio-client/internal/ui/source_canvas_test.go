@@ -67,3 +67,26 @@ func TestCompareSourcePathOnCanvasTogglesMainSourceComparison(t *testing.T) {
 		t.Fatalf("compare should be cleared, got %#v", app.compare)
 	}
 }
+
+func TestImportImagePathAsEditSourcePromotesImportedImageToSource(t *testing.T) {
+	sourcePath := filepath.Join(t.TempDir(), "imported-source.png")
+	writeSolidTestPNG(t, sourcePath, color.NRGBA{R: 0x88, G: 0x66, B: 0x44, A: 0xff})
+
+	app := &App{mode: string(client.ModeGenerate), batchMode: true}
+	if err := app.importImagePathAsEditSource(sourcePath); err != nil {
+		t.Fatalf("importImagePathAsEditSource: %v", err)
+	}
+	if app.mode != string(client.ModeEdit) {
+		t.Fatalf("mode=%q want edit", app.mode)
+	}
+	if app.batchMode {
+		t.Fatal("batchMode should reset to false after import")
+	}
+	if app.result.SavedPath != sourcePath || app.result.SourceEvent != "import" {
+		t.Fatalf("result=%#v", app.result)
+	}
+	paths := app.sourcePaths()
+	if len(paths) != 1 || paths[0] != sourcePath {
+		t.Fatalf("sourcePaths=%v want [%s]", paths, sourcePath)
+	}
+}

@@ -208,6 +208,7 @@ export function createImageActions(store: StateAdapter) {
         mode: item.mode,
         size: item.size,
         quality: item.quality,
+        editAutoAspectResolution: "",
       };
       if (item.seed !== undefined) patch.seed = item.seed;
       if (item.negativePrompt !== undefined) patch.negativePrompt = item.negativePrompt;

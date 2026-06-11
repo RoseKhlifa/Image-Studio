@@ -6,7 +6,13 @@ import type { HistoryItem, Workspace } from "../types/domain";
 import type { StudioState } from "./studioStore.types";
 import { historyItemsByIds, saveActiveWorkspaceSnapshot } from "./studioStore.runtime";
 import { streamPreviewItemFromWorkspace } from "./studioStore.streamPreview";
-import { defaultBatchProcessConfig, defaultLoopGenerationConfig, normalizeBatchProcessConfig, normalizeLoopGenerationConfig } from "./workspaceRuntime";
+import {
+  defaultBatchProcessConfig,
+  defaultLoopGenerationConfig,
+  normalizeAutoAspectResolutionPreset,
+  normalizeBatchProcessConfig,
+  normalizeLoopGenerationConfig,
+} from "./workspaceRuntime";
 
 type StateAdapter = {
   getState: () => StudioState;
@@ -39,6 +45,7 @@ export function createWorkspaceActions(store: StateAdapter) {
         batchCount: 1,
         selectedPresetId: null,
         editSourceMode: "manual",
+        editAutoAspectResolution: "",
         batchProcess: defaultBatchProcessConfig(),
         loopGeneration: defaultLoopGenerationConfig(),
         sources: [],
@@ -77,6 +84,7 @@ export function createWorkspaceActions(store: StateAdapter) {
         batchCount: newWorkspace.batchCount,
         selectedPresetId: newWorkspace.selectedPresetId ?? null,
         editSourceMode: newWorkspace.editSourceMode,
+        editAutoAspectResolution: normalizeAutoAspectResolutionPreset(newWorkspace.editAutoAspectResolution),
         batchProcess: normalizeBatchProcessConfig(newWorkspace.batchProcess),
         loopGeneration: normalizeLoopGenerationConfig(newWorkspace.loopGeneration),
         sources: newWorkspace.sources,
@@ -133,6 +141,7 @@ export function createWorkspaceActions(store: StateAdapter) {
         batchCount: target.batchCount,
         selectedPresetId: target.selectedPresetId ?? null,
         editSourceMode: target.editSourceMode,
+        editAutoAspectResolution: normalizeAutoAspectResolutionPreset(target.editAutoAspectResolution),
         batchProcess: normalizeBatchProcessConfig(target.batchProcess),
         loopGeneration: normalizeLoopGenerationConfig(target.loopGeneration),
         sources: target.sources,
@@ -200,6 +209,7 @@ export function createWorkspaceActions(store: StateAdapter) {
           batchCount: next.batchCount,
           selectedPresetId: next.selectedPresetId ?? null,
           editSourceMode: next.editSourceMode,
+          editAutoAspectResolution: normalizeAutoAspectResolutionPreset(next.editAutoAspectResolution),
           batchProcess: normalizeBatchProcessConfig(next.batchProcess),
           loopGeneration: normalizeLoopGenerationConfig(next.loopGeneration),
           sources: next.sources,

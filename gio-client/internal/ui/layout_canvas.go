@@ -641,7 +641,7 @@ func (a *App) resultSurface(gtx layout.Context, snap snapshot) layout.Dimensions
 		if err != nil {
 			a.appendLog("选择图片失败: " + err.Error())
 		} else if len(paths) > 0 {
-			if err := a.replaceCurrentResultWithPath(paths[0], "import"); err != nil {
+			if err := a.importImagePathAsEditSource(paths[0]); err != nil {
 				a.appendLog("载入本地图片失败: " + err.Error())
 			}
 		}

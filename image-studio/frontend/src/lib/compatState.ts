@@ -1,5 +1,6 @@
 import { LoadCompatibilityState, SaveCompatibilityState } from "../platform/runtime/host.ts";
 import type {
+  AutoAspectResolutionPreset,
   BatchProcessConfig,
   BackgroundValue,
   CompletionNotificationConfig,
@@ -486,11 +487,18 @@ function normalizePresets(raw: unknown): Preset[] {
       imageStyle: source.imageStyle === undefined ? undefined : normalizeImageStyle(source.imageStyle),
       moderation: source.moderation === undefined ? undefined : normalizeModeration(source.moderation),
       styleTag: typeof source.styleTag === "string" ? source.styleTag : undefined,
+      editAutoAspectResolution: normalizeAutoAspectResolutionPreset(source.editAutoAspectResolution),
       kernelRuntimeMode: normalizeKernelRuntimeMode(source.kernelRuntimeMode),
       batchCount: normalizeBatchCount(source.batchCount),
     });
   }
   return out;
+}
+
+function normalizeAutoAspectResolutionPreset(value: unknown): AutoAspectResolutionPreset {
+  return value === "256" || value === "512" || value === "1k" || value === "2k" || value === "4k"
+    ? value
+    : "";
 }
 
 function normalizeTheme(value: unknown): ThemeMode {

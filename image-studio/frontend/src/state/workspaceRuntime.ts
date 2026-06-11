@@ -1,4 +1,5 @@
 import type {
+  AutoAspectResolutionPreset,
   BatchProcessAutoAspectResolution,
   BatchProcessSourceImage,
   BatchProcessConfig,
@@ -104,10 +105,14 @@ export function defaultBatchProcessConfig(): BatchProcessConfig {
   };
 }
 
-export function normalizeBatchProcessAutoAspectResolution(value: unknown): BatchProcessAutoAspectResolution {
+export function normalizeAutoAspectResolutionPreset(value: unknown): AutoAspectResolutionPreset {
   return value === "256" || value === "512" || value === "1k" || value === "2k" || value === "4k"
     ? value
     : "";
+}
+
+export function normalizeBatchProcessAutoAspectResolution(value: unknown): BatchProcessAutoAspectResolution {
+  return normalizeAutoAspectResolutionPreset(value);
 }
 
 export function normalizeBatchProcessConcurrency(value: unknown): number {
@@ -196,6 +201,7 @@ export function patchWorkspaceRuntime(workspaces: Workspace[], workspaceId: stri
     const next: Workspace = { ...w };
     if (patch.name !== undefined) next.name = patch.name;
     if (patch.loopGeneration !== undefined) next.loopGeneration = normalizeLoopGenerationConfig(patch.loopGeneration);
+    if (patch.editAutoAspectResolution !== undefined) next.editAutoAspectResolution = normalizeAutoAspectResolutionPreset(patch.editAutoAspectResolution);
     if (patch.batchProcess !== undefined) next.batchProcess = normalizeBatchProcessConfig(patch.batchProcess);
     if (patch.currentImageId !== undefined) next.currentImageId = patch.currentImageId;
     if (patch.batchResultIds !== undefined) next.batchResultIds = patch.batchResultIds;

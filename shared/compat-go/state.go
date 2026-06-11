@@ -94,6 +94,7 @@ type Preset struct {
 	ImageStyle        string `json:"imageStyle,omitempty"`
 	Moderation        string `json:"moderation,omitempty"`
 	StyleTag          string `json:"styleTag,omitempty"`
+	EditAutoAspectRes string `json:"editAutoAspectResolution,omitempty"`
 	KernelRuntimeMode string `json:"kernelRuntimeMode,omitempty"`
 	BatchCount        int    `json:"batchCount"`
 }

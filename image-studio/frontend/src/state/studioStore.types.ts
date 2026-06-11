@@ -4,6 +4,7 @@ import type {
   Annotation,
   AppUpdateInfo,
   APIMode,
+  AutoAspectResolutionPreset,
   BatchProcessConfig,
   BackgroundValue,
   BatchProcessSourceImage,
@@ -104,6 +105,7 @@ export interface StudioState {
   activeProfileId: string;
   sources: SourceImage[];
   editSourceMode: EditSourceMode;
+  editAutoAspectResolution: AutoAspectResolutionPreset;
   batchProcess: BatchProcessConfig;
   runningJobs: string[];
   jobsTotal: number;
