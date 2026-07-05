@@ -86,7 +86,7 @@ func newHistoryPromptGroupWithText(key string, compactPrompt string, item *share
 
 func finalizeHistoryPromptGroup(group *historyPromptGroup) {
 	prompt := strings.TrimSpace(group.Prompt)
-	group.Title = "同提示词结果"
+	group.Title = "(无 prompt)"
 	group.PromptPreview = "(无 prompt)"
 	if prompt != "" {
 		group.Title = prompt

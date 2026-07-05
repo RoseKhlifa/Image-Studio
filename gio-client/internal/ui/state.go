@@ -2,8 +2,10 @@ package ui
 
 import (
 	"fmt"
+	"image"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -146,12 +148,11 @@ func (a *App) closeSavePrompt() {
 func (a *App) openHistoryTimeline() {
 	a.mu.Lock()
 	a.historyTimelineOpen = true
-	a.historyTimelineModeFilter = a.historyModeFilter
-	a.historyTimelineDateFilter = a.historyDateFilter
 	a.historyTimelineModePickerOpen = false
 	a.historyTimelineDatePickerOpen = false
-	a.historyTimelineQueryInput.SetText(a.historyQueryInput.Text())
 	a.expandedPromptGroups = map[string]bool{}
+	a.historyActionMenuItem = sharedCompat.HistoryItem{}
+	a.historyActionMenuContext = ""
 	a.mu.Unlock()
 	a.invalidateNow()
 }
@@ -162,6 +163,8 @@ func (a *App) closeHistoryTimeline() {
 	a.historyTimelineModePickerOpen = false
 	a.historyTimelineDatePickerOpen = false
 	a.expandedPromptGroups = map[string]bool{}
+	a.historyActionMenuItem = sharedCompat.HistoryItem{}
+	a.historyActionMenuContext = ""
 	a.mu.Unlock()
 	a.invalidateNow()
 }
@@ -474,6 +477,124 @@ func (a *App) closeRawResponseModal() {
 	a.invalidateNow()
 }
 
+func (a *App) openAdvancedPanel() {
+	a.mu.Lock()
+	a.advancedOpen = true
+	a.mu.Unlock()
+	a.invalidateNow()
+}
+
+func (a *App) closeAdvancedPanel() {
+	if err := a.persistAdvancedPanelPrefs(); err != nil {
+		a.appendLog("保存高级参数面板偏好失败: " + err.Error())
+	}
+	a.mu.Lock()
+	a.advancedOpen = false
+	a.mu.Unlock()
+	a.invalidateNow()
+}
+
+func (a *App) toggleAdvancedGroup(group string) {
+	a.mu.Lock()
+	switch strings.TrimSpace(group) {
+	case "core":
+		a.advancedCoreGroupOpen = !a.advancedCoreGroupOpen
+	case "output":
+		a.advancedOutputGroupOpen = !a.advancedOutputGroupOpen
+	case "strategy":
+		a.advancedStrategyGroupOpen = !a.advancedStrategyGroupOpen
+	case "stream":
+		a.advancedStreamGroupOpen = !a.advancedStreamGroupOpen
+	default:
+		a.mu.Unlock()
+		return
+	}
+	a.mu.Unlock()
+	if err := a.persistAdvancedPanelPrefs(); err != nil {
+		a.appendLog("保存高级参数面板偏好失败: " + err.Error())
+	}
+	a.invalidateNow()
+}
+
+func (a *App) openHistoryActionMenu(item sharedCompat.HistoryItem, context string) {
+	if strings.TrimSpace(item.ID) == "" && strings.TrimSpace(item.SavedPath) == "" {
+		return
+	}
+	a.mu.Lock()
+	anchor := a.lastGlobalPressPos
+	if anchor == (image.Point{}) {
+		anchor = a.lastGlobalPointer
+	}
+	if anchor == (image.Point{}) {
+		anchor = image.Pt(240, 180)
+	}
+	a.historyActionMenuItem = item
+	a.historyActionMenuContext = strings.TrimSpace(context)
+	a.historyActionMenuPos = anchor
+	a.mu.Unlock()
+	a.invalidateNow()
+}
+
+func (a *App) closeHistoryActionMenu() {
+	a.mu.Lock()
+	a.historyActionMenuItem = sharedCompat.HistoryItem{}
+	a.historyActionMenuContext = ""
+	a.historyActionMenuPos = image.Point{}
+	a.mu.Unlock()
+	a.invalidateNow()
+}
+
+func (a *App) beginNativeFileDrag(path string) error {
+	if runtime.GOOS != "darwin" {
+		return fmt.Errorf("当前平台不支持原生文件拖出")
+	}
+	path = strings.TrimSpace(path)
+	if path == "" || isVirtualImagePath(path) {
+		return fmt.Errorf("当前结果没有可拖出的本地文件")
+	}
+	a.mu.Lock()
+	view := a.darwinAppKitView
+	window := a.window
+	a.mu.Unlock()
+	if view == 0 {
+		return fmt.Errorf("当前窗口还没有可用的原生视图句柄")
+	}
+	if window == nil {
+		return fmt.Errorf("当前窗口未初始化")
+	}
+	var dragErr error
+	window.Run(func() {
+		dragErr = beginNativeFileDragDarwin(view, path)
+	})
+	return dragErr
+}
+
+func (a *App) prepareHistoryItemForNativeDrag(item sharedCompat.HistoryItem) (sharedCompat.HistoryItem, string, error) {
+	path := strings.TrimSpace(item.SavedPath)
+	if path != "" && !isVirtualImagePath(path) {
+		return item, path, nil
+	}
+	if !canSaveHistoryItem(item) {
+		return item, "", fmt.Errorf("当前结果没有可拖出的本地文件")
+	}
+	next, err := a.materializeHistoryItemForLocalPath(item)
+	if err != nil {
+		return item, "", err
+	}
+	return next, strings.TrimSpace(next.SavedPath), nil
+}
+
+func (a *App) dragOutHistoryItem(item sharedCompat.HistoryItem) (sharedCompat.HistoryItem, error) {
+	next, path, err := a.prepareHistoryItemForNativeDrag(item)
+	if err != nil {
+		return item, err
+	}
+	if err := a.beginNativeFileDrag(path); err != nil {
+		return next, err
+	}
+	return next, nil
+}
+
 func (a *App) readSnapshot() snapshot {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -546,6 +667,8 @@ func (a *App) readSnapshot() snapshot {
 		PromptImportRegisterOpen:  a.promptImportRegisterOpen,
 		PromptImportRegisterBusy:  a.promptImportRegisterBusy,
 		PromptImportRegisterNote:  a.promptImportRegisterNote,
+		HistoryActionMenuItem:     a.historyActionMenuItem,
+		HistoryActionMenuContext:  a.historyActionMenuContext,
 	}
 	a.snapshotCache = snap
 	a.snapshotReady = true

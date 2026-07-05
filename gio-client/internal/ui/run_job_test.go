@@ -15,14 +15,17 @@ import (
 )
 
 func TestRequestedRunConcurrencyUsesLoopSetting(t *testing.T) {
-	if got := requestedRunConcurrency(4, false, 0); got != 4 {
-		t.Fatalf("requestedRunConcurrency(batch)= %d want 4", got)
+	if got := requestedRunConcurrency(4, true, 2, false, 0); got != 2 {
+		t.Fatalf("requestedRunConcurrency(batch)= %d want 2", got)
 	}
-	if got := requestedRunConcurrency(10, true, 3); got != 3 {
+	if got := requestedRunConcurrency(10, false, 0, true, 3); got != 3 {
 		t.Fatalf("requestedRunConcurrency(loop)= %d want 3", got)
 	}
-	if got := requestedRunConcurrency(2, true, 9); got != 2 {
+	if got := requestedRunConcurrency(2, false, 0, true, 9); got != 2 {
 		t.Fatalf("requestedRunConcurrency(loop clamped)= %d want 2", got)
+	}
+	if got := requestedRunConcurrency(2, true, 9, true, 1); got != 2 {
+		t.Fatalf("requestedRunConcurrency(batch overrides loop)= %d want 2", got)
 	}
 }
 

@@ -1961,7 +1961,7 @@ func filteredHistoryItems(
 	query = normalizeHistorySearchQuery(query)
 	modeFilter = strings.TrimSpace(modeFilter)
 	dateFilter = strings.TrimSpace(dateFilter)
-	dateKind, dateCutoff := prepareHistoryDateFilter(dateFilter, now)
+	dateKind, dateStart, dateEnd := prepareHistoryDateFilter(dateFilter, "", now)
 	if query == "" && modeFilter == "all" && dateFilter == "all" {
 		return items
 	}
@@ -1970,7 +1970,7 @@ func filteredHistoryItems(
 		if modeFilter != "" && modeFilter != "all" && item.Mode != modeFilter {
 			continue
 		}
-		if !matchHistoryDatePrepared(item.CreatedAt, dateKind, dateCutoff) {
+		if !matchHistoryDatePrepared(item.CreatedAt, dateKind, dateStart, dateEnd) {
 			continue
 		}
 		if !matchHistoryQueryNormalized(item, query) {
@@ -2740,16 +2740,7 @@ func (a *App) applyHistoryThumbBackfill(thumbUpdates map[string]historyMediaBack
 }
 
 func (a *App) applyPromptSuggestion(text string) {
-	current := strings.TrimSpace(a.promptInput.Text())
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return
-	}
-	if current == "" {
-		a.promptInput.SetText(text)
-	} else {
-		a.promptInput.SetText(current + "\n" + text)
-	}
+	a.promptInput.SetText(appendPromptTemplateText(a.promptInput.Text(), text))
 	a.promptHelperOpen = false
 	a.invalidateNow()
 }
@@ -2865,10 +2856,12 @@ func (a *App) applyPreset(preset sharedCompat.Preset) {
 		a.moderation = moderation
 	}
 	a.styleTag = strings.TrimSpace(preset.StyleTag)
+	a.editAutoAspectResolution = strings.TrimSpace(preset.EditAutoAspectRes)
 	if runtimeMode := strings.TrimSpace(preset.KernelRuntimeMode); runtimeMode != "" {
 		a.kernelRuntimeMode = normalizeKernelRuntimeMode(runtimeMode)
 	}
 	a.batchCount = normalizeBatchCount(preset.BatchCount)
+	a.selectedPresetID = strings.TrimSpace(preset.ID)
 	a.promptHelperOpen = false
 	a.appendLog("已应用预设: " + strings.TrimSpace(preset.Name))
 	a.invalidateNow()
@@ -3086,6 +3079,10 @@ func (a *App) deleteHistoryItem(id string) {
 	if a.activePromptGroup.Key != "" && historyPromptGroupContains(a.activePromptGroup, id) {
 		a.activePromptGroup = historyPromptGroup{}
 	}
+	if a.historyActionMenuItem.ID == id {
+		a.historyActionMenuItem = sharedCompat.HistoryItem{}
+		a.historyActionMenuContext = ""
+	}
 	a.appendLogLocked("已删除历史项: " + id)
 	a.mu.Unlock()
 	a.invalidateNow()
@@ -3109,6 +3106,8 @@ func (a *App) persistThemeMode(mode string) {
 func (a *App) openPromptGroup(group historyPromptGroup) {
 	a.mu.Lock()
 	a.activePromptGroup = group
+	a.historyActionMenuItem = sharedCompat.HistoryItem{}
+	a.historyActionMenuContext = ""
 	a.pruneImageCacheLocked()
 	a.mu.Unlock()
 	a.invalidateNow()
@@ -3117,6 +3116,8 @@ func (a *App) openPromptGroup(group historyPromptGroup) {
 func (a *App) closePromptGroup() {
 	a.mu.Lock()
 	a.activePromptGroup = historyPromptGroup{}
+	a.historyActionMenuItem = sharedCompat.HistoryItem{}
+	a.historyActionMenuContext = ""
 	a.pruneImageCacheLocked()
 	a.mu.Unlock()
 	a.invalidateNow()
@@ -3516,6 +3517,8 @@ func (a *App) openResultDetail(item sharedCompat.HistoryItem) {
 	}
 	a.mu.Lock()
 	a.activeResultDetail = item
+	a.historyActionMenuItem = sharedCompat.HistoryItem{}
+	a.historyActionMenuContext = ""
 	a.mu.Unlock()
 	a.invalidateNow()
 }

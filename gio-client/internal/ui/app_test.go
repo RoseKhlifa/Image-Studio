@@ -8,12 +8,17 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	"gioui.org/f32"
+	"gioui.org/io/key"
+	"gioui.org/layout"
+	"gioui.org/widget"
 	"github.com/yuanhua/image-gptcodex/pkg/client"
+	giodCompat "image-studio/gio-client/internal/compat"
 	"image-studio/gio-client/internal/kernel"
 	sharedCompat "image-studio/shared/compat"
 )
@@ -244,6 +249,153 @@ func TestCurrentConfigIncludesResponsesTransportAndReasoning(t *testing.T) {
 	}
 	if cfg.ReasoningEffort != "high" {
 		t.Fatalf("reasoning effort=%q want high", cfg.ReasoningEffort)
+	}
+}
+
+func TestCurrentConfigNormalizesUnsupportedSizeForCurrentModel(t *testing.T) {
+	app := &App{
+		api:    string(client.APIModeResponses),
+		policy: string(client.RequestPolicyOpenAI),
+		size:   "2048x1152",
+	}
+	app.imageModelInput.SetText("dall-e-3")
+
+	cfg := app.currentConfig()
+	if cfg.Size != "1024x1024" {
+		t.Fatalf("cfg.Size=%q want 1024x1024", cfg.Size)
+	}
+
+	app.size = "auto"
+	cfg = app.currentConfig()
+	if cfg.Size != "1024x1024" {
+		t.Fatalf("cfg.Size for dalle3 auto=%q want 1024x1024", cfg.Size)
+	}
+
+	app.imageModelInput.SetText("gpt-image-1.5")
+	cfg = app.currentConfig()
+	if cfg.Size != "auto" {
+		t.Fatalf("cfg.Size for legacy gpt-image auto=%q want auto", cfg.Size)
+	}
+}
+
+func TestCurrentConfigUsesManualEditAutoAspectForSourceImage(t *testing.T) {
+	dir := t.TempDir()
+	sourcePath := filepath.Join(dir, "source-21x9.png")
+	writeSizedSolidTestPNG(t, sourcePath, 2100, 900, color.NRGBA{R: 0x44, G: 0x77, B: 0xaa, A: 0xff})
+
+	app := &App{
+		mode:                     string(client.ModeEdit),
+		api:                      string(client.APIModeResponses),
+		policy:                   string(client.RequestPolicyOpenAI),
+		editAutoAspectResolution: "1k",
+	}
+	app.imageModelInput.SetText("gpt-image-2")
+	app.sourcePathsInput.SetText(sourcePath)
+
+	cfg := app.currentConfig()
+	if cfg.Size != "1536x656" {
+		t.Fatalf("cfg.Size=%q want 1536x656", cfg.Size)
+	}
+
+	app.imageModelInput.SetText("dall-e-3")
+	cfg = app.currentConfig()
+	if cfg.Size != "1792x1024" {
+		t.Fatalf("cfg.Size with dalle3=%q want 1792x1024", cfg.Size)
+	}
+}
+
+func TestCurrentConfigUsesManualEditAutoAspectForImplicitCurrentImage(t *testing.T) {
+	dir := t.TempDir()
+	sourcePath := filepath.Join(dir, "implicit-current.png")
+	writeSizedSolidTestPNG(t, sourcePath, 1600, 900, color.NRGBA{R: 0x66, G: 0x99, B: 0xcc, A: 0xff})
+
+	app := &App{
+		mode:                     string(client.ModeEdit),
+		api:                      string(client.APIModeResponses),
+		policy:                   string(client.RequestPolicyOpenAI),
+		editAutoAspectResolution: "1k",
+		result: resultState{
+			SavedPath: sourcePath,
+			Item: sharedCompat.HistoryItem{
+				ID:        "current-result",
+				SavedPath: sourcePath,
+			},
+			HasItem: true,
+		},
+	}
+	app.imageModelInput.SetText("gpt-image-2")
+
+	cfg := app.currentConfig()
+	if cfg.Size != "1536x864" {
+		t.Fatalf("cfg.Size=%q want 1536x864", cfg.Size)
+	}
+}
+
+func TestWorkspaceSnapshotPreservesEditAutoAspectResolution(t *testing.T) {
+	app := &App{
+		activeWorkspaceID:        "ws-1",
+		workspaces:               []workspaceState{{ID: "ws-1", Name: "图片 1"}},
+		editAutoAspectResolution: "1k",
+	}
+
+	snapshot := app.buildWorkspaceSnapshot()
+	if snapshot.EditAutoAspectResolution != "1k" {
+		t.Fatalf("snapshot.EditAutoAspectResolution=%q want 1k", snapshot.EditAutoAspectResolution)
+	}
+
+	app.editAutoAspectResolution = ""
+	app.applyWorkspace(snapshot)
+	if app.editAutoAspectResolution != "1k" {
+		t.Fatalf("app.editAutoAspectResolution=%q want 1k", app.editAutoAspectResolution)
+	}
+}
+
+func TestOpenCustomSizeModalUsesCurrentSizeOrDefault(t *testing.T) {
+	app := &App{
+		api:    string(client.APIModeResponses),
+		policy: string(client.RequestPolicyOpenAI),
+		size:   "auto",
+	}
+	app.imageModelInput.SetText("gpt-image-2")
+
+	app.openCustomSizeModal()
+	if !app.customSizeModalOpen {
+		t.Fatal("custom size modal should be open")
+	}
+	if got := app.customSizeWidthInput.Text(); got != "1024" {
+		t.Fatalf("width input=%q want 1024", got)
+	}
+	if got := app.customSizeHeightInput.Text(); got != "1024" {
+		t.Fatalf("height input=%q want 1024", got)
+	}
+
+	app.size = "1536x864"
+	app.openCustomSizeModal()
+	if got := app.customSizeWidthInput.Text(); got != "1536" {
+		t.Fatalf("width input=%q want 1536", got)
+	}
+	if got := app.customSizeHeightInput.Text(); got != "864" {
+		t.Fatalf("height input=%q want 864", got)
+	}
+}
+
+func TestApplyCustomSizeSetsExactSizeAndClosesModal(t *testing.T) {
+	app := &App{
+		api:    string(client.APIModeResponses),
+		policy: string(client.RequestPolicyOpenAI),
+	}
+	app.imageModelInput.SetText("gpt-image-2")
+	app.customSizeModalOpen = true
+	app.customSizeWidthInput.SetText("1536")
+	app.customSizeHeightInput.SetText("656")
+
+	app.applyCustomSize()
+
+	if app.customSizeModalOpen {
+		t.Fatal("custom size modal should be closed after apply")
+	}
+	if app.size != "1536x656" {
+		t.Fatalf("size=%q want 1536x656", app.size)
 	}
 }
 
@@ -1314,15 +1466,22 @@ func TestReplaceCurrentResultWithPathPromotesTransformResultToFirstEditSource(t 
 
 func TestAdvancedSummaryRefreshesAfterRelevantChanges(t *testing.T) {
 	app := &App{
-		format:     "png",
-		background: "transparent",
-		moderation: "auto",
+		format:               "png",
+		background:           "transparent",
+		moderation:           "auto",
+		protectStreamPreview: true,
 	}
 	app.negativePromptInput.SetText("no watermark")
 	app.partialImagesInput.SetText("0")
 	first := app.advancedSummary()
 	if !strings.Contains(first, "仅最终图") {
 		t.Fatalf("first=%q want partial-preview summary", first)
+	}
+	if !strings.Contains(first, "背景 transparent") {
+		t.Fatalf("first=%q want raw background value summary", first)
+	}
+	if strings.Contains(first, "预览保护") {
+		t.Fatalf("first=%q should not include protect-stream summary", first)
 	}
 
 	app.seedInput.SetText("123")
@@ -1407,6 +1566,7 @@ func TestApplyPresetUsesExtendedSharedFields(t *testing.T) {
 	app.outputCompressionInput.SetText("100")
 	app.batchCount = 1
 	app.kernelRuntimeMode = "auto"
+	app.editAutoAspectResolution = ""
 
 	app.applyPreset(sharedCompat.Preset{
 		ID:                "preset-1",
@@ -1421,6 +1581,7 @@ func TestApplyPresetUsesExtendedSharedFields(t *testing.T) {
 		ImageStyle:        "vivid",
 		Moderation:        "auto",
 		StyleTag:          "anime",
+		EditAutoAspectRes: "1k",
 		KernelRuntimeMode: "remote",
 		BatchCount:        4,
 	})
@@ -1431,8 +1592,307 @@ func TestApplyPresetUsesExtendedSharedFields(t *testing.T) {
 	if app.negativePromptInput.Text() != "no watermark" {
 		t.Fatalf("negativePrompt=%q want no watermark", app.negativePromptInput.Text())
 	}
-	if app.background != "transparent" || app.outputCompressionInput.Text() != "87" || app.inputFidelity != "high" || app.imageStyle != "vivid" || app.moderation != "auto" || app.styleTag != "anime" || app.kernelRuntimeMode != "remote" || app.batchCount != 4 {
-		t.Fatalf("extended preset fields not applied: background=%q compression=%q fidelity=%q imageStyle=%q moderation=%q style=%q runtime=%q batch=%d", app.background, app.outputCompressionInput.Text(), app.inputFidelity, app.imageStyle, app.moderation, app.styleTag, app.kernelRuntimeMode, app.batchCount)
+	if app.background != "transparent" || app.outputCompressionInput.Text() != "87" || app.inputFidelity != "high" || app.imageStyle != "vivid" || app.moderation != "auto" || app.styleTag != "anime" || app.editAutoAspectResolution != "1k" || app.kernelRuntimeMode != "remote" || app.batchCount != 4 || app.selectedPresetID != "preset-1" {
+		t.Fatalf("extended preset fields not applied: background=%q compression=%q fidelity=%q imageStyle=%q moderation=%q style=%q autoAspect=%q runtime=%q batch=%d selectedPreset=%q", app.background, app.outputCompressionInput.Text(), app.inputFidelity, app.imageStyle, app.moderation, app.styleTag, app.editAutoAspectResolution, app.kernelRuntimeMode, app.batchCount, app.selectedPresetID)
+	}
+}
+
+func TestWorkspaceSnapshotPersistsSelectedPresetID(t *testing.T) {
+	app := &App{
+		activeWorkspaceID: "ws-1",
+		workspaces:        []workspaceState{{ID: "ws-1", Name: "图片 1"}},
+		selectedPresetID:  "preset-2",
+	}
+
+	app.saveActiveWorkspaceSnapshot()
+
+	if len(app.workspaces) != 1 || app.workspaces[0].SelectedPresetID != "preset-2" {
+		t.Fatalf("workspace snapshot selectedPresetID=%q want preset-2", app.workspaces[0].SelectedPresetID)
+	}
+
+	app.selectedPresetID = ""
+	app.applyWorkspace(app.workspaces[0])
+	if app.selectedPresetID != "preset-2" {
+		t.Fatalf("selectedPresetID=%q want preset-2 after applyWorkspace", app.selectedPresetID)
+	}
+}
+
+func TestCurrentPresetSnapshotIncludesEditAutoAspectResolution(t *testing.T) {
+	app := &App{
+		size:                     "1536x1024",
+		quality:                  "high",
+		format:                   "png",
+		background:               "transparent",
+		inputFidelity:            "high",
+		imageStyle:               "vivid",
+		moderation:               "auto",
+		styleTag:                 "anime",
+		editAutoAspectResolution: "1k",
+		kernelRuntimeMode:        "remote",
+		batchCount:               4,
+	}
+	app.presetNameInput.SetText("配置1")
+	app.outputCompressionInput.SetText("87")
+
+	preset := app.currentPresetSnapshot()
+	if preset.EditAutoAspectRes != "1k" {
+		t.Fatalf("preset.EditAutoAspectRes=%q want 1k", preset.EditAutoAspectRes)
+	}
+}
+
+func TestCurrentPresetSummaryStateDetectsMatchedPreset(t *testing.T) {
+	app := &App{
+		size:                     "1536x1024",
+		quality:                  "high",
+		format:                   "png",
+		background:               "transparent",
+		inputFidelity:            "high",
+		imageStyle:               "vivid",
+		moderation:               "auto",
+		styleTag:                 "anime",
+		editAutoAspectResolution: "1k",
+		kernelRuntimeMode:        "remote",
+		batchCount:               4,
+	}
+	compression := 87
+	app.outputCompressionInput.SetText("87")
+	app.presets = []sharedCompat.Preset{{
+		ID:                "preset-1",
+		Name:              "配置1",
+		Size:              "1536x1024",
+		Quality:           "high",
+		OutputFormat:      "png",
+		NegativePrompt:    "",
+		Background:        "transparent",
+		OutputCompression: &compression,
+		InputFidelity:     "high",
+		ImageStyle:        "vivid",
+		Moderation:        "auto",
+		StyleTag:          "anime",
+		EditAutoAspectRes: "1k",
+		KernelRuntimeMode: "remote",
+		BatchCount:        4,
+	}}
+
+	summary := app.currentPresetSummaryState()
+	if summary.MatchedPreset == nil || summary.MatchedPreset.ID != "preset-1" {
+		t.Fatalf("matched preset=%#v want preset-1", summary.MatchedPreset)
+	}
+	if summary.Title == "" || summary.Detail == "" {
+		t.Fatalf("summary should not be empty: %#v", summary)
+	}
+}
+
+func TestLoadPresetDraftLockedLoadsEditableFields(t *testing.T) {
+	app := &App{}
+	app.presets = []sharedCompat.Preset{{
+		ID:                "preset-1",
+		Name:              "配置1",
+		Size:              "1536x1024",
+		Quality:           "high",
+		OutputFormat:      "webp",
+		StyleTag:          "anime",
+		EditAutoAspectRes: "1k",
+		BatchCount:        4,
+	}}
+
+	if !app.loadPresetDraftLocked("preset-1") {
+		t.Fatal("expected preset draft to load")
+	}
+	if app.selectedPresetID != "preset-1" || app.presetNameInput.Text() != "配置1" {
+		t.Fatalf("selected/id draft name mismatch: selected=%q name=%q", app.selectedPresetID, app.presetNameInput.Text())
+	}
+	if app.presetSizeInput.Text() != "1536x1024" || app.presetQualityInput.Text() != "high" || app.presetOutputFormatInput.Text() != "webp" || app.presetStyleTagInput.Text() != "anime" || app.editAutoAspectResolution != "1k" || app.presetBatchCountInput.Text() != "4" {
+		t.Fatalf("editable draft fields not loaded: size=%q quality=%q format=%q style=%q autoAspect=%q batch=%q", app.presetSizeInput.Text(), app.presetQualityInput.Text(), app.presetOutputFormatInput.Text(), app.presetStyleTagInput.Text(), app.editAutoAspectResolution, app.presetBatchCountInput.Text())
+	}
+}
+
+func TestCurrentPresetDraftValuesPreferDraftInputs(t *testing.T) {
+	app := &App{size: "1024x1024", quality: "auto", format: "png", batchCount: 1, styleTag: ""}
+	app.presetSizeInput.SetText("1536x1024")
+	app.presetQualityInput.SetText("high")
+	app.presetOutputFormatInput.SetText("webp")
+	app.presetBatchCountInput.SetText("4")
+	app.presetStyleTagInput.SetText("anime")
+
+	size, quality, outputFormat, batchCount, styleTag := app.currentPresetDraftValues()
+	if size != "1536x1024" || quality != "high" || outputFormat != "webp" || batchCount != 4 || styleTag != "anime" {
+		t.Fatalf("draft values mismatch: size=%q quality=%q format=%q batch=%d style=%q", size, quality, outputFormat, batchCount, styleTag)
+	}
+}
+
+func TestBuildUpdatedPresetFromDraftKeepsUneditedFields(t *testing.T) {
+	compression := 87
+	current := sharedCompat.Preset{
+		ID:                "preset-1",
+		Name:              "配置1",
+		Size:              "1024x1024",
+		Quality:           "auto",
+		OutputFormat:      "png",
+		NegativePrompt:    "keep me",
+		Background:        "transparent",
+		OutputCompression: &compression,
+		InputFidelity:     "high",
+		ImageStyle:        "vivid",
+		Moderation:        "auto",
+		StyleTag:          "",
+		EditAutoAspectRes: "1k",
+		KernelRuntimeMode: "remote",
+		BatchCount:        1,
+	}
+
+	updated := buildUpdatedPresetFromDraft(current, "新名字", "1536x1024", "high", "webp", 4, "anime")
+
+	if updated.Name != "新名字" || updated.Size != "1536x1024" || updated.Quality != "high" || updated.OutputFormat != "webp" || updated.BatchCount != 4 || updated.StyleTag != "anime" {
+		t.Fatalf("edited fields mismatch: %#v", updated)
+	}
+	if updated.NegativePrompt != "keep me" || updated.Background != "transparent" || updated.InputFidelity != "high" || updated.ImageStyle != "vivid" || updated.Moderation != "auto" || updated.EditAutoAspectRes != "1k" || updated.KernelRuntimeMode != "remote" {
+		t.Fatalf("unedited fields should stay unchanged: %#v", updated)
+	}
+	if updated.OutputCompression == nil || *updated.OutputCompression != 87 {
+		t.Fatalf("output compression should be preserved: %#v", updated.OutputCompression)
+	}
+}
+
+func TestOpenPromptHelperPopoverDefaultsToTemplates(t *testing.T) {
+	app := &App{}
+	app.promptHelperTab = "history"
+	app.promptHelperOpen = false
+	app.openPromptHelperPopover("", nil, image.Point{})
+
+	if !app.promptHelperOpen {
+		t.Fatal("prompt helper should open from preset picker button")
+	}
+	if app.promptHelperTab != "templates" {
+		t.Fatalf("promptHelperTab=%q want templates", app.promptHelperTab)
+	}
+	if app.promptHelperAnchorRect == (image.Rectangle{}) {
+		t.Fatal("prompt helper should fall back to a stable anchor rect")
+	}
+}
+
+func TestCanvasShortcutModalsOpenIncludesPromptHelper(t *testing.T) {
+	app := &App{promptHelperOpen: true}
+	if !app.canvasShortcutModalsOpen(snapshot{}) {
+		t.Fatal("prompt helper should block canvas shortcuts while open")
+	}
+}
+
+func TestCanvasShortcutModalsOpenIncludesPresetPicker(t *testing.T) {
+	app := &App{presetPickerOpen: true}
+	if !app.canvasShortcutModalsOpen(snapshot{}) {
+		t.Fatal("preset picker should block canvas shortcuts while open")
+	}
+}
+
+func TestCanvasShortcutModalsOpenIncludesLoopModal(t *testing.T) {
+	app := &App{loopModalOpen: true}
+	if !app.canvasShortcutModalsOpen(snapshot{}) {
+		t.Fatal("loop modal should block canvas shortcuts while open")
+	}
+}
+
+func TestSetLoopEnabledOpeningAlsoOpensLoopModal(t *testing.T) {
+	app := &App{}
+	app.setLoopEnabled(true)
+	if !app.loopEnabled {
+		t.Fatal("loop should be enabled")
+	}
+	if !app.loopModalOpen {
+		t.Fatal("enabling loop from launcher should also open loop modal")
+	}
+}
+
+func TestAdvancedPanelStateHelpers(t *testing.T) {
+	app := &App{}
+	if app.advancedOpen {
+		t.Fatal("advanced panel should start closed")
+	}
+	app.openAdvancedPanel()
+	if !app.advancedOpen {
+		t.Fatal("advanced panel should open")
+	}
+	app.closeAdvancedPanel()
+	if app.advancedOpen {
+		t.Fatal("advanced panel should close")
+	}
+
+	app.toggleAdvancedGroup("core")
+	if !app.advancedCoreGroupOpen {
+		t.Fatal("core group should toggle open")
+	}
+	app.toggleAdvancedGroup("output")
+	if !app.advancedOutputGroupOpen {
+		t.Fatal("output group should toggle open")
+	}
+}
+
+func TestClampAdvancedPanelPosKeepsFloatingPanelInViewport(t *testing.T) {
+	app := &App{}
+	got := app.clampAdvancedPanelPos(image.Pt(9999, -40), image.Pt(1280, 720), 360, 420)
+	if got.X < advancedPanelMargin || got.Y < advancedPanelMargin {
+		t.Fatalf("clamped pos=%v should stay inside panel margin", got)
+	}
+	if got.X > 1280-360-advancedPanelMargin || got.Y > 720-420-advancedPanelMargin {
+		t.Fatalf("clamped pos=%v should stay within viewport", got)
+	}
+}
+
+func TestNewRestoresAdvancedFloatingPanelPrefs(t *testing.T) {
+	root := t.TempDir()
+	origStable := giodCompat.StableDataRootForTest()
+	giodCompat.SetStableDataRootForTest(func() (string, error) { return root, nil })
+	defer giodCompat.SetStableDataRootForTest(origStable)
+
+	x := 812
+	y := 136
+	state := sharedCompat.State{
+		Settings: sharedCompat.Settings{
+			AdvancedFloatingPanel: &sharedCompat.AdvancedFloatingPanelPrefs{
+				X: &x,
+				Y: &y,
+				Groups: map[string]bool{
+					"core":     false,
+					"output":   true,
+					"strategy": true,
+					"stream":   false,
+				},
+			},
+		},
+	}
+	if err := giodCompat.SaveState(state); err != nil {
+		t.Fatalf("SaveState: %v", err)
+	}
+
+	app := New()
+	if app.advancedPanelPos != image.Pt(812, 136) {
+		t.Fatalf("advancedPanelPos=%v want (812,136)", app.advancedPanelPos)
+	}
+	if app.advancedCoreGroupOpen || !app.advancedOutputGroupOpen || !app.advancedStrategyGroupOpen || app.advancedStreamGroupOpen {
+		t.Fatalf("advanced group prefs not restored: core=%t output=%t strategy=%t stream=%t", app.advancedCoreGroupOpen, app.advancedOutputGroupOpen, app.advancedStrategyGroupOpen, app.advancedStreamGroupOpen)
+	}
+}
+
+func TestAppendPromptTemplateTextMatchesWebviewSemantics(t *testing.T) {
+	if got := appendPromptTemplateText("", "anime style"); got != "anime style" {
+		t.Fatalf("appendPromptTemplateText(empty)=%q want anime style", got)
+	}
+	if got := appendPromptTemplateText("a cat in rain", "anime style"); got != "a cat in rain, anime style" {
+		t.Fatalf("appendPromptTemplateText(non-empty)=%q want comma join", got)
+	}
+}
+
+func TestApplyPromptSuggestionAppendsWithCommaSeparator(t *testing.T) {
+	app := &App{}
+	app.promptInput.SetText("a cat in rain")
+
+	app.applyPromptSuggestion("anime style")
+
+	if got := app.promptInput.Text(); got != "a cat in rain, anime style" {
+		t.Fatalf("prompt=%q want comma-joined prompt", got)
+	}
+	if app.promptHelperOpen {
+		t.Fatal("prompt helper should close after applying suggestion")
 	}
 }
 
@@ -1581,6 +2041,333 @@ func TestOpenRawResponseModalReadsVirtualText(t *testing.T) {
 	}
 	if snap.RawResponseModalText != "hello raw response" {
 		t.Fatalf("raw response text=%q want %q", snap.RawResponseModalText, "hello raw response")
+	}
+}
+
+func TestOpenHistoryActionMenuExposesSnapshotState(t *testing.T) {
+	app := &App{}
+	item := sharedCompat.HistoryItem{ID: "history-1", Prompt: "cat", SavedPath: "/tmp/cat.png"}
+
+	app.openHistoryActionMenu(item, "timeline")
+
+	snap := app.readSnapshot()
+	if snap.HistoryActionMenuItem.ID != item.ID {
+		t.Fatalf("menu item id=%q want %q", snap.HistoryActionMenuItem.ID, item.ID)
+	}
+	if snap.HistoryActionMenuContext != "timeline" {
+		t.Fatalf("menu context=%q want timeline", snap.HistoryActionMenuContext)
+	}
+	if app.historyActionMenuPos == (image.Point{}) {
+		t.Fatal("history action menu should capture a fallback anchor position")
+	}
+
+	app.closeHistoryActionMenu()
+	snap = app.readSnapshot()
+	if snap.HistoryActionMenuItem.ID != "" || snap.HistoryActionMenuContext != "" {
+		t.Fatalf("menu should be cleared, got item=%q context=%q", snap.HistoryActionMenuItem.ID, snap.HistoryActionMenuContext)
+	}
+}
+
+func TestCanvasShortcutModalsOpenIncludesHistoryActionMenu(t *testing.T) {
+	app := &App{}
+	snap := snapshot{HistoryActionMenuItem: sharedCompat.HistoryItem{ID: "history-1", SavedPath: "/tmp/cat.png"}}
+	if !app.canvasShortcutModalsOpen(snap) {
+		t.Fatal("history action menu should block canvas shortcuts while open")
+	}
+}
+
+func TestHistoryActionMenuDetailKeepsTimelineContextOpen(t *testing.T) {
+	app := &App{}
+	item := sharedCompat.HistoryItem{ID: "history-2", Prompt: "dog", SavedPath: "/tmp/dog.png"}
+	app.historyTimelineOpen = true
+
+	app.triggerHistoryActionMenu(layout.Context{}, "detail", item, "timeline")
+
+	snap := app.readSnapshot()
+	if !snap.HistoryTimelineOpen {
+		t.Fatal("timeline should stay open after opening detail from timeline context")
+	}
+	if snap.ActiveResultDetail.ID != item.ID {
+		t.Fatalf("active detail id=%q want %q", snap.ActiveResultDetail.ID, item.ID)
+	}
+}
+
+func TestHistoryActionMenuOpenRawKeepsPromptGroupContextOpen(t *testing.T) {
+	app := &App{}
+	path := registerVirtualText("raw payload", "raw.txt")
+	item := sharedCompat.HistoryItem{ID: "history-3", Prompt: "bird", RawPath: path}
+	app.activePromptGroup = historyPromptGroup{Key: "group-1"}
+
+	app.triggerHistoryActionMenu(layout.Context{}, "open-raw", item, "prompt-group")
+
+	snap := app.readSnapshot()
+	if snap.ActivePromptGroup.Key != "group-1" {
+		t.Fatalf("prompt group should stay open, got key=%q", snap.ActivePromptGroup.Key)
+	}
+	if snap.RawResponseModalPath != path {
+		t.Fatalf("raw path=%q want %q", snap.RawResponseModalPath, path)
+	}
+}
+
+func TestCloseHistoryTimelineClearsHistoryActionMenuState(t *testing.T) {
+	app := &App{}
+	app.historyTimelineOpen = true
+	app.historyActionMenuItem = sharedCompat.HistoryItem{ID: "history-4", Prompt: "fox"}
+	app.historyActionMenuContext = "timeline"
+
+	app.closeHistoryTimeline()
+
+	snap := app.readSnapshot()
+	if snap.HistoryTimelineOpen {
+		t.Fatal("timeline should be closed")
+	}
+	if snap.HistoryActionMenuItem.ID != "" || snap.HistoryActionMenuContext != "" {
+		t.Fatalf("history action menu should be cleared, got item=%q context=%q", snap.HistoryActionMenuItem.ID, snap.HistoryActionMenuContext)
+	}
+}
+
+func TestReuseHistoryItemAsSourceAppendsSavedPath(t *testing.T) {
+	app := &App{}
+	item := sharedCompat.HistoryItem{
+		ID:        "history-5",
+		Prompt:    "horse",
+		SavedPath: "/tmp/horse.png",
+	}
+
+	app.reuseHistoryItemAsSource(item)
+
+	paths := app.sourcePaths()
+	if len(paths) != 1 || paths[0] != item.SavedPath {
+		t.Fatalf("source paths=%v want [%s]", paths, item.SavedPath)
+	}
+}
+
+func TestHandlePromptGroupItemClickDoubleClickReusesAndKeepsGroupOpen(t *testing.T) {
+	app := &App{}
+	app.activePromptGroup = historyPromptGroup{Key: "group-2"}
+	item := sharedCompat.HistoryItem{
+		ID:        "history-6",
+		Prompt:    "rabbit",
+		SavedPath: "/tmp/rabbit.png",
+	}
+
+	app.handlePromptGroupItemClick(widget.Click{NumClicks: 2}, item)
+
+	paths := app.sourcePaths()
+	if len(paths) != 1 || paths[0] != item.SavedPath {
+		t.Fatalf("source paths=%v want [%s]", paths, item.SavedPath)
+	}
+	if snap := app.readSnapshot(); snap.ActivePromptGroup.Key != "group-2" {
+		t.Fatalf("prompt group should stay open, got key=%q", snap.ActivePromptGroup.Key)
+	}
+}
+
+func TestHandlePromptGroupItemClickShiftTogglesCompareAndKeepsGroupOpen(t *testing.T) {
+	app := &App{}
+	app.activePromptGroup = historyPromptGroup{Key: "group-4"}
+	item := sharedCompat.HistoryItem{
+		ID:        "history-9",
+		Prompt:    "whale",
+		SavedPath: "/tmp/whale.png",
+	}
+
+	app.handlePromptGroupItemClick(widget.Click{Modifiers: key.ModShift}, item)
+
+	snap := app.readSnapshot()
+	if snap.Compare.Item.ID != item.ID {
+		t.Fatalf("compare id=%q want %q", snap.Compare.Item.ID, item.ID)
+	}
+	if snap.ActivePromptGroup.Key != "group-4" {
+		t.Fatalf("prompt group should stay open, got key=%q", snap.ActivePromptGroup.Key)
+	}
+}
+
+func TestPromptGroupHeroLatestUsesSingleSelectPreviewBehavior(t *testing.T) {
+	dir := t.TempDir()
+	fullPath := filepath.Join(dir, "hero-latest-full.png")
+	thumbPath := filepath.Join(dir, "hero-latest-thumb.png")
+	writeSolidTestPNG(t, fullPath, color.NRGBA{R: 0xaa, G: 0x44, B: 0x66, A: 0xff})
+	writeSolidTestPNG(t, thumbPath, color.NRGBA{R: 0x33, G: 0x99, B: 0xdd, A: 0xff})
+
+	app := &App{imageCache: map[string]cachedImage{}}
+	app.activePromptGroup = historyPromptGroup{Key: "group-hero"}
+	item := sharedCompat.HistoryItem{
+		ID:          "hero-latest",
+		Prompt:      "hero latest",
+		PreviewPath: thumbPath,
+		SavedPath:   fullPath,
+		ThumbPath:   thumbPath,
+	}
+
+	if err := app.loadHistoryPreview(item, true); err != nil {
+		t.Fatalf("loadHistoryPreview: %v", err)
+	}
+
+	snap := app.readSnapshot()
+	if snap.SelectedHistoryID != item.ID {
+		t.Fatalf("selectedHistoryID=%q want %q", snap.SelectedHistoryID, item.ID)
+	}
+	if snap.ActivePromptGroup.Key != "group-hero" {
+		t.Fatalf("prompt group should stay open after latest preview, got key=%q", snap.ActivePromptGroup.Key)
+	}
+	if len(app.sourcePaths()) != 0 {
+		t.Fatalf("latest preview should not reuse as source, got %v", app.sourcePaths())
+	}
+	if snap.Compare.Item.ID != "" {
+		t.Fatalf("latest preview should not toggle compare, got %q", snap.Compare.Item.ID)
+	}
+}
+
+func TestHandleHistoryGroupSummaryClickShiftTogglesCompare(t *testing.T) {
+	app := &App{}
+	group := historyPromptGroup{
+		Key: "group-3",
+		Representative: sharedCompat.HistoryItem{
+			ID:        "history-7",
+			Prompt:    "owl",
+			SavedPath: "/tmp/owl.png",
+		},
+	}
+
+	app.handleHistoryGroupSummaryClick(widget.Click{Modifiers: key.ModShift}, group, false)
+
+	snap := app.readSnapshot()
+	if snap.Compare.Item.ID != group.Representative.ID {
+		t.Fatalf("compare id=%q want %q", snap.Compare.Item.ID, group.Representative.ID)
+	}
+}
+
+func TestHandleHistoryGroupSummaryClickShiftClearsCompareWhenGroupAlreadyCompared(t *testing.T) {
+	app := &App{}
+	other := sharedCompat.HistoryItem{
+		ID:        "history-8",
+		Prompt:    "owl",
+		SavedPath: "/tmp/owl-alt.png",
+	}
+	group := historyPromptGroup{
+		Key:            "group-3",
+		Representative: sharedCompat.HistoryItem{ID: "history-7", Prompt: "owl", SavedPath: "/tmp/owl.png"},
+		Items:          []*sharedCompat.HistoryItem{{ID: "history-7", Prompt: "owl", SavedPath: "/tmp/owl.png"}, &other},
+	}
+	app.compare = resultState{Item: other, HasItem: true, Rev: 1}
+
+	app.handleHistoryGroupSummaryClick(widget.Click{Modifiers: key.ModShift}, group, false)
+
+	snap := app.readSnapshot()
+	if snap.Compare.Item.ID != "" || snap.Compare.HasItem {
+		t.Fatalf("compare should be cleared, got id=%q hasItem=%v", snap.Compare.Item.ID, snap.Compare.HasItem)
+	}
+}
+
+func TestBuildHistoryPromptEntriesUsesEmptyPromptLabelFallback(t *testing.T) {
+	items := []sharedCompat.HistoryItem{
+		{ID: "a1", Prompt: ""},
+		{ID: "a2", Prompt: "   "},
+	}
+
+	entries := buildHistoryPromptEntries(items)
+	if len(entries) != 1 || entries[0].Kind != "group" || entries[0].Group == nil {
+		t.Fatalf("entries=%#v want single prompt group", entries)
+	}
+	if entries[0].Group.Title != "(无 prompt)" {
+		t.Fatalf("group title=%q want (无 prompt)", entries[0].Group.Title)
+	}
+	if entries[0].Group.PromptPreview != "(无 prompt)" {
+		t.Fatalf("group preview=%q want (无 prompt)", entries[0].Group.PromptPreview)
+	}
+}
+
+func TestToggleExpandedPromptGroupTogglesEntry(t *testing.T) {
+	app := &App{}
+
+	app.toggleExpandedPromptGroup("group-1")
+	if !app.expandedPromptGroups["group-1"] {
+		t.Fatalf("expected group-1 to be expanded")
+	}
+
+	app.toggleExpandedPromptGroup("group-1")
+	if _, ok := app.expandedPromptGroups["group-1"]; ok {
+		t.Fatalf("expected group-1 to be collapsed")
+	}
+
+	app.toggleExpandedPromptGroup("")
+	if len(app.expandedPromptGroups) != 0 {
+		t.Fatalf("expected empty key to be ignored, got %v", app.expandedPromptGroups)
+	}
+}
+
+func TestHandleHistoryItemClickDoubleClickReusesSource(t *testing.T) {
+	app := &App{}
+	item := sharedCompat.HistoryItem{
+		ID:        "history-8",
+		Prompt:    "seal",
+		SavedPath: "/tmp/seal.png",
+	}
+
+	app.handleHistoryItemClick(widget.Click{NumClicks: 2}, item, false)
+
+	paths := app.sourcePaths()
+	if len(paths) != 1 || paths[0] != item.SavedPath {
+		t.Fatalf("source paths=%v want [%s]", paths, item.SavedPath)
+	}
+}
+
+func TestHistoryActionMenuEntriesIncludesDragOutOnDarwinWhenSavable(t *testing.T) {
+	app := &App{}
+	item := sharedCompat.HistoryItem{ID: "history-10", Prompt: "koala", SavedPath: "/tmp/koala.png"}
+
+	entries := app.historyActionMenuEntries(item, "history", "")
+	found := false
+	for _, entry := range entries {
+		if entry.ID != "drag-out" {
+			continue
+		}
+		found = true
+		wantDisabled := runtime.GOOS != "darwin"
+		if entry.Disabled != wantDisabled {
+			t.Fatalf("drag-out disabled=%v want %v on %s", entry.Disabled, wantDisabled, runtime.GOOS)
+		}
+	}
+	if !found {
+		t.Fatal("expected drag-out history action entry")
+	}
+}
+
+func TestBeginNativeFileDragRejectsVirtualPath(t *testing.T) {
+	app := &App{}
+	virtualPath := registerVirtualImage(base64.StdEncoding.EncodeToString([]byte("img")), "virtual.png", "png")
+
+	err := app.beginNativeFileDrag(virtualPath)
+	if err == nil {
+		t.Fatal("expected error for virtual drag path")
+	}
+	if !strings.Contains(err.Error(), "本地文件") && runtime.GOOS == "darwin" {
+		t.Fatalf("unexpected darwin error: %v", err)
+	}
+}
+
+func TestPrepareHistoryItemForNativeDragMaterializesInlineImage(t *testing.T) {
+	app := &App{}
+	dir := t.TempDir()
+	app.outputDirInput.SetText(dir)
+	validPath := filepath.Join(dir, "valid.png")
+	writeSolidTestPNG(t, validPath, color.NRGBA{R: 0x44, G: 0x77, B: 0xaa, A: 0xff})
+	raw, readErr := os.ReadFile(validPath)
+	if readErr != nil {
+		t.Fatalf("read valid png: %v", readErr)
+	}
+	item := sharedCompat.HistoryItem{
+		ID:           "history-11",
+		Prompt:       "otter",
+		OutputFormat: "png",
+		ImageB64:     base64.StdEncoding.EncodeToString(raw),
+	}
+	next, path, err := app.prepareHistoryItemForNativeDrag(item)
+	if err != nil {
+		t.Fatalf("prepareHistoryItemForNativeDrag: %v", err)
+	}
+	if path == "" || next.SavedPath == "" {
+		t.Fatalf("expected materialized path, got path=%q item=%#v", path, next)
 	}
 }
 

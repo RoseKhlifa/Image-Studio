@@ -15,6 +15,7 @@ import (
 
 	"gioui.org/app"
 	"gioui.org/gesture"
+	"gioui.org/io/pointer"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/paint"
@@ -87,6 +88,8 @@ type snapshot struct {
 	PromptImportRegisterOpen  bool
 	PromptImportRegisterBusy  bool
 	PromptImportRegisterNote  string
+	HistoryActionMenuItem     sharedCompat.HistoryItem
+	HistoryActionMenuContext  string
 }
 
 type cachedImage struct {
@@ -124,48 +127,52 @@ type historyGroupLookupCache struct {
 }
 
 type workspaceState struct {
-	ID                  string
-	Name                string
-	Prompt              string
-	NegativePrompt      string
-	Mode                string
-	Size                string
-	Quality             string
-	OutputFormat        string
-	Background          string
-	OutputCompression   string
-	InputFidelity       string
-	ImageStyle          string
-	Moderation          string
-	UserIdentifier      string
-	PartialImages       string
-	StyleTag            string
-	SeedText            string
-	BatchCount          int
-	LoopEnabled         bool
-	LoopTotalCount      int
-	LoopConcurrency     int
-	LoopAutoSave        bool
-	LoopAutoSaveDir     string
-	LoopLivePreview     bool
-	BatchMode           bool
-	BatchInputDir       string
-	BatchOutputDir      string
-	BatchRetryOnFail    bool
-	BatchAutoAspect     string
-	SourcePathsText     string
-	ResultSavedPath     string
-	ResultRawPath       string
-	ResultRevisedPrompt string
-	ResultSourceEvent   string
-	ResultItem          sharedCompat.HistoryItem
-	ResultHasItem       bool
-	SelectedHistoryID   string
-	BatchResultIDs      []string
-	BatchPreviewItems   []sharedCompat.HistoryItem
-	ResultGridOpen      bool
-	CompareHistoryID    string
-	CompareSplit        float32
+	ID                       string
+	Name                     string
+	Prompt                   string
+	NegativePrompt           string
+	Mode                     string
+	Size                     string
+	Quality                  string
+	OutputFormat             string
+	Background               string
+	OutputCompression        string
+	InputFidelity            string
+	ImageStyle               string
+	Moderation               string
+	UserIdentifier           string
+	PartialImages            string
+	StyleTag                 string
+	SeedText                 string
+	BatchCount               int
+	LoopEnabled              bool
+	LoopTotalCount           int
+	LoopConcurrency          int
+	LoopAutoSave             bool
+	LoopAutoSaveDir          string
+	LoopLivePreview          bool
+	BatchMode                bool
+	BatchInputDir            string
+	BatchOutputDir           string
+	BatchOutputMode          string
+	BatchConcurrency         int
+	BatchRetryOnFail         bool
+	BatchAutoAspect          string
+	EditAutoAspectResolution string
+	SourcePathsText          string
+	ResultSavedPath          string
+	ResultRawPath            string
+	ResultRevisedPrompt      string
+	ResultSourceEvent        string
+	ResultItem               sharedCompat.HistoryItem
+	ResultHasItem            bool
+	SelectedHistoryID        string
+	SelectedPresetID         string
+	BatchResultIDs           []string
+	BatchPreviewItems        []sharedCompat.HistoryItem
+	ResultGridOpen           bool
+	CompareHistoryID         string
+	CompareSplit             float32
 }
 
 type App struct {
@@ -176,77 +183,90 @@ type App struct {
 	logList             widget.List
 	historyList         widget.List
 	historyTimelineList widget.List
+	advancedList        widget.List
 	promptGroupList     widget.List
 	promptHelperList    widget.List
 	settingsProfileList widget.List
 	settingsList        widget.List
 	workspaceList       widget.List
 
-	apiKeyInput               widget.Editor
-	baseURLInput              widget.Editor
-	textModelInput            widget.Editor
-	imageModelInput           widget.Editor
-	profileNameInput          widget.Editor
-	concurrencyLimitInput     widget.Editor
-	promptInput               widget.Editor
-	sourcePathsInput          widget.Editor
-	outputDirInput            widget.Editor
-	seedInput                 widget.Editor
-	negativePromptInput       widget.Editor
-	partialImagesInput        widget.Editor
-	outputCompressionInput    widget.Editor
-	proxyURLInput             widget.Editor
-	userIdentifierInput       widget.Editor
-	savePromptPathInput       widget.Editor
-	promptTemplateLabelInput  widget.Editor
-	promptTemplateTextInput   widget.Editor
-	presetNameInput           widget.Editor
-	loopTotalCountInput       widget.Editor
-	loopConcurrencyInput      widget.Editor
-	loopAutoSaveDirInput      widget.Editor
-	batchInputDirInput        widget.Editor
-	batchOutputDirInput       widget.Editor
-	upstreamQuickImportInput  widget.Editor
-	rawResponseViewerInput    widget.Editor
-	historyQueryInput         widget.Editor
-	historyTimelineQueryInput widget.Editor
-	workspaceNameInput        widget.Editor
-	canvasAnnotationTextInput widget.Editor
+	apiKeyInput                    widget.Editor
+	baseURLInput                   widget.Editor
+	textModelInput                 widget.Editor
+	imageModelInput                widget.Editor
+	profileNameInput               widget.Editor
+	concurrencyLimitInput          widget.Editor
+	promptInput                    widget.Editor
+	sourcePathsInput               widget.Editor
+	outputDirInput                 widget.Editor
+	seedInput                      widget.Editor
+	negativePromptInput            widget.Editor
+	partialImagesInput             widget.Editor
+	outputCompressionInput         widget.Editor
+	proxyURLInput                  widget.Editor
+	userIdentifierInput            widget.Editor
+	savePromptPathInput            widget.Editor
+	promptTemplateLabelInput       widget.Editor
+	promptTemplateTextInput        widget.Editor
+	presetNameInput                widget.Editor
+	presetSizeInput                widget.Editor
+	presetQualityInput             widget.Editor
+	presetOutputFormatInput        widget.Editor
+	presetBatchCountInput          widget.Editor
+	presetStyleTagInput            widget.Editor
+	loopTotalCountInput            widget.Editor
+	loopConcurrencyInput           widget.Editor
+	loopAutoSaveDirInput           widget.Editor
+	batchInputDirInput             widget.Editor
+	batchOutputDirInput            widget.Editor
+	batchConcurrencyInput          widget.Editor
+	upstreamQuickImportInput       widget.Editor
+	rawResponseViewerInput         widget.Editor
+	historyQueryInput              widget.Editor
+	historyTimelineQueryInput      widget.Editor
+	historyTimelinePickedDateInput widget.Editor
+	workspaceNameInput             widget.Editor
+	canvasAnnotationTextInput      widget.Editor
+	customSizeWidthInput           widget.Editor
+	customSizeHeightInput          widget.Editor
 
-	mode                 string
-	api                  string
-	size                 string
-	quality              string
-	format               string
-	policy               string
-	responsesTransport   string
-	reasoningEffort      string
-	fallbackProfileID    string
-	proxy                string
-	background           string
-	inputFidelity        string
-	imageStyle           string
-	moderation           string
-	styleTag             string
-	protectStreamPreview bool
-	autoRetryEnabled     bool
-	autoRetryCount       int
-	loopEnabled          bool
-	loopTotalCount       int
-	loopConcurrency      int
-	loopAutoSave         bool
-	loopAutoSaveDir      string
-	loopLivePreview      bool
-	batchMode            bool
-	batchInputDir        string
-	batchOutputDir       string
-	batchRetryOnFail     bool
-	batchAutoAspect      string
-	themeMode            string
-	fontScale            float64
-	reducedEffects       bool
-	imagesNewAPICompat   bool
-	batchCount           int
+	mode                     string
+	api                      string
+	size                     string
+	quality                  string
+	format                   string
+	policy                   string
+	responsesTransport       string
+	reasoningEffort          string
+	fallbackProfileID        string
+	proxy                    string
+	background               string
+	inputFidelity            string
+	imageStyle               string
+	moderation               string
+	styleTag                 string
+	protectStreamPreview     bool
+	autoRetryEnabled         bool
+	autoRetryCount           int
+	loopEnabled              bool
+	loopTotalCount           int
+	loopConcurrency          int
+	loopAutoSave             bool
+	loopAutoSaveDir          string
+	loopLivePreview          bool
+	batchMode                bool
+	batchInputDir            string
+	batchOutputDir           string
+	batchOutputMode          string
+	batchConcurrency         int
+	batchRetryOnFail         bool
+	batchAutoAspect          string
+	editAutoAspectResolution string
+	themeMode                string
+	fontScale                float64
+	reducedEffects           bool
+	imagesNewAPICompat       bool
+	batchCount               int
 
 	modeButtons                              []widget.Clickable
 	apiButtons                               []widget.Clickable
@@ -285,6 +305,7 @@ type App struct {
 	copyRawResponseButton                    widget.Clickable
 	clearLogButton                           widget.Clickable
 	saveAsButton                             widget.Clickable
+	dragOutButton                            widget.Clickable
 	panToolButton                            widget.Clickable
 	maskToolButton                           widget.Clickable
 	annotateToolButton                       widget.Clickable
@@ -322,17 +343,22 @@ type App struct {
 	addSourceStripButton                     widget.Clickable
 	chooseBatchInputDirButton                widget.Clickable
 	chooseBatchFilesButton                   widget.Clickable
+	refreshBatchInputDirButton               widget.Clickable
 	chooseBatchOutputDirButton               widget.Clickable
 	toggleLoopButton                         widget.Clickable
+	openLoopModalButton                      widget.Clickable
+	closeLoopModalButton                     widget.Clickable
+	toggleLoopEnabledButton                  widget.Clickable
 	chooseLoopAutoSaveDirButton              widget.Clickable
 	useLoopOutputDirButton                   widget.Clickable
 	emptyStateImportButton                   widget.Clickable
 	promptHelperButton                       widget.Clickable
 	promptHelperTemplatesButton              widget.Clickable
-	promptHelperPresetsButton                widget.Clickable
 	promptHelperHistoryButton                widget.Clickable
+	closePresetPickerButton                  widget.Clickable
 	openPromptTemplateManagerButton          widget.Clickable
-	openPresetManagerFromPromptButton        widget.Clickable
+	openPresetManagerSummaryButton           widget.Clickable
+	openPresetManagerPickerButton            widget.Clickable
 	newPromptTemplateButton                  widget.Clickable
 	savePromptTemplateButton                 widget.Clickable
 	deletePromptTemplateButton               widget.Clickable
@@ -347,8 +373,11 @@ type App struct {
 	deletePresetButton                       widget.Clickable
 	presetListButtons                        map[string]*widget.Clickable
 	openCustomAspectRatioManagerButton       widget.Clickable
+	openCustomSizeModalButton                widget.Clickable
 	addCustomAspectRatioButton               widget.Clickable
 	deleteCustomAspectRatioButton            widget.Clickable
+	applyCustomSizeButton                    widget.Clickable
+	closeCustomSizeModalButton               widget.Clickable
 	customAspectRatioListButtons             map[string]*widget.Clickable
 	closePromptHelperButton                  widget.Clickable
 	optimizePromptButton                     widget.Clickable
@@ -383,6 +412,7 @@ type App struct {
 	useGeneralLoopOutputDirButton            widget.Clickable
 	chooseGeneralBatchInputButton            widget.Clickable
 	chooseGeneralBatchFilesButton            widget.Clickable
+	refreshGeneralBatchInputButton           widget.Clickable
 	chooseGeneralBatchOutputButton           widget.Clickable
 	resetGeneralOutputButton                 widget.Clickable
 	triggerGeneralHistoryMediaBackfillButton widget.Clickable
@@ -423,12 +453,16 @@ type App struct {
 	generalLoopAutoSaveButtons               []widget.Clickable
 	generalLoopPreviewButtons                []widget.Clickable
 	generalBatchButtons                      []widget.Clickable
+	generalBatchOutputModeButtons            []widget.Clickable
 	generalBatchRetryButtons                 []widget.Clickable
 	generalBatchAutoAspectButtons            []widget.Clickable
 	generalBatchAutoAspectResolutionButtons  []widget.Clickable
 	composeBatchRetryButtons                 []widget.Clickable
+	composeBatchOutputModeButtons            []widget.Clickable
 	composeBatchAutoAspectButtons            []widget.Clickable
 	composeBatchAutoAspectResolutionButtons  []widget.Clickable
+	composeEditAutoAspectButtons             []widget.Clickable
+	composeEditAutoAspectResolutionButtons   []widget.Clickable
 	composeLoopButtons                       []widget.Clickable
 	composeLoopCountButtons                  []widget.Clickable
 	composeLoopConcurrencyButtons            []widget.Clickable
@@ -443,6 +477,7 @@ type App struct {
 	settingsButton                           widget.Clickable
 	fullscreenButton                         widget.Clickable
 	resultDetailButton                       widget.Clickable
+	batchGridDragOutButton                   widget.Clickable
 	footerOutputButton                       widget.Clickable
 	footerGithubButton                       widget.Clickable
 	footerFeedbackButton                     widget.Clickable
@@ -457,6 +492,7 @@ type App struct {
 	settingsActivateProfileButton            widget.Clickable
 	closeResultDetailButton                  widget.Clickable
 	resultDetailSaveAsButton                 widget.Clickable
+	resultDetailDragOutButton                widget.Clickable
 	resultDetailUseSourceButton              widget.Clickable
 	resultDetailApplyParamsButton            widget.Clickable
 	resultDetailRegenerateButton             widget.Clickable
@@ -471,6 +507,11 @@ type App struct {
 	resultDetailDeleteButton                 widget.Clickable
 	composeToggleButton                      widget.Clickable
 	advancedToggleButton                     widget.Clickable
+	advancedCloseButton                      widget.Clickable
+	advancedCoreGroupButton                  widget.Clickable
+	advancedOutputGroupButton                widget.Clickable
+	advancedStrategyGroupButton              widget.Clickable
+	advancedStreamGroupButton                widget.Clickable
 	copyPerformanceDiagnosticsButton         widget.Clickable
 	profilePickerButton                      widget.Clickable
 	manageUpstreamButton                     widget.Clickable
@@ -479,6 +520,7 @@ type App struct {
 	openHistoryTimelineButton                widget.Clickable
 	openHistoryTimelineMoreButton            widget.Clickable
 	closeHistoryTimelineButton               widget.Clickable
+	closeHistoryActionMenuButton             widget.Clickable
 	savePromptSaveButton                     widget.Clickable
 	savePromptSkipButton                     widget.Clickable
 	savePromptSelectAllButton                widget.Clickable
@@ -626,6 +668,11 @@ type App struct {
 	batchPreviewItems              map[int]sharedCompat.HistoryItem
 	resultGridOpen                 bool
 	keyboardShortcutTag            struct{}
+	advancedPanelEventTag          struct{}
+	globalPointerTag               struct{}
+	promptHelperEventTag           struct{}
+	presetPickerEventTag           struct{}
+	historyActionMenuEventTag      struct{}
 	canvasPointerTag               struct{}
 	compareSplitSlider             widget.Float
 	compareSplitDrag               gesture.Drag
@@ -655,6 +702,14 @@ type App struct {
 	promptImportRegisterNote         string
 	composeOpen                      bool
 	advancedOpen                     bool
+	advancedCoreGroupOpen            bool
+	advancedOutputGroupOpen          bool
+	advancedStrategyGroupOpen        bool
+	advancedStreamGroupOpen          bool
+	advancedPanelPos                 image.Point
+	advancedPanelDragActive          bool
+	advancedPanelDragPointerID       pointer.ID
+	advancedPanelDragOffset          image.Point
 	profilePickerOpen                bool
 	historyRailCollapsed             bool
 	historyModeFilter                string
@@ -664,21 +719,33 @@ type App struct {
 	historyTimelineDateFilter        string
 	historyTimelineModePickerOpen    bool
 	historyTimelineDatePickerOpen    bool
+	historyActionMenuItem            sharedCompat.HistoryItem
+	historyActionMenuContext         string
+	historyActionMenuPos             image.Point
 	profileButtons                   map[string]*widget.Clickable
 	settingsProfileButtons           map[string]*widget.Clickable
 	historyButtons                   map[string]*widget.Clickable
 	promptButtons                    map[string]*widget.Clickable
+	presetQuickButtons               map[string]*widget.Clickable
 	sourceButtons                    map[string]*widget.Clickable
 	savePromptSelectionButtons       map[string]*widget.Clickable
 	historyActionButtons             map[string]*widget.Clickable
+	historyPointerTargets            map[string]*historyPointerTarget
 	expandedPromptGroups             map[string]bool
 	promptHelperOpen                 bool
 	promptHelperTab                  string
+	promptHelperAnchorRect           image.Rectangle
+	promptHelperButtonSize           image.Point
 	promptTemplateManagerOpen        bool
 	selectedPromptTemplateID         string
+	presetPickerOpen                 bool
+	presetPickerAnchorRect           image.Rectangle
+	presetPickerButtonSize           image.Point
 	presetManagerOpen                bool
 	selectedPresetID                 string
 	customAspectRatioManagerOpen     bool
+	customSizeModalOpen              bool
+	loopModalOpen                    bool
 	customAspectWidthInput           widget.Editor
 	customAspectHeightInput          widget.Editor
 	selectedCustomAspectRatioID      string
@@ -703,6 +770,9 @@ type App struct {
 	workspaceLastClickID             string
 	workspaceLastClickAt             time.Time
 	headerQuoteIndex                 int
+	darwinAppKitView                 uintptr
+	lastGlobalPointer                image.Point
+	lastGlobalPressPos               image.Point
 
 	invalidate func()
 	window     *app.Window
@@ -761,8 +831,11 @@ func New() *App {
 		batchMode:                               false,
 		batchInputDir:                           "",
 		batchOutputDir:                          "",
+		batchOutputMode:                         batchOutputModeSourceDir,
+		batchConcurrency:                        defaultBatchProcessConcurrency,
 		batchRetryOnFail:                        false,
 		batchAutoAspect:                         "",
+		editAutoAspectResolution:                "",
 		themeMode:                               themeMode,
 		fontScale:                               fontScale,
 		reducedEffects:                          compatState.Settings.ReducedEffects,
@@ -798,12 +871,16 @@ func New() *App {
 		generalLoopAutoSaveButtons:              make([]widget.Clickable, 2),
 		generalLoopPreviewButtons:               make([]widget.Clickable, 2),
 		generalBatchButtons:                     make([]widget.Clickable, 2),
+		generalBatchOutputModeButtons:           make([]widget.Clickable, 2),
 		generalBatchRetryButtons:                make([]widget.Clickable, 2),
 		generalBatchAutoAspectButtons:           make([]widget.Clickable, 2),
 		generalBatchAutoAspectResolutionButtons: make([]widget.Clickable, 5),
 		composeBatchRetryButtons:                make([]widget.Clickable, 2),
+		composeBatchOutputModeButtons:           make([]widget.Clickable, 2),
 		composeBatchAutoAspectButtons:           make([]widget.Clickable, 2),
 		composeBatchAutoAspectResolutionButtons: make([]widget.Clickable, 5),
+		composeEditAutoAspectButtons:            make([]widget.Clickable, 2),
+		composeEditAutoAspectResolutionButtons:  make([]widget.Clickable, 5),
 		composeLoopButtons:                      make([]widget.Clickable, 2),
 		composeLoopCountButtons:                 make([]widget.Clickable, 5),
 		composeLoopConcurrencyButtons:           make([]widget.Clickable, 4),
@@ -835,7 +912,7 @@ func New() *App {
 		historyModeButtons:                      make([]widget.Clickable, 3),
 		historyDateButtons:                      make([]widget.Clickable, 3),
 		historyTimelineModeButtons:              make([]widget.Clickable, 3),
-		historyTimelineDateButtons:              make([]widget.Clickable, 3),
+		historyTimelineDateButtons:              make([]widget.Clickable, 4),
 		status:                                  "Gio 原生客户端就绪",
 		logs:                                    []string{"独立 Gio 高性能测试客户端已启动。"},
 		logsRev:                                 1,
@@ -854,6 +931,10 @@ func New() *App {
 		historyRev:                              1,
 		composeOpen:                             false,
 		advancedOpen:                            false,
+		advancedCoreGroupOpen:                   true,
+		advancedOutputGroupOpen:                 false,
+		advancedStrategyGroupOpen:               false,
+		advancedStreamGroupOpen:                 false,
 		profilePickerOpen:                       false,
 		historyRailCollapsed:                    false,
 		historyModeFilter:                       "all",
@@ -864,6 +945,7 @@ func New() *App {
 		settingsProfileButtons:                  map[string]*widget.Clickable{},
 		historyButtons:                          map[string]*widget.Clickable{},
 		promptButtons:                           map[string]*widget.Clickable{},
+		presetQuickButtons:                      map[string]*widget.Clickable{},
 		promptTemplateListButtons:               map[string]*widget.Clickable{},
 		presetListButtons:                       map[string]*widget.Clickable{},
 		customAspectRatioListButtons:            map[string]*widget.Clickable{},
@@ -874,6 +956,7 @@ func New() *App {
 		expandedPromptGroups:                    map[string]bool{},
 		promptHelperOpen:                        false,
 		promptHelperTab:                         "templates",
+		presetPickerOpen:                        false,
 		headerQuoteIndex:                        initialHeaderQuoteIndex(time.Now()),
 	}
 	if profile, ok := gioCompat.ActiveProfile(compatState); ok {
@@ -891,10 +974,20 @@ func New() *App {
 	if compatErr != nil {
 		a.appendLogLocked("兼容状态读取失败: " + compatErr.Error())
 	}
+	if prefs := compatState.Settings.AdvancedFloatingPanel; prefs != nil {
+		if prefs.X != nil {
+			a.advancedPanelPos.X = *prefs.X
+		}
+		if prefs.Y != nil {
+			a.advancedPanelPos.Y = *prefs.Y
+		}
+		a.applyAdvancedPanelGroupPrefs(prefs.Groups)
+	}
 	a.controlsList.List.Axis = layout.Vertical
 	a.logList.List.Axis = layout.Vertical
 	a.historyList.List.Axis = layout.Vertical
 	a.historyTimelineList.List.Axis = layout.Vertical
+	a.advancedList.List.Axis = layout.Vertical
 	a.promptGroupList.List.Axis = layout.Vertical
 	a.promptHelperList.List.Axis = layout.Vertical
 	a.settingsProfileList.List.Axis = layout.Vertical
@@ -904,6 +997,9 @@ func New() *App {
 	a.configureEditors(cfg)
 	a.historyQueryInput.SingleLine = true
 	a.historyTimelineQueryInput.SingleLine = true
+	a.historyTimelinePickedDateInput.SingleLine = true
+	a.batchConcurrencyInput.SingleLine = true
+	a.batchConcurrencyInput.SetText(strconv.Itoa(normalizeBatchProcessConcurrency(a.batchConcurrency)))
 	a.runStartupHistoryThumbPrewarm()
 	a.startHistoryPreviewWarmup()
 	if latest, ok := newestHistoryItem(a.history); ok {
@@ -936,15 +1032,24 @@ func (a *App) configureEditors(cfg kernel.Config) {
 		&a.savePromptPathInput,
 		&a.promptTemplateLabelInput,
 		&a.presetNameInput,
+		&a.presetSizeInput,
+		&a.presetQualityInput,
+		&a.presetOutputFormatInput,
+		&a.presetBatchCountInput,
+		&a.presetStyleTagInput,
 		&a.loopTotalCountInput,
 		&a.loopConcurrencyInput,
 		&a.loopAutoSaveDirInput,
 		&a.batchInputDirInput,
 		&a.batchOutputDirInput,
+		&a.batchConcurrencyInput,
 		&a.historyQueryInput,
 		&a.historyTimelineQueryInput,
+		&a.historyTimelinePickedDateInput,
 		&a.workspaceNameInput,
 		&a.canvasAnnotationTextInput,
+		&a.customSizeWidthInput,
+		&a.customSizeHeightInput,
 	}
 	for _, editor := range singleLine {
 		editor.SingleLine = true
@@ -958,6 +1063,11 @@ func (a *App) configureEditors(cfg kernel.Config) {
 	a.concurrencyLimitInput.Filter = "0123456789"
 	a.loopTotalCountInput.Filter = "0123456789"
 	a.loopConcurrencyInput.Filter = "0123456789"
+	a.batchConcurrencyInput.Filter = "0123456789"
+	a.presetBatchCountInput.Filter = "0123456789"
+	a.historyTimelinePickedDateInput.Filter = "0123456789-"
+	a.customSizeWidthInput.Filter = "0123456789"
+	a.customSizeHeightInput.Filter = "0123456789"
 	a.apiKeyInput.SetText(cfg.APIKey)
 	a.baseURLInput.SetText(cfg.BaseURL)
 	a.textModelInput.SetText(cfg.TextModelID)
@@ -1013,6 +1123,8 @@ func (a *App) Run(w *app.Window) error {
 	var ops op.Ops
 	for {
 		switch e := w.Event().(type) {
+		case app.ViewEvent:
+			a.handlePlatformViewEvent(e)
 		case app.ConfigEvent:
 			a.mu.Lock()
 			a.windowFocused = e.Config.Focused

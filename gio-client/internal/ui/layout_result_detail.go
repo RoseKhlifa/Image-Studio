@@ -33,6 +33,14 @@ func (a *App) layoutResultDetailModal(gtx layout.Context, snap snapshot) layout.
 	for a.resultDetailSaveAsButton.Clicked(gtx) {
 		a.openSavePromptForItem(item)
 	}
+	for a.resultDetailDragOutButton.Clicked(gtx) {
+		next, err := a.dragOutHistoryItem(item)
+		if err != nil {
+			a.appendLog("拖出复制失败: " + err.Error())
+			continue
+		}
+		item = next
+	}
 	for a.resultDetailUseSourceButton.Clicked(gtx) {
 		a.reuseHistoryItemAsSource(item)
 		a.appendLog("已将历史结果加入源图: " + shortPrompt(item.Prompt))
@@ -134,6 +142,11 @@ func (a *App) layoutResultDetailPreview(gtx layout.Context, item sharedCompat.Hi
 						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 							return a.compactIconTextButton(gtx, &a.resultDetailSaveAsButton, uiIconSave, "另存为", false)
 						}),
+					}
+					if canDragOutHistoryItem(item) {
+						children = append(children, layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+							return a.compactIconTextButton(gtx, &a.resultDetailDragOutButton, uiIconLaunch, "拖出复制", false)
+						}))
 					}
 					openDirLabel := "打开输出目录"
 					if strings.TrimSpace(item.SavedPath) != "" && !isVirtualImagePath(item.SavedPath) {

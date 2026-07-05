@@ -39,7 +39,7 @@ func buildCustomAspectRatioID(width int, height int) string {
 
 func isBuiltInAspectRatioID(id string) bool {
 	switch strings.TrimSpace(id) {
-	case "1:1", "3:2", "2:3", "16:9", "9:16":
+	case "1:1", "3:2", "2:3", "16:9", "9:16", "7:4", "4:7":
 		return true
 	default:
 		return false

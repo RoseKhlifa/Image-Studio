@@ -49,6 +49,7 @@ func (a *App) promptTemplateListButton(id string) *widget.Clickable {
 
 func (a *App) openPromptTemplateManager() {
 	a.mu.Lock()
+	a.promptHelperOpen = false
 	if a.selectedPromptTemplateID == "" && len(a.promptTemplates) > 0 {
 		a.selectedPromptTemplateID = strings.TrimSpace(a.promptTemplates[0].ID)
 	}

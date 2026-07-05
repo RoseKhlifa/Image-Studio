@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/yuanhua/image-gptcodex/pkg/client"
@@ -24,8 +25,8 @@ type aspectChoice struct {
 
 var (
 	modeChoices = []choice{
-		{"文生图", string(client.ModeGenerate)},
-		{"图生图", string(client.ModeEdit)},
+		{"📝 文生图", string(client.ModeGenerate)},
+		{"🖼 图生图", string(client.ModeEdit)},
 	}
 	apiChoices = []choice{
 		{"Responses", string(client.APIModeResponses)},
@@ -33,19 +34,23 @@ var (
 	}
 	sizeChoices = []choice{
 		{"自适应 auto", "auto"},
+		{"方形 256x256", "256x256"},
+		{"方形 512x512", "512x512"},
 		{"方形 1024x1024", "1024x1024"},
 		{"横版 1536x1024", "1536x1024"},
 		{"竖版 1024x1536", "1024x1536"},
 		{"横版 1536x864", "1536x864"},
 		{"竖版 864x1536", "864x1536"},
+		{"宽画幅 1792x1024", "1792x1024"},
+		{"高画幅 1024x1792", "1024x1792"},
 		{"2K 方形 2048x2048", "2048x2048"},
 		{"2K 横版 2048x1360", "2048x1360"},
 		{"2K 竖版 1360x2048", "1360x2048"},
 		{"2K 横版 2048x1152", "2048x1152"},
 		{"2K 竖版 1152x2048", "1152x2048"},
 		{"4K 方形 2880x2880", "2880x2880"},
-		{"4K 横版 3456x2304", "3456x2304"},
-		{"4K 竖版 2304x3456", "2304x3456"},
+		{"4K 横版 3520x2352", "3520x2352"},
+		{"4K 竖版 2352x3520", "2352x3520"},
 		{"4K 横版 3840x2160", "3840x2160"},
 		{"4K 竖版 2160x3840", "2160x3840"},
 	}
@@ -56,9 +61,13 @@ var (
 		{Value: "2:3", Label: "2:3", W: 14, H: 20},
 		{Value: "16:9", Label: "16:9", W: 24, H: 13},
 		{Value: "9:16", Label: "9:16", W: 12, H: 22},
+		{Value: "7:4", Label: "7:4", W: 24, H: 14},
+		{Value: "4:7", Label: "4:7", W: 14, H: 24},
 	}
 	resolutionChoices = []choice{
 		{"自动", "auto"},
+		{"256", "256"},
+		{"512", "512"},
 		{"1K", "1k"},
 		{"2K", "2k"},
 		{"4K", "4k"},
@@ -142,19 +151,21 @@ var (
 	}
 	sizeMatrix = map[string]map[string]string{
 		"1:1": {
-			"1k": "1024x1024",
-			"2k": "2048x2048",
-			"4k": "2880x2880",
+			"256": "256x256",
+			"512": "512x512",
+			"1k":  "1024x1024",
+			"2k":  "2048x2048",
+			"4k":  "2880x2880",
 		},
 		"3:2": {
 			"1k": "1536x1024",
 			"2k": "2048x1360",
-			"4k": "3456x2304",
+			"4k": "3520x2352",
 		},
 		"2:3": {
 			"1k": "1024x1536",
 			"2k": "1360x2048",
-			"4k": "2304x3456",
+			"4k": "2352x3520",
 		},
 		"16:9": {
 			"1k": "1536x864",
@@ -166,40 +177,54 @@ var (
 			"2k": "1152x2048",
 			"4k": "2160x3840",
 		},
+		"7:4": {
+			"1k": "1792x1024",
+		},
+		"4:7": {
+			"1k": "1024x1792",
+		},
 	}
 	sizeToAspect = map[string]string{
 		"auto":      "auto",
+		"256x256":   "1:1",
+		"512x512":   "1:1",
 		"1024x1024": "1:1",
 		"2048x2048": "1:1",
 		"2880x2880": "1:1",
 		"1536x1024": "3:2",
 		"2048x1360": "3:2",
-		"3456x2304": "3:2",
+		"3520x2352": "3:2",
 		"1024x1536": "2:3",
 		"1360x2048": "2:3",
-		"2304x3456": "2:3",
+		"2352x3520": "2:3",
 		"1536x864":  "16:9",
 		"2048x1152": "16:9",
 		"3840x2160": "16:9",
 		"864x1536":  "9:16",
 		"1152x2048": "9:16",
 		"2160x3840": "9:16",
+		"1792x1024": "7:4",
+		"1024x1792": "4:7",
 	}
 	sizeToResolution = map[string]string{
 		"auto":      "auto",
+		"256x256":   "256",
+		"512x512":   "512",
 		"1024x1024": "1k",
 		"1536x1024": "1k",
 		"1024x1536": "1k",
 		"1536x864":  "1k",
 		"864x1536":  "1k",
+		"1792x1024": "1k",
+		"1024x1792": "1k",
 		"2048x2048": "2k",
 		"2048x1360": "2k",
 		"1360x2048": "2k",
 		"2048x1152": "2k",
 		"1152x2048": "2k",
 		"2880x2880": "4k",
-		"3456x2304": "4k",
-		"2304x3456": "4k",
+		"3520x2352": "4k",
+		"2352x3520": "4k",
 		"3840x2160": "4k",
 		"2160x3840": "4k",
 	}
@@ -237,7 +262,7 @@ func sizeDisplayLabel(value string) string {
 		return "自动"
 	}
 	aspect := deriveAspectPreset(value, nil)
-	resolution := deriveResolutionPreset(value)
+	resolution := deriveResolutionPreset(value, nil)
 	if aspect == "" || resolution == "" {
 		return value
 	}
@@ -285,46 +310,141 @@ func chooseStyleSummary(value string) string {
 }
 
 func deriveAspectPreset(size string, customRatios []sharedCompat.CustomAspectRatio) string {
-	for _, ratio := range customRatios {
-		for _, resolution := range []string{"1k", "2k", "4k"} {
-			if buildCustomSizeSelection(ratio, resolution) == size {
-				return "custom:" + ratio.ID
-			}
-		}
+	size = strings.TrimSpace(size)
+	if size == "auto" {
+		return "auto"
+	}
+	if aspect, _, ok := customSizeSelection(size, customRatios); ok {
+		return aspect
 	}
 	if value, ok := sizeToAspect[size]; ok {
 		return value
 	}
+	width, height, ok := parseSizeSelectionValue(size)
+	if !ok {
+		return "1:1"
+	}
+	if customMatch, ok := findMatchingCustomAspect(width, height, customRatios); ok {
+		return "custom:" + customMatch.ID
+	}
+	if builtinAspect, distance := nearestBuiltinAspect(width, height); distance <= builtinAspectTolerance {
+		return builtinAspect
+	}
 	return "1:1"
 }
 
-func deriveResolutionPreset(size string) string {
+func deriveResolutionPreset(size string, customRatios []sharedCompat.CustomAspectRatio) string {
+	size = strings.TrimSpace(size)
+	if size == "auto" {
+		return "auto"
+	}
+	if _, resolution, ok := customSizeSelection(size, customRatios); ok {
+		return resolution
+	}
 	if value, ok := sizeToResolution[size]; ok {
 		return value
 	}
-	return "1k"
+	width, height, ok := parseSizeSelectionValue(size)
+	if !ok {
+		return "1k"
+	}
+	bestResolution := "1k"
+	bestDistance := math.Inf(1)
+	aspect := float64(width) / float64(height)
+	for _, resolution := range []string{"1k", "2k", "4k"} {
+		expectedWidth, expectedHeight := buildCustomDimensionsForResolution(aspect, resolution)
+		distance := customSizeDistance(width, height, float64(expectedWidth), float64(expectedHeight))
+		if distance < bestDistance {
+			bestDistance = distance
+			bestResolution = resolution
+		}
+	}
+	return bestResolution
 }
 
-func buildAspectSizeSelection(aspect string, currentResolution string, apiMode string, requestPolicy string, imageModelID string) string {
-	if aspect == "auto" {
-		return "auto"
+func normalizeSizeSelection(size string, apiMode string, requestPolicy string, imageModelID string, customRatios []sharedCompat.CustomAspectRatio) string {
+	size = strings.TrimSpace(size)
+	if size == "auto" {
+		if supportsAutomaticSizing(imageModelID) {
+			return "auto"
+		}
+		return client.DefaultSize
+	}
+	if size == "" {
+		return client.DefaultSize
+	}
+	width, height, ok := parseSizeSelectionValue(size)
+	if !ok {
+		return client.DefaultSize
+	}
+	if aspect, resolution, ok := customSizeSelection(size, customRatios); ok {
+		return buildSupportedSizeSelection(aspect, resolution, apiMode, requestPolicy, imageModelID, customRatios)
+	}
+	if supportsPreciseSizeControl(apiMode, requestPolicy, imageModelID) && isExactSizeValue(size, apiMode, requestPolicy, imageModelID, customRatios) {
+		if exactSize, ok := buildExactSizeValue(width, height); ok {
+			return exactSize
+		}
+		return client.DefaultSize
+	}
+	aspect := deriveAspectPreset(size, customRatios)
+	resolution := deriveResolutionPreset(size, customRatios)
+	return buildSupportedSizeSelection(aspect, resolution, apiMode, requestPolicy, imageModelID, customRatios)
+}
+
+func buildAspectSizeSelection(aspect string, currentResolution string, apiMode string, requestPolicy string, imageModelID string, customRatios []sharedCompat.CustomAspectRatio) string {
+	if strings.TrimSpace(aspect) == "auto" {
+		if supportsAutomaticSizing(imageModelID) {
+			return "auto"
+		}
+		return client.DefaultSize
 	}
 	currentResolution = normalizeResolutionChoice(currentResolution, apiMode, requestPolicy, imageModelID)
 	if currentResolution == "auto" {
 		currentResolution = "1k"
 	}
-	return buildSizeSelection(aspect, currentResolution)
+	return buildSupportedSizeSelection(aspect, currentResolution, apiMode, requestPolicy, imageModelID, customRatios)
 }
 
-func buildResolutionSizeSelection(currentAspect string, resolution string, apiMode string, requestPolicy string, imageModelID string) string {
-	if resolution == "auto" {
-		return "auto"
+func buildResolutionSizeSelection(currentAspect string, resolution string, apiMode string, requestPolicy string, imageModelID string, customRatios []sharedCompat.CustomAspectRatio) string {
+	if strings.TrimSpace(resolution) == "auto" {
+		if supportsAutomaticSizing(imageModelID) {
+			return "auto"
+		}
+		return client.DefaultSize
 	}
 	resolution = normalizeResolutionChoice(resolution, apiMode, requestPolicy, imageModelID)
-	if currentAspect == "auto" {
+	if strings.TrimSpace(currentAspect) == "auto" {
 		currentAspect = "1:1"
 	}
-	return buildSizeSelection(currentAspect, resolution)
+	return buildSupportedSizeSelection(currentAspect, resolution, apiMode, requestPolicy, imageModelID, customRatios)
+}
+
+func buildSupportedSizeSelection(aspect string, resolution string, apiMode string, requestPolicy string, imageModelID string, customRatios []sharedCompat.CustomAspectRatio) string {
+	aspect = strings.TrimSpace(aspect)
+	resolution = normalizeResolutionChoice(strings.TrimSpace(resolution), apiMode, requestPolicy, imageModelID)
+	if aspect == "auto" || resolution == "auto" {
+		if supportsAutomaticSizing(imageModelID) {
+			return "auto"
+		}
+		return client.DefaultSize
+	}
+	if strings.HasPrefix(aspect, "custom:") {
+		if !supportsCustomAspectRatios(apiMode, requestPolicy, imageModelID) {
+			return client.DefaultSize
+		}
+		customID := strings.TrimPrefix(aspect, "custom:")
+		for _, ratio := range customRatios {
+			if strings.TrimSpace(ratio.ID) != customID {
+				continue
+			}
+			return buildCustomSizeSelection(ratio, resolution)
+		}
+		return buildSizeSelection("1:1", resolution)
+	}
+	if !isAllowedBuiltinAspect(aspect, imageModelID) {
+		return client.DefaultSize
+	}
+	return buildSizeSelection(aspect, resolution)
 }
 
 func buildSizeSelection(aspect string, resolution string) string {
@@ -342,24 +462,30 @@ func buildSizeSelection(aspect string, resolution string) string {
 	return "1024x1024"
 }
 
-func buildCustomSizeSelection(ratio sharedCompat.CustomAspectRatio, resolution string) string {
-	switch resolution {
-	case "2k":
-		if ratio.Width >= ratio.Height {
-			return buildCustomResolutionSize(ratio.Width, ratio.Height, 2048)
-		}
-		return buildCustomResolutionSize(ratio.Width, ratio.Height, 2048)
-	case "4k":
-		if ratio.Width >= ratio.Height {
-			return buildCustomResolutionSize(ratio.Width, ratio.Height, 3840)
-		}
-		return buildCustomResolutionSize(ratio.Width, ratio.Height, 3840)
-	default:
-		if ratio.Width >= ratio.Height {
-			return buildCustomResolutionSize(ratio.Width, ratio.Height, 1536)
-		}
-		return buildCustomResolutionSize(ratio.Width, ratio.Height, 1536)
+func customSizeSelection(size string, customRatios []sharedCompat.CustomAspectRatio) (string, string, bool) {
+	size = strings.TrimSpace(size)
+	if size == "" {
+		return "", "", false
 	}
+	for _, ratio := range customRatios {
+		if strings.TrimSpace(ratio.ID) == "" || ratio.Width <= 0 || ratio.Height <= 0 {
+			continue
+		}
+		for _, resolution := range []string{"1k", "2k", "4k"} {
+			if buildCustomSizeSelection(ratio, resolution) == size {
+				return "custom:" + ratio.ID, resolution, true
+			}
+		}
+	}
+	return "", "", false
+}
+
+func buildCustomSizeSelection(ratio sharedCompat.CustomAspectRatio, resolution string) string {
+	if ratio.Width <= 0 || ratio.Height <= 0 {
+		return client.DefaultSize
+	}
+	width, height := buildCustomDimensionsForResolution(float64(ratio.Width)/float64(ratio.Height), resolution)
+	return fmt.Sprintf("%dx%d", width, height)
 }
 
 func buildCustomResolutionSize(width int, height int, longSide int) string {
@@ -380,6 +506,35 @@ func aspectChoicesWithCustom(customRatios []sharedCompat.CustomAspectRatio) []as
 	}
 	items := make([]aspectChoice, 0, len(aspectChoices)+len(customRatios))
 	items = append(items, aspectChoices...)
+	for _, ratio := range customRatios {
+		if strings.TrimSpace(ratio.ID) == "" || ratio.Width <= 0 || ratio.Height <= 0 {
+			continue
+		}
+		w, h := aspectShapeFromRatio(ratio.Width, ratio.Height)
+		items = append(items, aspectChoice{
+			Value:  "custom:" + ratio.ID,
+			Label:  ratio.Label,
+			W:      w,
+			H:      h,
+			Custom: true,
+		})
+	}
+	return items
+}
+
+func visibleAspectChoices(apiMode string, requestPolicy string, imageModelID string, customRatios []sharedCompat.CustomAspectRatio) []aspectChoice {
+	_ = apiMode
+	allowed := allowedBuiltinAspects(imageModelID)
+	items := make([]aspectChoice, 0, len(aspectChoices)+len(customRatios))
+	for _, choice := range aspectChoices {
+		if !allowed[choice.Value] {
+			continue
+		}
+		items = append(items, choice)
+	}
+	if !supportsCustomAspectRatios(apiMode, requestPolicy, imageModelID) {
+		return items
+	}
 	for _, ratio := range customRatios {
 		if strings.TrimSpace(ratio.ID) == "" || ratio.Width <= 0 || ratio.Height <= 0 {
 			continue
@@ -417,12 +572,44 @@ func aspectShapeFromRatio(width int, height int) (int, int) {
 }
 
 func visibleResolutionChoices(apiMode string, requestPolicy string, imageModelID string) []choice {
-	if supportsExplicitLargeSizes(apiMode, requestPolicy, imageModelID) {
-		return resolutionChoices
+	family := classifyImageModel(imageModelID)
+	switch {
+	case family == "dalle2":
+		return filterResolutionChoices("256", "512", "1k")
+	case family == "dalle3":
+		return filterResolutionChoices("1k")
+	case isLegacyGPTImageModel(imageModelID):
+		return filterResolutionChoices("auto", "1k")
+	case supportsExplicitLargeSizes(apiMode, requestPolicy, imageModelID):
+		return filterResolutionChoices("auto", "1k", "2k", "4k")
+	default:
+		return filterResolutionChoices("auto", "1k")
 	}
-	filtered := make([]choice, 0, 2)
+}
+
+func visibleNonAutoResolutionChoices(apiMode string, requestPolicy string, imageModelID string) []choice {
+	choices := visibleResolutionChoices(apiMode, requestPolicy, imageModelID)
+	filtered := make([]choice, 0, len(choices))
+	for _, item := range choices {
+		if item.Value == "auto" {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	return filtered
+}
+
+func filterResolutionChoices(values ...string) []choice {
+	if len(values) == 0 {
+		return nil
+	}
+	allowed := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		allowed[strings.TrimSpace(value)] = struct{}{}
+	}
+	filtered := make([]choice, 0, len(values))
 	for _, item := range resolutionChoices {
-		if item.Value == "2k" || item.Value == "4k" {
+		if _, ok := allowed[item.Value]; !ok {
 			continue
 		}
 		filtered = append(filtered, item)
@@ -450,42 +637,116 @@ func choiceLabel(choices []choice, value string) string {
 }
 
 func classifyImageModel(modelID string) string {
-	value := strings.ToLower(strings.TrimSpace(modelID))
-	if value == "" {
-		value = strings.ToLower(client.ImageModel)
-	}
+	value := normalizedImageModelID(modelID)
 	switch {
-	case strings.Contains(value, "gpt-image"):
-		return "gpt-image"
-	case strings.Contains(value, "dall-e-3"), strings.Contains(value, "dalle-3"), strings.Contains(value, "dall-e3"), strings.Contains(value, "dalle3"):
+	case strings.HasPrefix(value, "dall-e-2"):
+		return "dalle2"
+	case strings.HasPrefix(value, "dall-e-3"), strings.HasPrefix(value, "dalle-3"), strings.HasPrefix(value, "dall-e3"), strings.HasPrefix(value, "dalle3"):
 		return "dalle3"
+	case strings.HasPrefix(value, "gpt-image"), strings.HasPrefix(value, "chatgpt-image"):
+		return "gpt-image"
 	default:
 		return "other"
 	}
 }
 
-func supportsExplicitLargeSizes(apiMode string, requestPolicy string, imageModelID string) bool {
-	family := classifyImageModel(imageModelID)
-	if strings.TrimSpace(apiMode) == string(client.APIModeImages) {
-		return family == "gpt-image" || family == "dalle3"
+func normalizedImageModelID(modelID string) string {
+	value := strings.ToLower(strings.TrimSpace(modelID))
+	if value == "" {
+		return strings.ToLower(client.ImageModel)
 	}
-	if family == "gpt-image" {
+	return value
+}
+
+func isFlexibleGPTImageModel(imageModelID string) bool {
+	return strings.HasPrefix(normalizedImageModelID(imageModelID), "gpt-image-2")
+}
+
+func isLegacyGPTImageModel(imageModelID string) bool {
+	value := normalizedImageModelID(imageModelID)
+	if strings.HasPrefix(value, "gpt-image-2") {
+		return false
+	}
+	return strings.HasPrefix(value, "gpt-image-1") || strings.HasPrefix(value, "chatgpt-image")
+}
+
+func supportsAutomaticSizing(imageModelID string) bool {
+	return isFlexibleGPTImageModel(imageModelID) || isLegacyGPTImageModel(imageModelID)
+}
+
+func supportsCustomAspectRatios(apiMode string, requestPolicy string, imageModelID string) bool {
+	_ = apiMode
+	if isFlexibleGPTImageModel(imageModelID) {
 		return true
 	}
-	return strings.TrimSpace(requestPolicy) == string(client.RequestPolicyCompat)
+	return classifyImageModel(imageModelID) == "other" && strings.TrimSpace(requestPolicy) == string(client.RequestPolicyCompat)
+}
+
+func supportsExplicitLargeSizes(apiMode string, requestPolicy string, imageModelID string) bool {
+	_ = apiMode
+	if isFlexibleGPTImageModel(imageModelID) {
+		return true
+	}
+	return classifyImageModel(imageModelID) == "other" && strings.TrimSpace(requestPolicy) == string(client.RequestPolicyCompat)
+}
+
+func allowedBuiltinAspects(imageModelID string) map[string]bool {
+	switch {
+	case classifyImageModel(imageModelID) == "dalle2":
+		return map[string]bool{"1:1": true}
+	case classifyImageModel(imageModelID) == "dalle3":
+		return map[string]bool{"1:1": true, "7:4": true, "4:7": true}
+	case isLegacyGPTImageModel(imageModelID):
+		return map[string]bool{"auto": true, "1:1": true, "3:2": true, "2:3": true}
+	default:
+		return map[string]bool{"auto": true, "1:1": true, "3:2": true, "2:3": true, "16:9": true, "9:16": true}
+	}
+}
+
+func isAllowedBuiltinAspect(aspect string, imageModelID string) bool {
+	return allowedBuiltinAspects(imageModelID)[strings.TrimSpace(aspect)]
 }
 
 func normalizeResolutionChoice(resolution string, apiMode string, requestPolicy string, imageModelID string) string {
 	allowed := visibleResolutionChoices(apiMode, requestPolicy, imageModelID)
+	resolution = strings.TrimSpace(resolution)
 	for _, item := range allowed {
 		if item.Value == resolution {
 			return resolution
 		}
 	}
+	for _, item := range allowed {
+		if item.Value != "auto" {
+			return item.Value
+		}
+	}
+	if len(allowed) > 0 {
+		return allowed[0].Value
+	}
+	return "1k"
+}
+
+func normalizeBatchAutoAspectResolution(resolution string, apiMode string, requestPolicy string, imageModelID string) string {
+	allowed := visibleNonAutoResolutionChoices(apiMode, requestPolicy, imageModelID)
+	resolution = strings.TrimSpace(resolution)
+	for _, item := range allowed {
+		if item.Value == resolution {
+			return item.Value
+		}
+	}
+	if len(allowed) > 0 {
+		return allowed[0].Value
+	}
 	return "1k"
 }
 
 func sizeCapabilityHint(apiMode string, requestPolicy string, imageModelID string) string {
+	switch classifyImageModel(imageModelID) {
+	case "dalle2":
+		return "当前模型仅支持 256 / 512 / 1024 的正方形尺寸。"
+	case "dalle3":
+		return "当前模型仅支持 1024x1024、1792x1024、1024x1792。"
+	}
 	if supportsExplicitLargeSizes(apiMode, requestPolicy, imageModelID) {
 		return ""
 	}

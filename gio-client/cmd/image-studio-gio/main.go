@@ -5,12 +5,14 @@ package main
 import (
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 
 	"image-studio/gio-client/internal/promptipc"
 	"image-studio/gio-client/internal/ui"
 
 	"gioui.org/app"
+	"gioui.org/io/event"
 	"gioui.org/unit"
 )
 
@@ -67,5 +69,21 @@ func main() {
 		}
 		os.Exit(0)
 	}()
-	app.Main()
+	app.Events(func(evt event.Event) bool {
+		switch e := evt.(type) {
+		case app.URLEvent:
+			handlePromptImportURLEvent(appUI, e)
+		}
+		return true
+	})
+}
+
+func handlePromptImportURLEvent(appUI *ui.App, evt app.URLEvent) {
+	msg := promptImportMessageFromURL(evt.URL)
+	switch msg.Type {
+	case promptipc.MessageTypeToken:
+		appUI.HandlePromptImportToken(msg.Token)
+	case promptipc.MessageTypeInvalid:
+		appUI.HandlePromptImportInvalid()
+	}
 }
