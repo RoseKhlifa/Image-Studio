@@ -65,6 +65,81 @@ func TestRequestImagesAPIWithPartialStreamsPreviews(t *testing.T) {
 	}
 }
 
+func TestRequestImagesAPIDownloadsURLOnlyResponse(t *testing.T) {
+	imageBytes := []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01}
+	var imageURL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/images/generations":
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprintf(w, `{"data":[{"url":%q,"revised_prompt":"cat revised"}]}`, imageURL)
+		case "/image.png":
+			w.Header().Set("Content-Type", "image/png")
+			_, _ = w.Write(imageBytes)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	imageURL = srv.URL + "/image.png"
+
+	res, err := RequestImagesAPIWithPartial(context.Background(), Options{
+		APIKey:       "sk-test",
+		Prompt:       "cat",
+		BaseURL:      srv.URL,
+		APIMode:      APIModeImages,
+		ImageModelID: "relay-image-model",
+	}, &bytes.Buffer{}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.ImageB64 != base64.StdEncoding.EncodeToString(imageBytes) {
+		t.Fatalf("ImageB64 = %q", res.ImageB64)
+	}
+	if res.RevisedPrompt != "cat revised" {
+		t.Fatalf("RevisedPrompt = %q", res.RevisedPrompt)
+	}
+	if res.SourceEvent != "images_api_url" {
+		t.Fatalf("SourceEvent = %q", res.SourceEvent)
+	}
+}
+
+func TestRequestImagesAPIGeminiModelUsesNonStreamingCompatEndpoint(t *testing.T) {
+	finalB64 := base64.StdEncoding.EncodeToString([]byte("final"))
+	var requestBody []byte
+	var requestPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestPath = r.URL.Path
+		requestBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"data":[{"b64_json":%q}]}`, finalB64)
+	}))
+	defer srv.Close()
+
+	res, err := RequestImagesAPIWithPartial(context.Background(), Options{
+		APIKey:       "sk-test",
+		Prompt:       "cat",
+		BaseURL:      srv.URL + "/v1beta/openai",
+		APIMode:      APIModeImages,
+		ImageModelID: "gemini-3.1-flash-image",
+	}, &bytes.Buffer{}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requestPath != "/v1beta/openai/images/generations" {
+		t.Fatalf("request path = %q", requestPath)
+	}
+	if strings.Contains(string(requestBody), `"stream"`) {
+		t.Fatalf("gemini request should omit stream: %s", requestBody)
+	}
+	if !strings.Contains(string(requestBody), `"response_format":"b64_json"`) {
+		t.Fatalf("gemini request should request b64_json: %s", requestBody)
+	}
+	if res.ImageB64 != finalB64 {
+		t.Fatalf("ImageB64 = %q", res.ImageB64)
+	}
+}
+
 func TestRequestImagesAPIWithRetriesRetriesWhenOnlyPartialPreviewArrives(t *testing.T) {
 	partialB64 := base64.StdEncoding.EncodeToString([]byte("partial"))
 	finalB64 := base64.StdEncoding.EncodeToString([]byte("final"))

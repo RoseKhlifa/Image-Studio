@@ -40,3 +40,14 @@ func TestValidateBaseURL(t *testing.T) {
 		})
 	}
 }
+
+func TestOpenAIAPIEndpointKeepsVersionedOpenAICompatibilityBase(t *testing.T) {
+	t.Parallel()
+
+	if got := openAIAPIEndpoint("https://generativelanguage.googleapis.com/v1beta/openai", "images/generations"); got != "https://generativelanguage.googleapis.com/v1beta/openai/images/generations" {
+		t.Fatalf("google endpoint = %q", got)
+	}
+	if got := openAIAPIEndpoint("https://relay.example.com/api", "/images/edits"); got != "https://relay.example.com/api/v1/images/edits" {
+		t.Fatalf("relay endpoint = %q", got)
+	}
+}

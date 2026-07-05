@@ -29,6 +29,25 @@ export function normalizeBaseURL(raw) {
   return trimmed.replace(/\/v1$/i, "");
 }
 
+export function isVersionedOpenAICompatibilityBaseURL(raw) {
+  try {
+    const parsed = new URL(normalizeBaseURL(raw));
+    return parsed.pathname.replace(/\/+$/, "").toLowerCase().endsWith("/openai");
+  } catch {
+    return false;
+  }
+}
+
+export function openAIAPIEndpoint(baseURL, endpointPath) {
+  const normalized = normalizeBaseURL(baseURL);
+  const path = String(endpointPath || "").trim().replace(/^\/+|\/+$/g, "");
+  if (!path) return normalized;
+  if (isVersionedOpenAICompatibilityBaseURL(normalized)) {
+    return `${normalized}/${path}`;
+  }
+  return `${normalized}/v1/${path}`;
+}
+
 export function normalizeAPIMode(apiMode) {
   return apiMode === "images" ? "images" : "responses";
 }
@@ -280,12 +299,19 @@ export function supportsImageStyle(imageModelID) {
   return classifyImageModel(imageModelID) === "dalle3";
 }
 
+export function isGoogleImageModel(imageModelID) {
+  const normalized = normalizeImageModel(imageModelID).toLowerCase();
+  return normalized.startsWith("gemini-") ||
+    normalized.startsWith("imagen-") ||
+    normalized.includes("nano-banana");
+}
+
 export function shouldSendExtendedImageParameters(requestPolicy) {
   return isCompatRequestPolicy(requestPolicy);
 }
 
 export function shouldUseImagesNewAPICompat(payload) {
-  return payload?.imagesNewAPICompat === true;
+  return payload?.imagesNewAPICompat === true || isGoogleImageModel(payload?.imageModelID);
 }
 
 export function fileNameFromPath(path) {

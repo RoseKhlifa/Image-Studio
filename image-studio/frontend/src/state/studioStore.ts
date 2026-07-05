@@ -14,6 +14,8 @@ import {
   GetOutputDir,
   DeleteStoredAPIKey,
   GetStoredAPIKey,
+  OpenImageDialog,
+  ReadImageAsBase64,
   SetStoredAPIKey,
   RegisterMediaAsset,
   RegisterImportedImageAsset,
@@ -1264,8 +1266,11 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       }),
     });
 
+    const importedMaskDataURL = s.maskDataURL && s.maskDataURL !== "__PENDING_MASK__" ? s.maskDataURL : null;
     const maskDataURL = s.mode === "edit"
-      ? buildMaskPNGDataURL(s.strokes, s.currentImage?.imageB64 ? imageDims(s.currentImage.imageB64) : null)
+      ? (s.strokes.length > 0
+        ? buildMaskPNGDataURL(s.strokes, s.currentImage?.imageB64 ? imageDims(s.currentImage.imageB64) : null)
+        : importedMaskDataURL)
       : null;
     const maskB64 = maskDataURL ? stripDataURLPrefix(maskDataURL) : "";
     let augmentedPrompt = augmentPromptWithAnnotations(s.prompt, s.annotations, s.currentImage?.imageB64 ? imageDims(s.currentImage.imageB64) : null);
@@ -1938,6 +1943,36 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     void backfillHistoryPreviewRefs(items);
   },
 
+  importMaskImage: async () => {
+    try {
+      const res = await OpenImageDialog();
+      if (!res?.path) return;
+      const b64 = res.imageB64 || await ReadImageAsBase64(res.path);
+      if (!b64) throw new Error("未读取到图片内容");
+      const beforeStrokes = get().strokes;
+      const beforeMaskDataURL = get().maskDataURL;
+      const nextMaskDataURL = tempDataURLFromB64(b64);
+      const entry: UndoEntry = {
+        label: "import-mask",
+        undo: () => ({ strokes: beforeStrokes, maskDataURL: beforeMaskDataURL }),
+        redo: () => ({ strokes: [], maskDataURL: nextMaskDataURL }),
+      };
+      set({
+        tool: "mask",
+        strokes: [],
+        maskDataURL: nextMaskDataURL,
+        undoStack: [...get().undoStack, entry],
+        redoStack: [],
+        errorMessage: null,
+        errorCanRetry: false,
+        errorRawPath: null,
+      });
+      get().pushToast("已导入蒙版图片", "success");
+    } catch (error: any) {
+      set({ errorMessage: `导入蒙版失败:${error?.message ?? error}`, errorCanRetry: false, errorRawPath: null });
+    }
+  },
+
   setMaskDataURL: (v) => set({ maskDataURL: v }),
 
   pushStroke: (stroke) => {
@@ -1957,10 +1992,11 @@ export const useStudioStore = create<StudioState>((set, get) => ({
 
   resetMask: () => {
     const before = get().strokes;
-    if (before.length === 0) return;
+    const beforeMaskDataURL = get().maskDataURL;
+    if (before.length === 0 && !beforeMaskDataURL) return;
     const entry: UndoEntry = {
       label: "clear-mask",
-      undo: () => ({ strokes: before, maskDataURL: get().maskDataURL }),
+      undo: () => ({ strokes: before, maskDataURL: beforeMaskDataURL }),
       redo: () => ({ strokes: [], maskDataURL: null }),
     };
     set({

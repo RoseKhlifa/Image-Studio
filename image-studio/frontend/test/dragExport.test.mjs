@@ -13,7 +13,7 @@ function restoreWindow() {
   globalThis.window = realWindow;
 }
 
-test("buildHistoryItemDragExport prefers the managed full media route over saved file path", async () => {
+test("buildHistoryItemDragExport prefers the saved file path for desktop file drags", async () => {
   installWindow();
   try {
     const dragExport = await import(`../src/lib/dragExport.ts?drag-export-test=${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -28,10 +28,10 @@ test("buildHistoryItemDragExport prefers the managed full media route over saved
       previewOnly: false,
     });
     assert.deepEqual(spec, {
-      href: "http://wails.localhost/media/full/abc123",
+      href: "file:///tmp/image-generate-cat.png",
       fileName: "image-generate-cat.png",
       mimeType: "image/png",
-      downloadURL: "image/png:image-generate-cat.png:http://wails.localhost/media/full/abc123",
+      downloadURL: "image/png:image-generate-cat.png:file:///tmp/image-generate-cat.png",
     });
   } finally {
     restoreWindow();
@@ -113,7 +113,7 @@ test("buildHistoryItemDragExport rewrites wails asset URLs for drag export", asy
   }
 });
 
-test("buildHistoryItemDragExport still uses the full asset for persisted preview-only history items", async () => {
+test("buildHistoryItemDragExport still prefers saved paths for persisted preview-only history items", async () => {
   installWindow("http://wails.localhost/app/");
   try {
     const dragExport = await import(`../src/lib/dragExport.ts?drag-export-test=${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -128,10 +128,10 @@ test("buildHistoryItemDragExport still uses the full asset for persisted preview
       previewOnly: true,
     });
     assert.deepEqual(spec, {
-      href: "http://wails.localhost/media/full/history-full-1",
+      href: "file:///tmp/image-generate-history.webp",
       fileName: "image-generate-history.webp",
       mimeType: "image/webp",
-      downloadURL: "image/webp:image-generate-history.webp:http://wails.localhost/media/full/history-full-1",
+      downloadURL: "image/webp:image-generate-history.webp:file:///tmp/image-generate-history.webp",
     });
   } finally {
     restoreWindow();
