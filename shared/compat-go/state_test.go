@@ -51,6 +51,16 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 			CompletionNotification: &CompletionNotificationSettings{
 				Enabled: false,
 			},
+			AdvancedFloatingPanel: &AdvancedFloatingPanelPrefs{
+				X: func() *int { v := 880; return &v }(),
+				Y: func() *int { v := 108; return &v }(),
+				Groups: map[string]bool{
+					"core":     true,
+					"output":   true,
+					"strategy": false,
+					"stream":   true,
+				},
+			},
 			Presets: []Preset{{
 				ID:                "preset-1",
 				Name:              "配置1",
@@ -117,6 +127,9 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	}
 	if loaded.Settings.CompletionNotification == nil || loaded.Settings.CompletionNotification.Enabled {
 		t.Fatalf("completion notification not preserved: %#v", loaded.Settings.CompletionNotification)
+	}
+	if loaded.Settings.AdvancedFloatingPanel == nil || loaded.Settings.AdvancedFloatingPanel.X == nil || *loaded.Settings.AdvancedFloatingPanel.X != 880 || loaded.Settings.AdvancedFloatingPanel.Y == nil || *loaded.Settings.AdvancedFloatingPanel.Y != 108 || !loaded.Settings.AdvancedFloatingPanel.Groups["output"] || !loaded.Settings.AdvancedFloatingPanel.Groups["stream"] {
+		t.Fatalf("advanced floating panel prefs not preserved: %#v", loaded.Settings.AdvancedFloatingPanel)
 	}
 	if len(loaded.Settings.Presets) != 1 {
 		t.Fatalf("presets not preserved: %#v", loaded.Settings.Presets)

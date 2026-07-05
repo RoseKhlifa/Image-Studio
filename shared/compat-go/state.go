@@ -21,6 +21,12 @@ type State struct {
 	HistoryFull   []HistoryFullItem `json:"historyFull,omitempty"`
 }
 
+type AdvancedFloatingPanelPrefs struct {
+	X      *int            `json:"x,omitempty"`
+	Y      *int            `json:"y,omitempty"`
+	Groups map[string]bool `json:"groups,omitempty"`
+}
+
 type Settings struct {
 	ProxyMode                 string                          `json:"proxyMode,omitempty"`
 	ProxyURL                  string                          `json:"proxyURL,omitempty"`
@@ -51,6 +57,7 @@ type Settings struct {
 	IgnoredReleaseTag         string                          `json:"ignoredReleaseTag,omitempty"`
 	CompletionSound           *CompletionSoundSettings        `json:"completionSound,omitempty"`
 	CompletionNotification    *CompletionNotificationSettings `json:"completionNotification,omitempty"`
+	AdvancedFloatingPanel     *AdvancedFloatingPanelPrefs     `json:"advancedFloatingPanel,omitempty"`
 }
 
 type CompletionSoundSettings struct {

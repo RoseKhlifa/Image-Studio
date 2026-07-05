@@ -86,6 +86,11 @@ func (a *App) canvasToolbar(gtx layout.Context, snap snapshot) layout.Dimensions
 	if a.saveAsButton.Clicked(gtx) {
 		a.openSavePromptForCurrent()
 	}
+	if a.dragOutButton.Clicked(gtx) {
+		if _, err := a.dragOutHistoryItem(snap.Result.Item); err != nil {
+			a.appendLog("拖出复制失败: " + err.Error())
+		}
+	}
 	if a.latestResultButton.Clicked(gtx) {
 		if hasLatest {
 			if err := a.loadHistoryPreview(latestItem, true); err != nil && !isMissingPreview(err) {
@@ -421,6 +426,11 @@ func (a *App) canvasToolbar(gtx layout.Context, snap snapshot) layout.Dimensions
 						}))
 					}
 					if snap.Result.HasItem && canSaveHistoryItem(snap.Result.Item) {
+						if canDragOutHistoryItem(snap.Result.Item) {
+							rightChildren = append(rightChildren, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								return a.toolbarTextButton(gtx, &a.dragOutButton, uiIconLaunch, "拖出复制", false)
+							}))
+						}
 						rightChildren = append(rightChildren, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 							return a.toolbarPrimaryTextButton(gtx, &a.saveAsButton, uiIconDownload, "另存为")
 						}))
@@ -472,8 +482,8 @@ func (a *App) sourceStrip(gtx layout.Context, snap snapshot, sourcePaths []strin
 	}
 	for _, path := range sourcePaths {
 		path := path
-		btn := a.sourceButton("remove:" + path)
-		for btn.Clicked(gtx) {
+		removeBtn := a.sourceButton("remove:" + path)
+		for removeBtn.Clicked(gtx) {
 			a.removeSourcePath(path)
 		}
 		previewBtn := a.sourceButton("preview:" + path)
@@ -481,6 +491,14 @@ func (a *App) sourceStrip(gtx layout.Context, snap snapshot, sourcePaths []strin
 			if err := a.viewSourcePathOnCanvas(path); err != nil {
 				a.appendLog("预览参考图失败: " + err.Error())
 			}
+		}
+		moveLeftBtn := a.sourceButton("move-left:" + path)
+		for moveLeftBtn.Clicked(gtx) {
+			a.moveSourcePath(path, -1)
+		}
+		moveRightBtn := a.sourceButton("move-right:" + path)
+		for moveRightBtn.Clicked(gtx) {
+			a.moveSourcePath(path, 1)
 		}
 	}
 
@@ -509,7 +527,7 @@ func (a *App) sourceStrip(gtx layout.Context, snap snapshot, sourcePaths []strin
 						indexLabel := strconv.Itoa(idx + 1)
 						tiles = append(tiles, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 							active := strings.TrimSpace(snap.Result.SavedPath) == strings.TrimSpace(path) || strings.TrimSpace(snap.Result.Item.SavedPath) == strings.TrimSpace(path)
-							return a.layoutSourceStripTile(gtx, path, indexLabel, active)
+							return a.layoutSourceStripTile(gtx, path, indexLabel, active, idx, len(sourcePaths))
 						}))
 					}
 					tiles = append(tiles, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -522,9 +540,11 @@ func (a *App) sourceStrip(gtx layout.Context, snap snapshot, sourcePaths []strin
 	})
 }
 
-func (a *App) layoutSourceStripTile(gtx layout.Context, path string, indexLabel string, active bool) layout.Dimensions {
+func (a *App) layoutSourceStripTile(gtx layout.Context, path string, indexLabel string, active bool, index int, total int) layout.Dimensions {
 	removeBtn := a.sourceButton("remove:" + path)
 	previewBtn := a.sourceButton("preview:" + path)
+	moveLeftBtn := a.sourceButton("move-left:" + path)
+	moveRightBtn := a.sourceButton("move-right:" + path)
 	img, imgOp := a.displayPathThumb(path, gtx.Dp(unit.Dp(48)))
 	bg := fluent.surface
 	border := fluent.border
@@ -573,21 +593,67 @@ func (a *App) layoutSourceStripTile(gtx layout.Context, path string, indexLabel 
 						layout.Stacked(func(gtx layout.Context) layout.Dimensions {
 							return layout.NE.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 								return layout.Inset{Top: unit.Dp(3), Right: unit.Dp(3)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-									return a.surfaceButton(
-										gtx,
-										removeBtn,
-										rgba(0x111111, 0xc0),
-										dangerAlpha(0xd8),
-										rgba(0xffffff, 0x00),
-										unit.Dp(3),
-										layout.Inset{Top: 2, Bottom: 2, Left: 2, Right: 2},
-										func(gtx layout.Context) layout.Dimensions {
-											return fixedWidth(gtx, unit.Dp(10), func(gtx layout.Context) layout.Dimensions {
-												return fixedHeight(gtx, unit.Dp(10), func(gtx layout.Context) layout.Dimensions {
-													return uiIconClose.Layout(gtx, fluent.white)
-												})
-											})
-										},
+									return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(unit.Dp(3))}.Layout(gtx,
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											if index <= 0 {
+												return layout.Dimensions{}
+											}
+											return a.surfaceButton(
+												gtx,
+												moveLeftBtn,
+												rgba(0x111111, 0xc0),
+												rgba(0x111111, 0xdb),
+												rgba(0xffffff, 0x00),
+												unit.Dp(3),
+												layout.Inset{Top: 2, Bottom: 2, Left: 2, Right: 2},
+												func(gtx layout.Context) layout.Dimensions {
+													return fixedWidth(gtx, unit.Dp(10), func(gtx layout.Context) layout.Dimensions {
+														return fixedHeight(gtx, unit.Dp(10), func(gtx layout.Context) layout.Dimensions {
+															return uiIconChevronLeft.Layout(gtx, fluent.white)
+														})
+													})
+												},
+											)
+										}),
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											if index >= total-1 {
+												return layout.Dimensions{}
+											}
+											return a.surfaceButton(
+												gtx,
+												moveRightBtn,
+												rgba(0x111111, 0xc0),
+												rgba(0x111111, 0xdb),
+												rgba(0xffffff, 0x00),
+												unit.Dp(3),
+												layout.Inset{Top: 2, Bottom: 2, Left: 2, Right: 2},
+												func(gtx layout.Context) layout.Dimensions {
+													return fixedWidth(gtx, unit.Dp(10), func(gtx layout.Context) layout.Dimensions {
+														return fixedHeight(gtx, unit.Dp(10), func(gtx layout.Context) layout.Dimensions {
+															return uiIconChevronRight.Layout(gtx, fluent.white)
+														})
+													})
+												},
+											)
+										}),
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											return a.surfaceButton(
+												gtx,
+												removeBtn,
+												rgba(0x111111, 0xc0),
+												dangerAlpha(0xd8),
+												rgba(0xffffff, 0x00),
+												unit.Dp(3),
+												layout.Inset{Top: 2, Bottom: 2, Left: 2, Right: 2},
+												func(gtx layout.Context) layout.Dimensions {
+													return fixedWidth(gtx, unit.Dp(10), func(gtx layout.Context) layout.Dimensions {
+														return fixedHeight(gtx, unit.Dp(10), func(gtx layout.Context) layout.Dimensions {
+															return uiIconClose.Layout(gtx, fluent.white)
+														})
+													})
+												},
+											)
+										}),
 									)
 								})
 							})
@@ -1420,6 +1486,7 @@ func chooseBatchGridInset(col int, columns int) unit.Dp {
 
 func (a *App) layoutBatchGridTile(gtx layout.Context, item sharedCompat.HistoryItem, index int, active bool, preview bool) layout.Dimensions {
 	var btn *widget.Clickable
+	var dragBtn *widget.Clickable
 	if !preview && strings.TrimSpace(item.ID) != "" {
 		btn = a.historyButton("batch-grid:" + item.ID)
 		for btn.Clicked(gtx) {
@@ -1428,6 +1495,15 @@ func (a *App) layoutBatchGridTile(gtx layout.Context, item sharedCompat.HistoryI
 			} else {
 				a.closeResultGrid()
 			}
+		}
+		dragBtn = a.historyActionButton("batch-grid-drag:" + item.ID)
+		for dragBtn.Clicked(gtx) {
+			next, err := a.dragOutHistoryItem(item)
+			if err != nil {
+				a.appendLog("拖出复制失败: " + err.Error())
+				continue
+			}
+			item = next
 		}
 	}
 	img, imgOp := a.displayHistoryThumb(item, gtx.Dp(unit.Dp(208)))
@@ -1501,6 +1577,38 @@ func (a *App) layoutBatchGridTile(gtx layout.Context, item sharedCompat.HistoryI
 										return a.label(gtx, fmt.Sprintf("%.0fs", item.ElapsedSec), unit.Sp(9), fluent.white, font.Medium)
 									})
 								})
+							})
+						})
+					}),
+					layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+						if !canDragOutHistoryItem(item) || preview || dragBtn == nil {
+							return layout.Dimensions{}
+						}
+						return layout.SE.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							return layout.Inset{Right: unit.Dp(8), Bottom: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+								return a.surfaceButton(
+									gtx,
+									dragBtn,
+									rgba(0x111111, 0xb2),
+									rgba(0x111111, 0xdb),
+									rgba(0xffffff, 0x00),
+									unit.Dp(999),
+									layout.Inset{Top: 4, Bottom: 4, Left: 8, Right: 8},
+									func(gtx layout.Context) layout.Dimensions {
+										return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle, Gap: gtx.Dp(unit.Dp(4))}.Layout(gtx,
+											layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+												return fixedWidth(gtx, unit.Dp(12), func(gtx layout.Context) layout.Dimensions {
+													return fixedHeight(gtx, unit.Dp(12), func(gtx layout.Context) layout.Dimensions {
+														return uiIconLaunch.Layout(gtx, fluent.white)
+													})
+												})
+											}),
+											layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+												return a.label(gtx, "拖出复制", unit.Sp(9), fluent.white, font.Medium)
+											}),
+										)
+									},
+								)
 							})
 						})
 					}),

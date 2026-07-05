@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -16,6 +17,14 @@ import (
 
 func canSaveHistoryItem(item sharedCompat.HistoryItem) bool {
 	return strings.TrimSpace(item.SavedPath) != "" || strings.TrimSpace(item.ImageB64) != ""
+}
+
+func supportsNativeFileDrag() bool {
+	return runtime.GOOS == "darwin"
+}
+
+func canDragOutHistoryItem(item sharedCompat.HistoryItem) bool {
+	return supportsNativeFileDrag() && canSaveHistoryItem(item)
 }
 
 func suggestedSaveNameForHistoryItem(item sharedCompat.HistoryItem) string {

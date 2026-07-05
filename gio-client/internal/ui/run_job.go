@@ -26,6 +26,7 @@ import (
 
 func (a *App) startRun() {
 	a.syncLoopSettingsFromInputs()
+	a.syncBatchSettingsFromInputs()
 	if client.Mode(a.mode) == client.ModeEdit && len(a.sourcePaths()) == 0 {
 		snap := a.readSnapshot()
 		if strings.TrimSpace(snap.Result.SavedPath) == "" && strings.TrimSpace(snap.Result.Item.ImageB64) != "" {
@@ -76,7 +77,7 @@ func (a *App) startRun() {
 		a.appendLog(errMsg)
 		return
 	}
-	requiredConcurrency := requestedRunConcurrency(total, a.loopEnabled, a.loopConcurrency)
+	requiredConcurrency := requestedRunConcurrency(total, a.batchMode, a.batchConcurrency, a.loopEnabled, a.loopConcurrency)
 	if limit := parseConcurrencyLimit(strings.TrimSpace(a.concurrencyLimitInput.Text())); limit > 0 && requiredConcurrency > limit {
 		a.appendLog(runConcurrencyLimitError(cfg.APIMode, limit, requiredConcurrency, a.batchMode, a.loopEnabled))
 		return
@@ -96,8 +97,18 @@ func parseConcurrencyLimit(raw string) int {
 	return value
 }
 
-func requestedRunConcurrency(total int, loopEnabled bool, loopConcurrency int) int {
+func requestedRunConcurrency(total int, batchMode bool, batchConcurrency int, loopEnabled bool, loopConcurrency int) int {
 	total = normalizeBatchCount(total)
+	if batchMode {
+		concurrency := normalizeBatchProcessConcurrency(batchConcurrency)
+		if concurrency > total {
+			concurrency = total
+		}
+		if concurrency < 1 {
+			concurrency = 1
+		}
+		return concurrency
+	}
 	if loopEnabled {
 		concurrency := normalizeLoopGenerationConcurrency(loopConcurrency)
 		if concurrency > total {
@@ -239,7 +250,7 @@ func (a *App) startRunWithConfig(cfg kernel.Config, total int) {
 					jobCfg.AutoRetryEnabled = a.batchRetryOnFail
 					if strings.TrimSpace(a.batchAutoAspect) != "" {
 						if width, height, err := imageDimensionsFromFile(batchSources[i]); err == nil && width > 0 && height > 0 {
-							jobCfg.Size = buildBatchAutoAspectSize(width, height, a.batchAutoAspect)
+							jobCfg.Size = buildReferenceResolutionSizeSelection(width, height, a.batchAutoAspect, a.api, a.policy, a.imageModelInput.Text(), a.customAspectRatios)
 						}
 					}
 				}
@@ -396,8 +407,9 @@ func (a *App) startRunWithConfig(cfg kernel.Config, total int) {
 				if a.batchMode && i < len(batchSources) {
 					saved := ""
 					var saveErr error
+					batchOutputDir := a.effectiveBatchOutputDir()
 					if previewOnlyRemote {
-						targetPath := batchResultTargetPath(batchSources[i], a.batchOutputDirInput.Text())
+						targetPath := batchResultTargetPath(batchSources[i], batchOutputDir)
 						if targetPath != "" {
 							saved, saveErr = saveImageB64ToPath(res.ImageB64, filepath.Base(targetPath), targetPath)
 						}
@@ -464,6 +476,15 @@ func (a *App) currentConfig() kernel.Config {
 	if client.Mode(a.mode) == client.ModeEdit {
 		maskB64 = a.currentCanvasMaskB64()
 	}
+	size := normalizeSizeSelection(a.size, a.api, a.policy, a.imageModelInput.Text(), a.customAspectRatios)
+	if client.Mode(a.mode) == client.ModeEdit && !a.batchMode && strings.TrimSpace(a.editAutoAspectResolution) != "" {
+		width, height, ok := a.currentEditReferenceDimensions()
+		if ok {
+			size = buildReferenceResolutionSizeSelection(width, height, a.editAutoAspectResolution, a.api, a.policy, a.imageModelInput.Text(), a.customAspectRatios)
+		} else {
+			size = buildReferenceResolutionSizeSelection(0, 0, a.editAutoAspectResolution, a.api, a.policy, a.imageModelInput.Text(), a.customAspectRatios)
+		}
+	}
 	var fallback *kernel.FallbackProfileConfig
 	fallbackID := strings.TrimSpace(a.fallbackProfileID)
 	if fallbackID != "" {
@@ -484,7 +505,7 @@ func (a *App) currentConfig() kernel.Config {
 		RequestPolicy:        client.RequestPolicy(a.policy),
 		ResponsesTransport:   client.ResponsesTransport(a.responsesTransport),
 		ImagesNewAPICompat:   a.imagesNewAPICompat,
-		Size:                 a.size,
+		Size:                 size,
 		Quality:              a.quality,
 		OutputFormat:         a.format,
 		Background:           a.background,
@@ -513,6 +534,63 @@ func (a *App) currentConfig() kernel.Config {
 		FallbackProfile:      fallback,
 		PreviewOnlyResult:    normalizeKernelRuntimeMode(a.kernelRuntimeMode) == "remote",
 	}
+}
+
+func (a *App) effectiveEditAutoAspectResolution() string {
+	if strings.TrimSpace(a.editAutoAspectResolution) == "" {
+		return ""
+	}
+	return normalizeBatchAutoAspectResolution(a.editAutoAspectResolution, a.api, a.policy, a.imageModelInput.Text())
+}
+
+func (a *App) currentEditAutoAspectResolvedSize() string {
+	resolution := a.effectiveEditAutoAspectResolution()
+	if resolution == "" {
+		return ""
+	}
+	width, height, ok := a.currentEditReferenceDimensions()
+	if ok {
+		return buildReferenceResolutionSizeSelection(width, height, resolution, a.api, a.policy, a.imageModelInput.Text(), a.customAspectRatios)
+	}
+	return buildReferenceResolutionSizeSelection(0, 0, resolution, a.api, a.policy, a.imageModelInput.Text(), a.customAspectRatios)
+}
+
+func (a *App) currentEditReferenceDimensions() (int, int, bool) {
+	if client.Mode(a.mode) != client.ModeEdit {
+		return 0, 0, false
+	}
+	for _, path := range a.sourcePaths() {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			continue
+		}
+		width, height, err := imageDimensionsFromFile(path)
+		if err == nil && width > 0 && height > 0 {
+			return width, height, true
+		}
+		break
+	}
+	if current := strings.TrimSpace(a.result.SavedPath); current != "" {
+		width, height, err := imageDimensionsFromFile(current)
+		if err == nil && width > 0 && height > 0 {
+			return width, height, true
+		}
+	}
+	if imageB64 := strings.TrimSpace(a.result.Item.ImageB64); imageB64 != "" {
+		if img, err := decodeImageB64(imageB64); err == nil && img != nil {
+			bounds := img.Bounds()
+			if bounds.Dx() > 0 && bounds.Dy() > 0 {
+				return bounds.Dx(), bounds.Dy(), true
+			}
+		}
+	}
+	if a.result.Image != nil {
+		bounds := a.result.Image.Bounds()
+		if bounds.Dx() > 0 && bounds.Dy() > 0 {
+			return bounds.Dx(), bounds.Dy(), true
+		}
+	}
+	return 0, 0, false
 }
 
 func (a *App) currentEditSourcesForConfig() ([]string, []string) {
@@ -668,7 +746,7 @@ func (a *App) copyBatchResultIfNeeded(savedPath string, sourcePath string) (stri
 	if savedPath == "" || sourcePath == "" {
 		return "", nil
 	}
-	dst := batchResultTargetPath(sourcePath, a.batchOutputDirInput.Text())
+	dst := batchResultTargetPath(sourcePath, a.effectiveBatchOutputDir())
 	if dst == "" {
 		return "", nil
 	}
@@ -676,6 +754,14 @@ func (a *App) copyBatchResultIfNeeded(savedPath string, sourcePath string) (stri
 }
 
 func imageDimensionsFromFile(path string) (int, int, error) {
+	if imageB64, ok := readVirtualImageB64(path); ok {
+		img, err := decodeImageB64(imageB64)
+		if err != nil {
+			return 0, 0, err
+		}
+		bounds := img.Bounds()
+		return bounds.Dx(), bounds.Dy(), nil
+	}
 	file, err := os.Open(path)
 	if err != nil {
 		return 0, 0, err
@@ -689,24 +775,5 @@ func imageDimensionsFromFile(path string) (int, int, error) {
 }
 
 func buildBatchAutoAspectSize(width int, height int, resolution string) string {
-	if width <= 0 || height <= 0 {
-		return "1024x1024"
-	}
-	longSide := 1536
-	switch strings.ToLower(strings.TrimSpace(resolution)) {
-	case "256":
-		longSide = 256
-	case "512":
-		longSide = 512
-	case "2k":
-		longSide = 2048
-	case "4k":
-		longSide = 3840
-	}
-	if width >= height {
-		shortSide := max(64, int(float64(longSide)*float64(height)/float64(width)+0.5))
-		return fmt.Sprintf("%dx%d", longSide, shortSide)
-	}
-	shortSide := max(64, int(float64(longSide)*float64(width)/float64(height)+0.5))
-	return fmt.Sprintf("%dx%d", shortSide, longSide)
+	return buildReferenceResolutionSizeSelection(width, height, resolution, string(client.APIModeResponses), string(client.RequestPolicyOpenAI), client.ImageModel, nil)
 }

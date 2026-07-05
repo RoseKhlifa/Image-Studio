@@ -32,6 +32,7 @@ func (a *App) layout(gtx layout.Context) layout.Dimensions {
 	for a.clearLogButton.Clicked(gtx) {
 		a.clearLogs()
 	}
+	a.trackGlobalPointer(gtx)
 	a.handleCanvasKeyboardShortcuts(gtx, snap)
 
 	paint.FillShape(gtx.Ops, fluent.bg, clip.Rect{Max: gtx.Constraints.Max}.Op())
@@ -105,17 +106,35 @@ func (a *App) layout(gtx layout.Context) layout.Dimensions {
 	if a.promptTemplateManagerOpen {
 		a.layoutPromptTemplateManagerModal(gtx, snap)
 	}
+	if a.promptHelperOpen {
+		a.layoutPromptHelperPopover(gtx)
+	}
+	if a.presetPickerOpen {
+		a.layoutPresetPickerPopover(gtx)
+	}
 	if a.presetManagerOpen {
 		a.layoutPresetManagerModal(gtx, snap)
 	}
 	if a.customAspectRatioManagerOpen {
 		a.layoutCustomAspectRatioManagerModal(gtx)
 	}
+	if a.customSizeModalOpen {
+		a.layoutCustomSizeModal(gtx)
+	}
+	if a.loopModalOpen {
+		a.layoutLoopModal(gtx)
+	}
+	if a.advancedOpen {
+		a.layoutAdvancedModal(gtx)
+	}
 	if a.canvasAnnotationTextPromptOpen {
 		a.layoutCanvasAnnotationTextPrompt(gtx)
 	}
 	if snap.ActiveResultDetail.ID != "" || snap.ActiveResultDetail.SavedPath != "" {
 		a.layoutResultDetailModal(gtx, snap)
+	}
+	if snap.HistoryActionMenuItem.ID != "" || snap.HistoryActionMenuItem.SavedPath != "" {
+		a.layoutHistoryActionMenuModal(gtx, snap)
 	}
 	if strings.TrimSpace(snap.RawResponseModalPath) != "" || strings.TrimSpace(snap.RawResponseModalError) != "" || strings.TrimSpace(snap.RawResponseModalText) != "" {
 		a.layoutRawResponseModal(gtx, snap)

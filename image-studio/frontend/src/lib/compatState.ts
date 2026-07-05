@@ -1,4 +1,5 @@
 import { LoadCompatibilityState, SaveCompatibilityState } from "../platform/runtime/host.ts";
+import { targetPlatform } from "../platform";
 import type {
   AutoAspectResolutionPreset,
   BatchProcessConfig,
@@ -45,6 +46,12 @@ import { normalizeAutoRetryCount } from "../../../../shared/kernel/requestModel.
 const SCHEMA_VERSION = 1;
 const MARKER_KEY = "gptcodex.compatStateUpdatedAt";
 
+type AdvancedFloatingPanelPrefs = {
+  x?: number;
+  y?: number;
+  groups?: Record<string, boolean>;
+};
+
 export type CompatibilityState = {
   schemaVersion: number;
   client?: string;
@@ -78,6 +85,7 @@ export type CompatibilityState = {
     ignoredReleaseTag?: string;
     completionSound?: CompletionSoundConfig;
     completionNotification?: CompletionNotificationConfig;
+    advancedFloatingPanel?: AdvancedFloatingPanelPrefs;
   };
   profiles: UpstreamProfile[];
   activeProfileId: string;
@@ -175,6 +183,7 @@ export function compatibilityExportFingerprint(input: CompatibilityExportInput):
     ignoredReleaseTag: input.ignoredReleaseTag,
     completionSound: input.completionSound,
     completionNotification: input.completionNotification,
+    advancedFloatingPanel: readAdvancedFloatingPanelPrefs(),
     outputDir: readLocalStorageString("gptcodex.outputDir"),
     trustedOutputRoots: loadTrustedOutputRoots(),
     savePromptSuppressed: readLocalStorageString("gptcodex.savePromptSuppressed") === "1",
@@ -217,6 +226,7 @@ function buildCompatibilityState(input: CompatibilityExportInput): Compatibility
       ignoredReleaseTag: readLocalStorageString("gptcodex.ignoredReleaseTag"),
       completionSound: normalizeCompletionSoundConfig(input.completionSound),
       completionNotification: normalizeCompletionNotificationConfig(input.completionNotification),
+      advancedFloatingPanel: readAdvancedFloatingPanelPrefs(),
     },
     profiles: normalizeProfiles(input.profiles),
     activeProfileId: input.activeProfileId || "",
@@ -271,6 +281,9 @@ function applyCompatibilityLocalStorage(state: CompatibilityState): void {
   }
   persistCompletionSoundConfig(normalizeCompletionSoundConfig(settings.completionSound));
   persistCompletionNotificationConfig(normalizeCompletionNotificationConfig(settings.completionNotification));
+  if (settings.advancedFloatingPanel) {
+    writeAdvancedFloatingPanelPrefs(settings.advancedFloatingPanel);
+  }
 }
 
 async function persistCompatibilityHistory(state: CompatibilityState): Promise<void> {
@@ -339,6 +352,7 @@ function normalizeSettings(raw: unknown): CompatibilityState["settings"] {
     ignoredReleaseTag: typeof source.ignoredReleaseTag === "string" ? source.ignoredReleaseTag.trim() : "",
     completionSound: normalizeCompletionSoundConfig(source.completionSound),
     completionNotification: normalizeCompletionNotificationConfig(source.completionNotification),
+    advancedFloatingPanel: normalizeAdvancedFloatingPanelPrefs(source.advancedFloatingPanel),
   };
 }
 
@@ -463,6 +477,48 @@ export function writeIgnoredReleaseTag(value: string): void {
   const trimmed = value.trim();
   if (trimmed) writeLocalStorageString("gptcodex.ignoredReleaseTag", trimmed);
   else removeLocalStorage("gptcodex.ignoredReleaseTag");
+}
+
+function advancedFloatingPanelStorageKey(): string {
+  return `gptcodex.advancedFloatingPanel.${targetPlatform}`;
+}
+
+function normalizeAdvancedFloatingPanelPrefs(raw: unknown): AdvancedFloatingPanelPrefs | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const source = raw as Record<string, any>;
+  const x = typeof source.x === "number" && Number.isFinite(source.x) ? Math.round(source.x) : undefined;
+  const y = typeof source.y === "number" && Number.isFinite(source.y) ? Math.round(source.y) : undefined;
+  const groupsSource = source.groups && typeof source.groups === "object" ? source.groups as Record<string, unknown> : {};
+  const groups = Object.fromEntries(
+    Object.entries(groupsSource)
+      .filter(([key, value]) => typeof key === "string" && key.trim() && typeof value === "boolean")
+      .map(([key, value]) => [key.trim(), value as boolean]),
+  );
+  if (x === undefined && y === undefined && Object.keys(groups).length === 0) return undefined;
+  return {
+    x,
+    y,
+    groups,
+  };
+}
+
+function readAdvancedFloatingPanelPrefs(): AdvancedFloatingPanelPrefs | undefined {
+  const raw = readLocalStorageString(advancedFloatingPanelStorageKey());
+  if (!raw) return undefined;
+  try {
+    return normalizeAdvancedFloatingPanelPrefs(JSON.parse(raw));
+  } catch {
+    return undefined;
+  }
+}
+
+function writeAdvancedFloatingPanelPrefs(value: AdvancedFloatingPanelPrefs): void {
+  const normalized = normalizeAdvancedFloatingPanelPrefs(value);
+  if (!normalized) {
+    removeLocalStorage(advancedFloatingPanelStorageKey());
+    return;
+  }
+  writeLocalStorageJSON(advancedFloatingPanelStorageKey(), normalized);
 }
 
 function normalizePresets(raw: unknown): Preset[] {

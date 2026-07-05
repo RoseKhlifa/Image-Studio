@@ -5,6 +5,26 @@ import (
 	"strings"
 )
 
+func (a *App) openLoopModal() {
+	a.loopModalOpen = true
+	a.invalidateNow()
+}
+
+func (a *App) closeLoopModal() {
+	a.loopModalOpen = false
+	a.invalidateNow()
+}
+
+func (a *App) setLoopEnabled(enabled bool) {
+	wasEnabled := a.loopEnabled
+	a.loopEnabled = enabled
+	if enabled && !wasEnabled {
+		a.openLoopModal()
+		return
+	}
+	a.invalidateNow()
+}
+
 func (a *App) setLoopTotalCount(value int) {
 	a.loopTotalCount = normalizeLoopGenerationCount(value)
 	a.loopTotalCountInput.SetText(strconv.Itoa(a.loopTotalCount))

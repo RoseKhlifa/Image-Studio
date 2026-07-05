@@ -10,19 +10,37 @@ import (
 	"gioui.org/unit"
 	"github.com/yuanhua/image-gptcodex/pkg/promptimport"
 	"image-studio/gio-client/internal/promptscheme"
+	sharedCompat "image-studio/shared/compat"
 )
 
-func normalizeImportedPromptSize(size string) string {
+func normalizeImportedPromptSize(size string, customRatios []sharedCompat.CustomAspectRatio) string {
 	size = strings.TrimSpace(size)
 	if size == "" || size == "auto" {
 		return "auto"
 	}
-	for _, choice := range sizeChoices {
-		if choice.Value == size {
-			return size
+	if _, ok := sizeToAspect[size]; ok {
+		return size
+	}
+	for _, ratio := range customRatios {
+		for _, resolution := range []string{"1k", "2k", "4k"} {
+			if buildCustomSizeSelection(ratio, resolution) == size {
+				return size
+			}
 		}
 	}
 	return "auto"
+}
+
+func normalizeImportedPromptSizeForApp(a *App, size string) string {
+	candidate := strings.TrimSpace(size)
+	if candidate == "" {
+		candidate = "auto"
+	}
+	if a == nil {
+		return normalizeImportedPromptSize(candidate, nil)
+	}
+	customRatios := append([]sharedCompat.CustomAspectRatio(nil), a.customAspectRatios...)
+	return normalizeSizeSelection(candidate, a.api, a.policy, a.imageModelInput.Text(), customRatios)
 }
 
 func promptImportErrorMessage(err error) string {
@@ -109,7 +127,7 @@ func (a *App) runNextPromptImport() {
 	a.promptImportOpen = true
 	a.promptImportToken = token
 	a.promptImportPayload = payload
-	a.promptImportResolvedSize = normalizeImportedPromptSize(payload.ResolvedSize)
+	a.promptImportResolvedSize = normalizeImportedPromptSizeForApp(a, payload.ResolvedSize)
 	a.lastErrorMessage = ""
 	a.mu.Unlock()
 	a.invalidateNow()
@@ -130,7 +148,7 @@ func (a *App) confirmPromptImport() {
 	} else {
 		a.negativePromptInput.SetText("")
 	}
-	a.size = normalizeImportedPromptSize(resolvedSize)
+	a.size = normalizeImportedPromptSizeForApp(a, resolvedSize)
 	a.mu.Lock()
 	a.promptImportOpen = false
 	a.promptImportPayload = nil
@@ -337,7 +355,7 @@ func (a *App) layoutPromptImportRegistrationPrompt(gtx layout.Context, snap snap
 	for a.promptImportRegisterLaterButton.Clicked(gtx) {
 		a.dismissPromptImportRegistrationPrompt()
 	}
-	subtitle := "当前 Windows / Linux 桌面端默认由 Gio 客户端接收 image-studio://import?... 深链。"
+	subtitle := "当前 Gio 桌面端可接收 image-studio://import?... 深链。"
 	return a.layoutStandardModal(
 		gtx,
 		unit.Dp(560),

@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"image"
 	"strconv"
 	"strings"
 	"time"
@@ -14,6 +15,13 @@ import (
 	"gioui.org/unit"
 	"gioui.org/widget"
 )
+
+type presetSummaryState struct {
+	SelectedPreset *sharedCompat.Preset
+	MatchedPreset  *sharedCompat.Preset
+	Title          string
+	Detail         string
+}
 
 func nextPresetName(items []sharedCompat.Preset) string {
 	used := map[int]struct{}{}
@@ -35,6 +43,111 @@ func nextPresetName(items []sharedCompat.Preset) string {
 	}
 }
 
+func presetMatchesSnapshot(preset sharedCompat.Preset, snapshot sharedCompat.Preset) bool {
+	if strings.TrimSpace(preset.Size) != strings.TrimSpace(snapshot.Size) {
+		return false
+	}
+	if strings.TrimSpace(preset.Quality) != strings.TrimSpace(snapshot.Quality) {
+		return false
+	}
+	if strings.TrimSpace(preset.OutputFormat) != strings.TrimSpace(snapshot.OutputFormat) {
+		return false
+	}
+	if strings.TrimSpace(preset.NegativePrompt) != strings.TrimSpace(snapshot.NegativePrompt) {
+		return false
+	}
+	if strings.TrimSpace(preset.Background) != strings.TrimSpace(snapshot.Background) {
+		return false
+	}
+	presetCompression := 0
+	if preset.OutputCompression != nil {
+		presetCompression = *preset.OutputCompression
+	}
+	snapshotCompression := 0
+	if snapshot.OutputCompression != nil {
+		snapshotCompression = *snapshot.OutputCompression
+	}
+	if presetCompression != snapshotCompression {
+		return false
+	}
+	if strings.TrimSpace(preset.InputFidelity) != strings.TrimSpace(snapshot.InputFidelity) {
+		return false
+	}
+	if strings.TrimSpace(preset.ImageStyle) != strings.TrimSpace(snapshot.ImageStyle) {
+		return false
+	}
+	if strings.TrimSpace(preset.Moderation) != strings.TrimSpace(snapshot.Moderation) {
+		return false
+	}
+	if strings.TrimSpace(preset.StyleTag) != strings.TrimSpace(snapshot.StyleTag) {
+		return false
+	}
+	if strings.TrimSpace(preset.EditAutoAspectRes) != strings.TrimSpace(snapshot.EditAutoAspectRes) {
+		return false
+	}
+	if strings.TrimSpace(preset.KernelRuntimeMode) != strings.TrimSpace(snapshot.KernelRuntimeMode) {
+		return false
+	}
+	return normalizeBatchCount(preset.BatchCount) == normalizeBatchCount(snapshot.BatchCount)
+}
+
+func describePreset(preset sharedCompat.Preset) string {
+	sizeLabel := strings.TrimSpace(preset.Size)
+	if autoAspect := strings.TrimSpace(preset.EditAutoAspectRes); autoAspect != "" {
+		sizeLabel = "按源图比例 + " + strings.ToUpper(autoAspect)
+	} else if sizeLabel == "auto" {
+		sizeLabel = "Auto"
+	}
+	parts := compactNonEmpty([]string{
+		sizeLabel,
+		qualityChoiceLabel(strings.TrimSpace(preset.Quality)),
+		strings.ToUpper(strings.TrimSpace(preset.OutputFormat)),
+		fmt.Sprintf("%d 张", normalizeBatchCount(preset.BatchCount)),
+	})
+	if styleTag := strings.TrimSpace(preset.StyleTag); styleTag != "" {
+		parts = append(parts, "#"+styleChoiceLabel(styleTag))
+	}
+	return strings.Join(parts, " · ")
+}
+
+func (a *App) currentPresetSummaryState() presetSummaryState {
+	snapshot := a.currentPresetSnapshot()
+	var selected *sharedCompat.Preset
+	selectedID := strings.TrimSpace(a.selectedPresetID)
+	for idx := range a.presets {
+		if strings.TrimSpace(a.presets[idx].ID) == selectedID {
+			selected = &a.presets[idx]
+			break
+		}
+	}
+	var matched *sharedCompat.Preset
+	for idx := range a.presets {
+		if presetMatchesSnapshot(a.presets[idx], snapshot) {
+			matched = &a.presets[idx]
+			break
+		}
+	}
+	state := presetSummaryState{
+		SelectedPreset: selected,
+		MatchedPreset:  matched,
+	}
+	switch {
+	case selected != nil && matched != nil && strings.TrimSpace(selected.ID) == strings.TrimSpace(matched.ID):
+		state.Title = "当前使用「" + strings.TrimSpace(selected.Name) + "」"
+		state.Detail = "当前参数与已选预设完全一致，可直接覆盖保存。"
+	case selected != nil:
+		state.Title = "已选「" + strings.TrimSpace(selected.Name) + "」"
+		state.Detail = "当前选中方案：" + describePreset(*selected)
+	case matched != nil:
+		state.Title = "当前匹配「" + strings.TrimSpace(matched.Name) + "」"
+		state.Detail = "当前参数正好匹配一条已有预设，可直接覆盖保存。"
+	default:
+		state.Title = "还没有选中预设"
+		state.Detail = "可以把当前参数直接保存成新预设，或打开预设管理器切换。"
+	}
+	return state
+}
+
 func (a *App) presetListButton(id string) *widget.Clickable {
 	if a.presetListButtons == nil {
 		a.presetListButtons = map[string]*widget.Clickable{}
@@ -44,6 +157,18 @@ func (a *App) presetListButton(id string) *widget.Clickable {
 	}
 	btn := new(widget.Clickable)
 	a.presetListButtons[id] = btn
+	return btn
+}
+
+func (a *App) presetQuickButton(id string) *widget.Clickable {
+	if a.presetQuickButtons == nil {
+		a.presetQuickButtons = map[string]*widget.Clickable{}
+	}
+	if btn, ok := a.presetQuickButtons[id]; ok {
+		return btn
+	}
+	btn := new(widget.Clickable)
+	a.presetQuickButtons[id] = btn
 	return btn
 }
 
@@ -66,13 +191,38 @@ func (a *App) currentPresetSnapshot() sharedCompat.Preset {
 		ImageStyle:        strings.TrimSpace(a.imageStyle),
 		Moderation:        strings.TrimSpace(a.moderation),
 		StyleTag:          strings.TrimSpace(a.styleTag),
+		EditAutoAspectRes: strings.TrimSpace(a.editAutoAspectResolution),
 		KernelRuntimeMode: normalizeKernelRuntimeMode(a.kernelRuntimeMode),
 		BatchCount:        normalizeBatchCount(a.batchCount),
 	}
 }
 
+func (a *App) selectedPresetEditableSummary() []string {
+	if strings.TrimSpace(a.selectedPresetID) == "" {
+		return nil
+	}
+	sizeLabel := strings.TrimSpace(a.size)
+	if autoAspect := strings.TrimSpace(a.editAutoAspectResolution); autoAspect != "" {
+		sizeLabel = "按源图比例 + " + strings.ToUpper(autoAspect)
+	} else if label := sizeDisplayLabel(a.size); strings.TrimSpace(label) != "" {
+		sizeLabel = label
+	}
+	items := compactNonEmpty([]string{
+		sizeLabel,
+		qualityDisplayLabel(a.quality),
+		strings.ToUpper(strings.TrimSpace(a.format)),
+		fmt.Sprintf("%d 张", normalizeBatchCount(a.batchCount)),
+	})
+	if styleTag := strings.TrimSpace(a.styleTag); styleTag != "" {
+		items = append(items, "#"+styleChoiceLabel(styleTag))
+	}
+	return items
+}
+
 func (a *App) openPresetManager() {
 	a.mu.Lock()
+	a.promptHelperOpen = false
+	a.presetPickerOpen = false
 	if a.selectedPresetID == "" && len(a.presets) > 0 {
 		a.selectedPresetID = strings.TrimSpace(a.presets[0].ID)
 	}
@@ -93,6 +243,49 @@ func (a *App) closePresetManager() {
 	a.invalidateNow()
 }
 
+func (a *App) presetPickerAnchorRectFromButton(btn *widget.Clickable, size image.Point) (image.Rectangle, bool) {
+	if btn == nil || size.X <= 0 || size.Y <= 0 {
+		return image.Rectangle{}, false
+	}
+	history := btn.History()
+	if len(history) == 0 {
+		return image.Rectangle{}, false
+	}
+	press := history[len(history)-1]
+	a.mu.Lock()
+	global := a.lastGlobalPressPos
+	if global == (image.Point{}) {
+		global = a.lastGlobalPointer
+	}
+	a.mu.Unlock()
+	minPt := global.Sub(press.Position)
+	return image.Rectangle{Min: minPt, Max: minPt.Add(size)}, true
+}
+
+func (a *App) openPresetPicker(btn *widget.Clickable, size image.Point) {
+	rect, ok := a.presetPickerAnchorRectFromButton(btn, size)
+	if !ok {
+		a.mu.Lock()
+		rect = a.presetPickerAnchorRect
+		a.mu.Unlock()
+		if rect == (image.Rectangle{}) {
+			rect = image.Rect(28, 168, 320, 214)
+		}
+	}
+	a.mu.Lock()
+	a.presetPickerAnchorRect = rect
+	a.presetPickerOpen = true
+	a.mu.Unlock()
+	a.invalidateNow()
+}
+
+func (a *App) closePresetPicker() {
+	a.mu.Lock()
+	a.presetPickerOpen = false
+	a.mu.Unlock()
+	a.invalidateNow()
+}
+
 func (a *App) loadPresetDraftLocked(id string) bool {
 	id = strings.TrimSpace(id)
 	if id == "" {
@@ -104,15 +297,69 @@ func (a *App) loadPresetDraftLocked(id string) bool {
 		}
 		a.selectedPresetID = id
 		a.presetNameInput.SetText(strings.TrimSpace(item.Name))
+		a.presetSizeInput.SetText(strings.TrimSpace(item.Size))
+		a.presetQualityInput.SetText(strings.TrimSpace(item.Quality))
+		a.presetOutputFormatInput.SetText(strings.TrimSpace(item.OutputFormat))
+		a.presetBatchCountInput.SetText(strconv.Itoa(normalizeBatchCount(item.BatchCount)))
+		a.presetStyleTagInput.SetText(strings.TrimSpace(item.StyleTag))
+		a.editAutoAspectResolution = strings.TrimSpace(item.EditAutoAspectRes)
 		return true
 	}
 	return false
+}
+
+func (a *App) currentPresetDraftValues() (string, string, string, int, string) {
+	size := strings.TrimSpace(a.presetSizeInput.Text())
+	if size == "" {
+		size = strings.TrimSpace(a.size)
+	}
+	quality := strings.TrimSpace(a.presetQualityInput.Text())
+	if quality == "" {
+		quality = strings.TrimSpace(a.quality)
+	}
+	outputFormat := strings.TrimSpace(a.presetOutputFormatInput.Text())
+	if outputFormat == "" {
+		outputFormat = strings.TrimSpace(a.format)
+	}
+	batchCount := normalizeBatchCount(a.batchCount)
+	if raw := strings.TrimSpace(a.presetBatchCountInput.Text()); raw != "" {
+		if value, err := strconv.Atoi(raw); err == nil {
+			batchCount = normalizeBatchCount(value)
+		}
+	}
+	styleTag := strings.TrimSpace(a.presetStyleTagInput.Text())
+	if styleTag == "" {
+		styleTag = strings.TrimSpace(a.styleTag)
+	}
+	return size, quality, outputFormat, batchCount, styleTag
+}
+
+func buildUpdatedPresetFromDraft(current sharedCompat.Preset, name string, size string, quality string, outputFormat string, batchCount int, styleTag string) sharedCompat.Preset {
+	updated := current
+	updated.Name = strings.TrimSpace(name)
+	if strings.TrimSpace(size) != "" {
+		updated.Size = strings.TrimSpace(size)
+	}
+	if strings.TrimSpace(quality) != "" {
+		updated.Quality = strings.TrimSpace(quality)
+	}
+	if strings.TrimSpace(outputFormat) != "" {
+		updated.OutputFormat = strings.TrimSpace(outputFormat)
+	}
+	updated.BatchCount = normalizeBatchCount(batchCount)
+	updated.StyleTag = strings.TrimSpace(styleTag)
+	return updated
 }
 
 func (a *App) startNewPresetDraft() {
 	a.mu.Lock()
 	a.selectedPresetID = ""
 	a.presetNameInput.SetText(nextPresetName(a.presets))
+	a.presetSizeInput.SetText(strings.TrimSpace(a.size))
+	a.presetQualityInput.SetText(strings.TrimSpace(a.quality))
+	a.presetOutputFormatInput.SetText(strings.TrimSpace(a.format))
+	a.presetBatchCountInput.SetText(strconv.Itoa(normalizeBatchCount(a.batchCount)))
+	a.presetStyleTagInput.SetText(strings.TrimSpace(a.styleTag))
 	a.mu.Unlock()
 	a.invalidateNow()
 }
@@ -148,6 +395,22 @@ func (a *App) savePresetAsNew() {
 	a.invalidateNow()
 }
 
+func (a *App) saveCurrentPresetQuick() {
+	a.mu.Lock()
+	a.selectedPresetID = ""
+	a.mu.Unlock()
+	a.presetNameInput.SetText(nextPresetName(a.presets))
+	a.savePresetAsNew()
+}
+
+func (a *App) overwritePresetByID(targetID string) {
+	a.mu.Lock()
+	a.selectedPresetID = strings.TrimSpace(targetID)
+	a.loadPresetDraftLocked(a.selectedPresetID)
+	a.mu.Unlock()
+	a.overwriteSelectedPreset()
+}
+
 func (a *App) overwriteSelectedPreset() {
 	targetID := ""
 	a.mu.Lock()
@@ -163,7 +426,8 @@ func (a *App) overwriteSelectedPreset() {
 		return
 	}
 	state = sharedCompat.Normalize(state)
-	snapshot := a.currentPresetSnapshot()
+	nameDraft := strings.TrimSpace(a.presetNameInput.Text())
+	size, quality, outputFormat, batchCount, styleTag := a.currentPresetDraftValues()
 	updated := false
 	name := ""
 	for i := range state.Settings.Presets {
@@ -171,9 +435,10 @@ func (a *App) overwriteSelectedPreset() {
 			continue
 		}
 		name = strings.TrimSpace(state.Settings.Presets[i].Name)
-		snapshot.ID = state.Settings.Presets[i].ID
-		snapshot.Name = name
-		state.Settings.Presets[i] = snapshot
+		if nameDraft != "" {
+			name = nameDraft
+		}
+		state.Settings.Presets[i] = buildUpdatedPresetFromDraft(state.Settings.Presets[i], name, size, quality, outputFormat, batchCount, styleTag)
 		updated = true
 		break
 	}
@@ -366,19 +631,40 @@ func (a *App) layoutPresetManagerModal(gtx layout.Context, snap snapshot) layout
 									return a.field(gtx, "预设名称", &a.presetNameInput, "配置1", unit.Dp(42))
 								}),
 								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-									summary := a.currentPresetSnapshot()
-									lines := compactNonEmpty([]string{
-										sizeDisplayLabel(summary.Size),
-										qualityDisplayLabel(summary.Quality),
-										strings.ToUpper(strings.TrimSpace(summary.OutputFormat)),
-										"负向: " + chooseValueOrFallback(summary.NegativePrompt, "空"),
-										"背景: " + chooseValueOrFallback(summary.Background, "auto"),
-										"保真: " + chooseValueOrFallback(summary.InputFidelity, "auto"),
-										"图风: " + chooseValueOrFallback(summary.ImageStyle, "default"),
-										"审核: " + chooseValueOrFallback(summary.Moderation, "low"),
-										"风格: " + chooseValueOrFallback(summary.StyleTag, "默认"),
-										fmt.Sprintf("张数: %d", summary.BatchCount),
-									})
+									if strings.TrimSpace(a.selectedPresetID) == "" {
+										return layout.Dimensions{}
+									}
+									return a.field(gtx, "尺寸", &a.presetSizeInput, "1024x1024 / auto", unit.Dp(42))
+								}),
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									if strings.TrimSpace(a.selectedPresetID) == "" {
+										return layout.Dimensions{}
+									}
+									return a.field(gtx, "质量", &a.presetQualityInput, "auto / low / medium / high", unit.Dp(42))
+								}),
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									if strings.TrimSpace(a.selectedPresetID) == "" {
+										return layout.Dimensions{}
+									}
+									return a.field(gtx, "输出格式", &a.presetOutputFormatInput, "png / jpeg / webp", unit.Dp(42))
+								}),
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									if strings.TrimSpace(a.selectedPresetID) == "" {
+										return layout.Dimensions{}
+									}
+									return a.field(gtx, "出图张数", &a.presetBatchCountInput, "1-9", unit.Dp(42))
+								}),
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									if strings.TrimSpace(a.selectedPresetID) == "" {
+										return layout.Dimensions{}
+									}
+									return a.field(gtx, "风格", &a.presetStyleTagInput, "默认 / anime / cyberpunk...", unit.Dp(42))
+								}),
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									lines := a.selectedPresetEditableSummary()
+									if len(lines) == 0 {
+										return a.label(gtx, "选中左侧预设后，可直接修改名称、尺寸、质量、输出格式、风格和张数。", unit.Sp(10), fluent.textDim, font.Normal)
+									}
 									rows := make([]layout.FlexChild, 0, len(lines))
 									for _, line := range lines {
 										line := line
@@ -391,6 +677,36 @@ func (a *App) layoutPresetManagerModal(gtx layout.Context, snap snapshot) layout
 											return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(unit.Dp(4))}.Layout(gtx, rows...)
 										})
 									})
+								}),
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									if strings.TrimSpace(a.selectedPresetID) == "" {
+										return layout.Dimensions{}
+									}
+									return a.field(gtx, "尺寸", &a.presetSizeInput, "1024x1024 / auto", unit.Dp(42))
+								}),
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									if strings.TrimSpace(a.selectedPresetID) == "" {
+										return layout.Dimensions{}
+									}
+									return a.field(gtx, "质量", &a.presetQualityInput, "auto / low / medium / high", unit.Dp(42))
+								}),
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									if strings.TrimSpace(a.selectedPresetID) == "" {
+										return layout.Dimensions{}
+									}
+									return a.field(gtx, "输出格式", &a.presetOutputFormatInput, "png / jpeg / webp", unit.Dp(42))
+								}),
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									if strings.TrimSpace(a.selectedPresetID) == "" {
+										return layout.Dimensions{}
+									}
+									return a.field(gtx, "出图张数", &a.presetBatchCountInput, "1-9", unit.Dp(42))
+								}),
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									if strings.TrimSpace(a.selectedPresetID) == "" {
+										return layout.Dimensions{}
+									}
+									return a.field(gtx, "风格", &a.presetStyleTagInput, "默认 / anime / cyberpunk...", unit.Dp(42))
 								}),
 								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 									return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(unit.Dp(8))}.Layout(gtx,

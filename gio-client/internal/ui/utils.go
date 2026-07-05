@@ -170,35 +170,52 @@ const (
 	historyDateFilterAll historyDateFilterKind = iota
 	historyDateFilterToday
 	historyDateFilterWeek
+	historyDateFilterPickedDay
 )
 
 func normalizeHistorySearchQuery(query string) string {
 	return strings.TrimSpace(strings.ToLower(query))
 }
 
-func prepareHistoryDateFilter(filter string, now time.Time) (historyDateFilterKind, int64) {
+func prepareHistoryDateFilter(filter string, pickedDate string, now time.Time) (historyDateFilterKind, int64, int64) {
 	switch strings.TrimSpace(filter) {
 	case "today":
-		return historyDateFilterToday, localDayStart(now).UnixMilli()
+		return historyDateFilterToday, localDayStart(now).UnixMilli(), 0
 	case "week":
-		return historyDateFilterWeek, now.AddDate(0, 0, -7).UnixMilli()
+		return historyDateFilterWeek, now.AddDate(0, 0, -7).UnixMilli(), 0
+	case "pick":
+		text := strings.TrimSpace(pickedDate)
+		if text == "" {
+			return historyDateFilterPickedDay, 0, 0
+		}
+		day, err := time.ParseInLocation("2006-01-02", text, now.Location())
+		if err != nil {
+			return historyDateFilterPickedDay, 0, 0
+		}
+		start := localDayStart(day)
+		return historyDateFilterPickedDay, start.UnixMilli(), start.AddDate(0, 0, 1).UnixMilli()
 	default:
-		return historyDateFilterAll, 0
+		return historyDateFilterAll, 0, 0
 	}
 }
 
-func matchHistoryDatePrepared(createdAt int64, kind historyDateFilterKind, cutoff int64) bool {
+func matchHistoryDatePrepared(createdAt int64, kind historyDateFilterKind, start int64, end int64) bool {
 	switch kind {
 	case historyDateFilterToday, historyDateFilterWeek:
-		return createdAt >= cutoff
+		return createdAt >= start
+	case historyDateFilterPickedDay:
+		if start == 0 || end == 0 {
+			return true
+		}
+		return createdAt >= start && createdAt < end
 	default:
 		return true
 	}
 }
 
 func matchHistoryDate(createdAt int64, filter string, now time.Time) bool {
-	kind, cutoff := prepareHistoryDateFilter(filter, now)
-	return matchHistoryDatePrepared(createdAt, kind, cutoff)
+	kind, start, end := prepareHistoryDateFilter(filter, "", now)
+	return matchHistoryDatePrepared(createdAt, kind, start, end)
 }
 
 func matchHistoryQueryNormalized(item sharedCompat.HistoryItem, query string) bool {

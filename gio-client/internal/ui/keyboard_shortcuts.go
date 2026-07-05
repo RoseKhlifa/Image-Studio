@@ -33,17 +33,26 @@ func (a *App) anyTextEditorFocused(gtx layout.Context) bool {
 		&a.promptTemplateLabelInput,
 		&a.promptTemplateTextInput,
 		&a.presetNameInput,
+		&a.presetSizeInput,
+		&a.presetQualityInput,
+		&a.presetOutputFormatInput,
+		&a.presetBatchCountInput,
+		&a.presetStyleTagInput,
 		&a.loopTotalCountInput,
 		&a.loopConcurrencyInput,
 		&a.loopAutoSaveDirInput,
 		&a.batchInputDirInput,
 		&a.batchOutputDirInput,
+		&a.batchConcurrencyInput,
 		&a.upstreamQuickImportInput,
 		&a.rawResponseViewerInput,
 		&a.historyQueryInput,
 		&a.historyTimelineQueryInput,
+		&a.historyTimelinePickedDateInput,
 		&a.workspaceNameInput,
 		&a.canvasAnnotationTextInput,
+		&a.customSizeWidthInput,
+		&a.customSizeHeightInput,
 		&a.customAspectWidthInput,
 		&a.customAspectHeightInput,
 	}
@@ -108,10 +117,13 @@ func (a *App) canvasShortcutModalsOpen(snap snapshot) bool {
 	if snap.ActiveResultDetail.ID != "" || snap.ActiveResultDetail.SavedPath != "" {
 		return true
 	}
+	if snap.HistoryActionMenuItem.ID != "" || snap.HistoryActionMenuItem.SavedPath != "" {
+		return true
+	}
 	if snap.RawResponseModalPath != "" || snap.RawResponseModalText != "" || snap.RawResponseModalError != "" {
 		return true
 	}
-	if a.generalSettingsOpen || a.aboutModalOpen || a.settingsModalOpen || a.promptTemplateManagerOpen || a.presetManagerOpen || a.customAspectRatioManagerOpen {
+	if a.generalSettingsOpen || a.aboutModalOpen || a.settingsModalOpen || a.promptHelperOpen || a.presetPickerOpen || a.promptTemplateManagerOpen || a.presetManagerOpen || a.customAspectRatioManagerOpen || a.customSizeModalOpen || a.loopModalOpen || a.advancedOpen {
 		return true
 	}
 	if a.canvasAnnotationTextPromptOpen {
