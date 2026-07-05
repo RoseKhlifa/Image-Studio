@@ -20,7 +20,7 @@ export function Toolbar() {
     fullscreen,
     batchResults, resultGridOpen, openResultGrid, closeResultGrid,
     setField, toggleFullscreen, saveCurrentImageAs,
-    resetMask, clearAnnotations,
+    importMaskImage, resetMask, clearAnnotations,
     undoStack, redoStack, undo, redo,
     rotateCurrent, flipCurrent, cropToRect,
     openResultDetail,
@@ -59,6 +59,7 @@ export function Toolbar() {
         annotationColor={annotationColor}
         onSetBrushMode={(mode) => setField("brushMode", mode)}
         onSetBrushSize={(size) => setField("brushSize", size)}
+        onImportMask={importMaskImage}
         onResetMask={resetMask}
         onSetAnnotationKind={(kind) => setField("annotationKind", kind)}
         onSetAnnotationColor={(color) => setField("annotationColor", color)}
@@ -123,6 +124,7 @@ export function Toolbar() {
                 annotationColor={annotationColor}
                 onSetBrushMode={(mode) => setField("brushMode", mode)}
                 onSetBrushSize={(size) => setField("brushSize", size)}
+                onImportMask={importMaskImage}
                 onResetMask={resetMask}
                 onSetAnnotationKind={(kind) => setField("annotationKind", kind)}
                 onSetAnnotationColor={(color) => setField("annotationColor", color)}
@@ -189,6 +191,7 @@ export function Toolbar() {
             annotationColor={annotationColor}
             onSetBrushMode={(mode) => setField("brushMode", mode)}
             onSetBrushSize={(size) => setField("brushSize", size)}
+            onImportMask={importMaskImage}
             onResetMask={resetMask}
             onSetAnnotationKind={(kind) => setField("annotationKind", kind)}
             onSetAnnotationColor={(color) => setField("annotationColor", color)}

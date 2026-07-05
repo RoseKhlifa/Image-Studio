@@ -536,7 +536,7 @@ class AndroidImageStudioBridge(
         if (apiKey.isBlank()) throw IllegalArgumentException("API Key 不能为空")
         thread(name = "image-studio-probe-${requestId.take(12)}") {
             try {
-                val connection = openHttpConnection("$baseUrl/v1/models", proxyMode, proxyUrl).apply {
+                val connection = openHttpConnection(openAIEndpoint(baseUrl, "models"), proxyMode, proxyUrl).apply {
                     requestMethod = "GET"
                     instanceFollowRedirects = true
                     connectTimeout = 20_000
@@ -842,7 +842,8 @@ class AndroidImageStudioBridge(
     }
 
     private fun validateProbeBaseUrl(raw: String): String {
-        val cleaned = raw.trim().trimEnd('/')
+        val trimmed = raw.trim().trimEnd('/')
+        val cleaned = if (trimmed.endsWith("/v1", ignoreCase = true)) trimmed.dropLast(3).trimEnd('/') else trimmed
         if (cleaned.isBlank()) throw IllegalArgumentException("未配置上游 BASE_URL")
         val uri = try {
             URI(cleaned)
@@ -860,6 +861,15 @@ class AndroidImageStudioBridge(
             throw IllegalArgumentException("拒绝使用非 TLS 上游: $cleaned。只有 localhost / 127.0.0.1 / ::1 允许 http://")
         }
         throw IllegalArgumentException("BASE_URL 仅支持 http:// 或 https://")
+    }
+
+    private fun openAIEndpoint(baseUrl: String, endpointPath: String): String {
+        val cleaned = baseUrl.trim().trimEnd('/')
+        val path = endpointPath.trim().trim('/')
+        if (path.isBlank()) return cleaned
+        val uri = URI(cleaned)
+        val basePath = (uri.path ?: "").trimEnd('/').lowercase(Locale.US)
+        return if (basePath.endsWith("/openai")) "$cleaned/$path" else "$cleaned/v1/$path"
     }
 
     private fun isProbeLoopbackHost(host: String): Boolean {

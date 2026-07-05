@@ -74,6 +74,8 @@ export function FAQModal({ open, onClose }: { open: boolean; onClose: () => void
             <p>
               <strong>Images API 模式</strong>下:任何提供 <code>/v1/images/generations</code> 和
               <code>/v1/images/edits</code>(或仅 generations,若只做文生图)的 OpenAI 兼容中转站都行。
+              Google 官方 Gemini OpenAI 兼容入口可填 <code>https://generativelanguage.googleapis.com/v1beta/openai</code>,
+              图像模型可填 <code>gemini-3.1-flash-image</code>。
             </p>
             <p>
               注意:只提供 <code>/v1/chat/completions</code> 的中转站<strong>两种模式都不兼容</strong>(本应用不发 chat 请求)。
@@ -110,7 +112,7 @@ export function FAQModal({ open, onClose }: { open: boolean; onClose: () => void
               <li>
                 <strong>Images API</strong> 只用<strong>一个</strong>模型 ID:
                 <ul>
-                  <li><strong>图像模型 ID</strong>(默认 <code>gpt-image-2</code>):直接传给 <code>/v1/images/generations</code> 的 <code>model</code> 字段。文本模型 ID 在此模式下不读。</li>
+                  <li><strong>图像模型 ID</strong>(默认 <code>gpt-image-2</code>):直接传给 <code>/v1/images/generations</code> 的 <code>model</code> 字段。文本模型 ID 在此模式下不读。Gemini / Imagen 图像模型会自动使用非流式兼容请求。</li>
                 </ul>
               </li>
             </ul>

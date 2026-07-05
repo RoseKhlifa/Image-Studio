@@ -192,6 +192,19 @@ export function BatchProcessSection({
                   </div>
                 ) : null}
 
+                <label className="space-y-1.5">
+                  <span className="block text-[12px] font-medium text-zinc-700 dark:text-zinc-200">文件名前缀</span>
+                  <input
+                    value={batchProcess.fileNamePrefix}
+                    onChange={(event) => setBatchProcess({ ...batchProcess, fileNamePrefix: event.target.value })}
+                    placeholder="processed-"
+                    className={`focus-ring w-full border border-black/[0.08] bg-[var(--surface)] px-3 py-2 text-[13px] text-zinc-900 dark:border-white/[0.08] dark:text-zinc-100 ${roundedClass}`}
+                  />
+                  <div className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                    留空时保留原文件名，遇到同名会自动追加 -2、-3。
+                  </div>
+                </label>
+
                 <div className="grid gap-3 sm:grid-cols-2">
                   <label className="space-y-1.5">
                     <span className="block text-[12px] font-medium text-zinc-700 dark:text-zinc-200">并发数</span>
@@ -296,7 +309,7 @@ export function BatchProcessSection({
             </div>
 
             <div className={`${surfaceClass} px-3 py-2 text-[11px] text-zinc-500 dark:text-zinc-400 ${roundedClass}`}>
-              结果文件名前缀固定为 <code>processed-</code>，遇到同名会自动追加 <code>-2</code>、<code>-3</code>。
+              默认输出名为 <code>{batchProcess.fileNamePrefix || ""}原文件名</code>，遇到同名会自动追加 <code>-2</code>、<code>-3</code>。
             </div>
           </div>
         )}

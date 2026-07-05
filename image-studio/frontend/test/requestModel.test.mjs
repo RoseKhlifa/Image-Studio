@@ -11,8 +11,10 @@ import {
   isRetryableRaw,
   normalizeAutoRetryCount,
   normalizeOpenAIImageSize,
+  openAIAPIEndpoint,
   repairSizeForOpenAI,
   normalizePartialImages,
+  shouldUseImagesNewAPICompat,
 } from "../../../shared/kernel/requestModel.js";
 
 test("Responses payload defaults partial_images to streaming preview count", () => {
@@ -41,6 +43,23 @@ test("normalizeAutoRetryCount clamps retry count range", () => {
   assert.equal(normalizeAutoRetryCount(-1), DEFAULT_AUTO_RETRY_COUNT);
   assert.equal(normalizeAutoRetryCount(3.8), 3);
   assert.equal(normalizeAutoRetryCount(99), 10);
+});
+
+test("OpenAI endpoint helper preserves Google compatibility base path", () => {
+  assert.equal(
+    openAIAPIEndpoint("https://generativelanguage.googleapis.com/v1beta/openai", "images/generations"),
+    "https://generativelanguage.googleapis.com/v1beta/openai/images/generations",
+  );
+  assert.equal(
+    openAIAPIEndpoint("https://relay.example.com/api/v1", "/images/edits"),
+    "https://relay.example.com/api/v1/images/edits",
+  );
+});
+
+test("Gemini and Imagen image models use non-streaming Images compat mode", () => {
+  assert.equal(shouldUseImagesNewAPICompat({ imageModelID: "gemini-3.1-flash-image" }), true);
+  assert.equal(shouldUseImagesNewAPICompat({ imageModelID: "imagen-4.0-generate-001" }), true);
+  assert.equal(shouldUseImagesNewAPICompat({ imageModelID: "gpt-image-2" }), false);
 });
 
 test("Responses payload uses configured reasoning effort", () => {

@@ -12,6 +12,7 @@ import {
   normalizeModeration,
   normalizeReasoningEffort,
   normalizeUserIdentifier,
+  openAIAPIEndpoint,
   shouldSendExtendedImageParameters,
   supportsImageBackground,
   supportsImageStyle,
@@ -104,7 +105,7 @@ export async function buildImagesRequestBody(
     }
     if (includeExtended && request.payload.seed) form.append("seed", String(request.payload.seed));
     if (includeExtended && request.payload.negativePrompt.trim()) form.append("negative_prompt", request.payload.negativePrompt.trim());
-    return { url: `${baseURL}/v1/images/edits`, body: form };
+    return { url: openAIAPIEndpoint(baseURL, "images/edits"), body: form };
   }
 
   const payload: Record<string, unknown> = {
@@ -140,7 +141,7 @@ export async function buildImagesRequestBody(
   if (includeExtended && request.payload.seed) payload.seed = request.payload.seed;
   if (includeExtended && request.payload.negativePrompt.trim()) payload.negative_prompt = request.payload.negativePrompt.trim();
   return {
-    url: `${baseURL}/v1/images/generations`,
+    url: openAIAPIEndpoint(baseURL, "images/generations"),
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   };

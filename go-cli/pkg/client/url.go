@@ -40,6 +40,31 @@ func ValidateBaseURL(raw string) (string, error) {
 	}
 }
 
+func OpenAIAPIEndpoint(baseURL, endpointPath string) string {
+	cleaned := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	path := strings.Trim(strings.TrimSpace(endpointPath), "/")
+	if path == "" {
+		return cleaned
+	}
+	if isVersionedOpenAICompatibilityBaseURL(cleaned) {
+		return cleaned + "/" + path
+	}
+	return cleaned + "/v1/" + path
+}
+
+func openAIAPIEndpoint(baseURL, endpointPath string) string {
+	return OpenAIAPIEndpoint(baseURL, endpointPath)
+}
+
+func isVersionedOpenAICompatibilityBaseURL(raw string) bool {
+	u, err := url.Parse(strings.TrimRight(strings.TrimSpace(raw), "/"))
+	if err != nil {
+		return false
+	}
+	path := strings.ToLower(strings.TrimRight(u.Path, "/"))
+	return strings.HasSuffix(path, "/openai")
+}
+
 func isLoopbackHost(host string) bool {
 	if host == "" {
 		return false

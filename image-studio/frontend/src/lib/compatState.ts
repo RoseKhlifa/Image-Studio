@@ -1,5 +1,5 @@
 import { LoadCompatibilityState, SaveCompatibilityState } from "../platform/runtime/host.ts";
-import { targetPlatform } from "../platform";
+import { targetPlatform } from "../platform/index.ts";
 import type {
   AutoAspectResolutionPreset,
   BatchProcessConfig,

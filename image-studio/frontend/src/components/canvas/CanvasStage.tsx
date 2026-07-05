@@ -24,6 +24,7 @@ export function CanvasStage() {
     selectedAnnotationId,
     annotations, addAnnotation, removeAnnotation, clearAnnotations,
     setMaskDataURL,
+    maskDataURL,
     strokes, pushStroke,
     undoStack, redoStack, undo, redo,
     compareB, compareSplit, setCompareSplit, setCompareB,
@@ -85,6 +86,8 @@ export function CanvasStage() {
 
   const currentImageURL = historyFullSrc(currentImage, null);
   const image = useImageFromSource(currentImage?.imageBlob ?? null, currentImage?.imageB64, currentImageURL);
+  const importedMaskURL = maskDataURL && maskDataURL !== "__PENDING_MASK__" ? maskDataURL : null;
+  const importedMaskImage = useImageFromSource(null, undefined, importedMaskURL);
 
   useEffect(() => {
     if (!currentImage?.previewOnly) return;
@@ -369,13 +372,18 @@ export function CanvasStage() {
   // Keep the store flag in sync so submit can cheaply know whether any mask
   // exists, but defer the expensive PNG export until the user actually submits.
   useEffect(() => {
-    if (!image || strokes.length === 0) {
+    const hasImportedMask = !!maskDataURL && maskDataURL !== "__PENDING_MASK__";
+    if (!image) {
       setMaskDataURL(null);
+      return;
+    }
+    if (strokes.length === 0) {
+      if (!hasImportedMask) setMaskDataURL(null);
       return;
     }
     const hasWhite = strokes.some((s) => !s.erase);
     setMaskDataURL(hasWhite ? "__PENDING_MASK__" : null);
-  }, [strokes, image, setMaskDataURL]);
+  }, [strokes, image, maskDataURL, setMaskDataURL]);
 
   function resetView() {
     setUserView(null);
@@ -527,6 +535,15 @@ export function CanvasStage() {
           </Layer>
 
           <Layer ref={maskLayerRef}>
+            {image && importedMaskImage ? (
+              <KonvaImage
+                image={importedMaskImage}
+                width={image.width}
+                height={image.height}
+                opacity={0.35}
+                listening={false}
+              />
+            ) : null}
             {strokes.map((s, i) => (
               <Line
                 key={i}

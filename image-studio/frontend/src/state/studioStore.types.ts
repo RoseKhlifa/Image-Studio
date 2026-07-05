@@ -199,6 +199,7 @@ export interface StudioState {
   deleteHistoryItem: (id: string) => Promise<void>;
   saveCurrentImageAs: () => Promise<void>;
   bootstrap: () => Promise<void>;
+  importMaskImage: () => Promise<void>;
   setMaskDataURL: (v: string | null) => void;
   pushStroke: (s: Stroke) => void;
   resetMask: () => void;

@@ -15,6 +15,8 @@ import {
   type RemoteJobResult,
 } from "./types.ts";
 
+const MAX_IMAGE_URL_BYTES = 50 * 1024 * 1024;
+
 function parseSSEEvent(line: string): any | null {
   const stripped = line.trim();
   if (!stripped.startsWith("data: ")) return null;
@@ -69,12 +71,12 @@ function parseImagesStreamEvent(
     }
   }
   if (event?.object === "image.generation.result" || event?.object === "image.edit.result") {
-    return parseImagesResponse(JSON.stringify(event), 200);
+    return parseImagesResponseSync(JSON.stringify(event), 200);
   }
   return null;
 }
 
-function parseImagesResponse(raw: string, status: number): ExtractedImageResult {
+function parseImagesResponseSync(raw: string, status: number): ExtractedImageResult {
   let parsed: any;
   try {
     parsed = JSON.parse(raw);
@@ -96,7 +98,7 @@ function parseImagesResponse(raw: string, status: number): ExtractedImageResult 
   const first = Array.isArray(parsed?.data) ? parsed.data[0] : null;
   if (!first?.b64_json) {
     if (first?.url) {
-      throw new RemoteKernelError("上游返回 URL 而非 b64_json(不支持 response_format),请联系中转站启用 b64_json");
+      throw new RemoteKernelError("上游返回 URL 而非 b64_json，当前路径需要下载 URL 图片");
     }
     throw new RemoteKernelError("上游没有返回可用图片");
   }
@@ -105,6 +107,59 @@ function parseImagesResponse(raw: string, status: number): ExtractedImageResult 
     revisedPrompt: first.revised_prompt || "",
     sourceEvent: "images_api",
   };
+}
+
+async function imageURLToBase64(rawURL: string, signal: AbortSignal): Promise<string> {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawURL);
+  } catch {
+    throw new RemoteKernelError(`上游返回的图片 URL 无效:${rawURL}`);
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    throw new RemoteKernelError(`上游返回的图片 URL 协议不支持:${parsed.protocol.replace(":", "")}`);
+  }
+  const response = await fetch(parsed.toString(), {
+    method: "GET",
+    headers: { Accept: "image/png, image/jpeg, image/webp, */*" },
+    signal,
+  });
+  if (!response.ok) {
+    throw new RemoteKernelError(`下载上游 URL 图片返回 HTTP ${response.status}`);
+  }
+  const blob = await response.blob();
+  if (blob.size > MAX_IMAGE_URL_BYTES) {
+    throw new RemoteKernelError(`上游 URL 图片过大(${blob.size}B > ${MAX_IMAGE_URL_BYTES}B 上限)`);
+  }
+  if (blob.type && !["image/png", "image/jpeg", "image/webp"].includes(blob.type.toLowerCase())) {
+    throw new RemoteKernelError(`上游 URL 图片类型不支持:${blob.type}`);
+  }
+  const buffer = await blob.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+async function parseImagesResponse(raw: string, status: number, signal: AbortSignal): Promise<ExtractedImageResult> {
+  let parsed: any;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return parseImagesResponseSync(raw, status);
+  }
+  const first = Array.isArray(parsed?.data) ? parsed.data[0] : null;
+  if (status < 400 && first?.url && !first.b64_json) {
+    return {
+      imageB64: await imageURLToBase64(first.url, signal),
+      revisedPrompt: first.revised_prompt || "",
+      sourceEvent: "images_api_url",
+    };
+  }
+  return parseImagesResponseSync(raw, status);
 }
 
 function parseImagesStreamRaw(
@@ -182,7 +237,7 @@ export async function requestImagesOnce(
       }
       const result = isStream
         ? nativeStreamResult ?? (receivedNativeStreamPayload ? null : parseImagesStreamRaw(rawBody, callbacks))
-        : parseImagesResponse(rawBody, response.status);
+        : await parseImagesResponse(rawBody, response.status, callbacks.signal);
       if (!result) throw new RemoteKernelError("上游没有返回可用图片", rawPath);
       return { ...result, rawPath, prompt: request.payload.prompt, mode: request.payload.mode };
     }
@@ -250,7 +305,7 @@ export async function requestImagesOnce(
     }
     const raw = await response.text();
     const rawPath = registerRawText("images", attempt, raw);
-    const result = parseImagesResponse(raw, response.status);
+    const result = await parseImagesResponse(raw, response.status, callbacks.signal);
     return { ...result, rawPath, prompt: request.payload.prompt, mode: request.payload.mode };
   } catch (error) {
     if (error instanceof RemoteKernelError) throw error;

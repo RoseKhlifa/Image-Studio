@@ -22,6 +22,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
+	neturl "net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -84,6 +85,17 @@ func supportsInputFidelity(model string) bool {
 
 func supportsImageStyle(model string, mode Mode) bool {
 	return mode != ModeEdit && classifyImageModel(model) == "dalle3"
+}
+
+func isGoogleImageModel(model string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(model))
+	return strings.HasPrefix(normalized, "gemini-") ||
+		strings.HasPrefix(normalized, "imagen-") ||
+		strings.Contains(normalized, "nano-banana")
+}
+
+func shouldUseImagesNonStreamingCompat(model string, explicit bool) bool {
+	return explicit || isGoogleImageModel(model)
 }
 
 func normalizeImageStyle(value string) string {
@@ -241,7 +253,7 @@ func RequestImagesAPIWithPartial(
 		partialImages = 0
 	}
 	includeExtended := shouldSendExtendedImageParameters(opts.RequestPolicy)
-	useNewAPICompat := opts.ImagesNewAPICompat
+	useNewAPICompat := shouldUseImagesNonStreamingCompat(model, opts.ImagesNewAPICompat)
 
 	var (
 		url         string
@@ -258,7 +270,7 @@ func RequestImagesAPIWithPartial(
 		if err != nil {
 			return ImageResult{}, err
 		}
-		url = baseURL + "/v1/images/edits"
+		url = openAIAPIEndpoint(baseURL, "images/edits")
 		body = multipartBuf
 		contentType = mpType
 	} else {
@@ -302,7 +314,7 @@ func RequestImagesAPIWithPartial(
 		if err != nil {
 			return ImageResult{}, fmt.Errorf("marshal payload: %w", err)
 		}
-		url = baseURL + "/v1/images/generations"
+		url = openAIAPIEndpoint(baseURL, "images/generations")
 		body = bytes.NewReader(b)
 		contentType = "application/json"
 	}
@@ -418,16 +430,13 @@ func RequestImagesAPIWithPartial(
 		return ImageResult{}, ErrNoImageInResponse
 	}
 	d := parsed.Data[0]
-	if d.B64JSON == "" {
-		// Some relays return URL only. We do not download URL responses to keep
-		// behaviour predictable — surface a clear error so user can adjust the
-		// upstream config.
-		if d.URL != "" {
-			return ImageResult{}, fmt.Errorf("上游返回 URL 而非 b64_json(不支持 response_format),请联系中转站启用 b64_json")
-		}
-		return ImageResult{}, ErrNoImageInResponse
+	if d.B64JSON != "" {
+		return imageResultFromImagesDatum(d), nil
 	}
-	return imageResultFromImagesDatum(d), nil
+	if d.URL != "" {
+		return downloadImagesAPIURL(ctx, httpClient, d.URL, d.RevisedPrompt, onProgress, startedAt)
+	}
+	return ImageResult{}, ErrNoImageInResponse
 }
 
 func imageResultFromImagesDatum(d imagesAPIDatum) ImageResult {
@@ -436,6 +445,60 @@ func imageResultFromImagesDatum(d imagesAPIDatum) ImageResult {
 		RevisedPrompt: d.RevisedPrompt,
 		SourceEvent:   "images_api",
 	}
+}
+
+func downloadImagesAPIURL(
+	ctx context.Context,
+	httpClient *http.Client,
+	rawURL string,
+	revisedPrompt string,
+	onProgress func(stage string, elapsedSeconds int, bytesReceived int64),
+	startedAt time.Time,
+) (ImageResult, error) {
+	parsedURL, err := neturl.Parse(strings.TrimSpace(rawURL))
+	if err != nil || parsedURL.Scheme == "" || parsedURL.Host == "" {
+		return ImageResult{}, fmt.Errorf("上游返回的图片 URL 无效:%s", rawURL)
+	}
+	scheme := strings.ToLower(parsedURL.Scheme)
+	if scheme != "https" && scheme != "http" {
+		return ImageResult{}, fmt.Errorf("上游返回的图片 URL 协议不支持:%s", parsedURL.Scheme)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, parsedURL.String(), nil)
+	if err != nil {
+		return ImageResult{}, err
+	}
+	req.Header.Set("Accept", "image/png, image/jpeg, image/webp, */*")
+	req.Header.Set("User-Agent", UserAgent())
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return ImageResult{}, fmt.Errorf("下载上游 URL 图片失败:%w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		return ImageResult{}, fmt.Errorf("下载上游 URL 图片返回 HTTP %d", resp.StatusCode)
+	}
+	if resp.ContentLength > MaxInputImageBytes {
+		return ImageResult{}, fmt.Errorf("上游 URL 图片过大(%dB > %dB 上限)", resp.ContentLength, MaxInputImageBytes)
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, MaxInputImageBytes+1))
+	if err != nil {
+		return ImageResult{}, fmt.Errorf("读取上游 URL 图片失败:%w", err)
+	}
+	if int64(len(data)) > MaxInputImageBytes {
+		return ImageResult{}, fmt.Errorf("上游 URL 图片过大(>%dB 上限)", MaxInputImageBytes)
+	}
+	if mimeType := detectImageMimeTypeFromBytes(data); mimeType == "" {
+		return ImageResult{}, errors.New("上游 URL 没有返回支持的 PNG/JPEG/WebP 图片")
+	}
+	if onProgress != nil {
+		onProgress("已下载 Images API URL 图片", int(time.Since(startedAt).Seconds()), int64(len(data)))
+	}
+	return ImageResult{
+		ImageB64:      base64.StdEncoding.EncodeToString(data),
+		RevisedPrompt: revisedPrompt,
+		SourceEvent:   "images_api_url",
+	}, nil
 }
 
 func parseImagesAPIResponseBytes(raw []byte, statusCode int) (ImageResult, error) {
