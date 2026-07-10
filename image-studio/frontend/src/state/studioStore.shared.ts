@@ -10,7 +10,7 @@ import { isWindows } from "../platform";
 import { ACTIVE_PROFILE_LS_KEY, PROFILES_LS_KEY, tryParseProfile } from "../lib/profiles";
 import type { UpstreamProfile } from "../types/domain";
 import { pruneHistoryStorage } from "../lib/storage";
-import { getImageDimensionsFromBase64 } from "../lib/images";
+import { dataURLFromBase64, getImageDimensionsFromBase64 } from "../lib/images";
 
 export const EMPTY_MODE_CFG: ModeConfig = {
   baseURL: "",
@@ -140,7 +140,7 @@ export function genId(): string {
 }
 
 export function tempDataURLFromB64(b64: string): string {
-  return `data:image/png;base64,${b64}`;
+  return dataURLFromBase64(b64);
 }
 
 export function stripDataURLPrefix(dataURL: string): string {
