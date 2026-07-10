@@ -298,7 +298,7 @@ export async function requestResponsesOnce(
               body,
               callbacks.signal,
               consumeNativePayload,
-              { proxyMode, proxyURL: request.payload.proxyURL || "" },
+              { proxyMode, proxyURL: request.payload.proxyURL || "", keepAlive: true },
             );
       };
       let response: Awaited<ReturnType<typeof requestOnce>>;
@@ -318,7 +318,7 @@ export async function requestResponsesOnce(
             body,
             callbacks.signal,
             consumeNativePayload,
-            { proxyMode, proxyURL: request.payload.proxyURL || "" },
+            { proxyMode, proxyURL: request.payload.proxyURL || "", keepAlive: true },
           );
         } else if (responsesTransport === "websocket" && !runState.hasFinalImage) {
           callbacks.onLog?.("WebSocket 连接中断，正在重新连接并重放本次生成...");

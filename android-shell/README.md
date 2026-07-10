@@ -12,8 +12,22 @@ Current scope:
 
 - APK packaging works from the WebView shell
 - Frontend startup is supported by the Android-side `AndroidImageStudio` bridge
+- Active image generation and editing requests use a `dataSync` foreground
+  service, a low-priority notification, and a bounded partial wake lock so a
+  user-started request can continue after the app moves to the background
 - Desktop-only backend features that still depend on the Go/Wails runtime are
   surfaced as explicit "not implemented in Android shell yet" errors
+
+Background execution is scoped to active image requests. The service starts
+when the native HTTP or Responses WebSocket request begins, tracks concurrent
+requests, and stops after the final request completes, fails, or is cancelled.
+Android 13 and newer ask for notification permission when the first image task
+starts. If that permission is denied, Android can still expose the foreground
+service in its active-apps UI, but it may omit the notification from the drawer.
+
+The shell does not request overlay permission and does not use a transparent or
+one-pixel window to keep an idle process alive. Force-stop, network loss, and
+device-specific battery policies can still terminate an active task.
 
 Local build:
 
