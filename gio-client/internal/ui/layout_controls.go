@@ -1967,6 +1967,12 @@ func (a *App) layoutGeneralSettingsModal(gtx layout.Context, snap snapshot) layo
 						return a.technicalField(gtx, "输出目录", &a.batchOutputDirInput, "留空 = 回原图目录", unit.Dp(42))
 					}),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return a.field(gtx, "文件名前缀", &a.batchOutputPrefixInput, defaultBatchOutputPrefix, unit.Dp(42))
+					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return a.label(gtx, "留空时保留原文件名；路径分隔符等非法字符会替换为 -。", unit.Sp(10), fluent.textDim, font.Normal)
+					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						return a.field(gtx, "并发数", &a.batchConcurrencyInput, "2", unit.Dp(42))
 					}),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -2329,7 +2335,7 @@ func (a *App) settingsPaneCard(gtx layout.Context, title string, body layout.Wid
 func (a *App) generalSettingsCard(gtx layout.Context, title string, body layout.Widget) layout.Dimensions {
 	bg := withAlpha(fluent.white, 0xb8)
 	radius := unit.Dp(12)
-	if resolveThemeMode(a.themeMode) == "dark" {
+	if a.isDarkTheme() {
 		bg = fluent.surfaceElevated
 		radius = unit.Dp(8)
 	}
@@ -4014,6 +4020,19 @@ func (a *App) layoutBatchSourceQueueSection(gtx layout.Context, sourcePaths []st
 						)
 					}),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(unit.Dp(6))}.Layout(gtx,
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								return a.label(gtx, "文件名前缀", unit.Sp(11), fluent.textMuted, font.Medium)
+							}),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								return a.technicalField(gtx, "", &a.batchOutputPrefixInput, defaultBatchOutputPrefix, unit.Dp(42))
+							}),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								return a.label(gtx, "留空时保留原文件名，遇到同名会自动追加 -2、-3。", unit.Sp(10), fluent.textDim, font.Normal)
+							}),
+						)
+					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(unit.Dp(8))}.Layout(gtx,
 							layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 								return a.field(gtx, "并发数", &a.batchConcurrencyInput, "2", unit.Dp(42))
@@ -4105,7 +4124,11 @@ func (a *App) layoutBatchSourceQueueSection(gtx layout.Context, sourcePaths []st
 	children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 		return a.borderedSurface(gtx, fluent.surface2, fluentControlRadius, fluent.border, func(gtx layout.Context) layout.Dimensions {
 			return layout.UniformInset(unit.Dp(10)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return a.label(gtx, "结果文件名前缀固定为 processed-，遇到同名会自动追加 -2、-3。", unit.Sp(10), fluent.textDim, font.Normal)
+				prefix := a.effectiveBatchOutputPrefix()
+				if prefix == "" {
+					prefix = "(无前缀)"
+				}
+				return a.label(gtx, "当前文件名前缀: "+prefix+"；遇到同名会自动追加 -2、-3。", unit.Sp(10), fluent.textDim, font.Normal)
 			})
 		})
 	}))

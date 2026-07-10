@@ -1062,7 +1062,7 @@ func (a *App) layoutHistoryResultGroupThumb(gtx layout.Context, group historyPro
 func (a *App) layoutHistoryPileLayer(gtx layout.Context, img image.Image, imgOp paint.ImageOp, width unit.Dp, height unit.Dp, radius unit.Dp) layout.Dimensions {
 	border := withAlpha(fluent.white, 0xdc)
 	bg := rgb(0xf4f4f5)
-	if resolveThemeMode(a.themeMode) == "dark" {
+	if a.isDarkTheme() {
 		border = withAlpha(fluent.white, 0x29)
 		bg = rgb(0x27272a)
 	}

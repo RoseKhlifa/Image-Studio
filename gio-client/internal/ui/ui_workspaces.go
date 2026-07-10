@@ -98,6 +98,7 @@ func (a *App) buildWorkspaceSnapshot() workspaceState {
 		BatchInputDir:            strings.TrimSpace(a.batchInputDirInput.Text()),
 		BatchOutputDir:           strings.TrimSpace(a.batchOutputDirInput.Text()),
 		BatchOutputMode:          normalizeBatchOutputMode(a.batchOutputMode),
+		BatchOutputPrefix:        a.effectiveBatchOutputPrefix(),
 		BatchConcurrency:         normalizeBatchProcessConcurrency(a.batchConcurrency),
 		BatchRetryOnFail:         a.batchRetryOnFail,
 		BatchAutoAspect:          strings.TrimSpace(a.batchAutoAspect),
@@ -179,6 +180,7 @@ func (a *App) applyWorkspace(ws workspaceState) {
 	a.batchInputDirInput.SetText(strings.TrimSpace(ws.BatchInputDir))
 	a.batchOutputDirInput.SetText(strings.TrimSpace(ws.BatchOutputDir))
 	a.batchOutputMode = normalizeBatchOutputMode(ws.BatchOutputMode)
+	a.batchOutputPrefixInput.SetText(normalizeBatchOutputPrefix(ws.BatchOutputPrefix))
 	a.batchConcurrency = normalizeBatchProcessConcurrency(ws.BatchConcurrency)
 	a.batchConcurrencyInput.SetText(strconv.Itoa(a.batchConcurrency))
 	a.batchRetryOnFail = ws.BatchRetryOnFail
@@ -310,6 +312,7 @@ func (a *App) createWorkspace() {
 		LoopLivePreview:          true,
 		BatchMode:                false,
 		BatchOutputMode:          batchOutputModeSourceDir,
+		BatchOutputPrefix:        defaultBatchOutputPrefix,
 		BatchConcurrency:         defaultBatchProcessConcurrency,
 		BatchRetryOnFail:         false,
 		BatchAutoAspect:          "",

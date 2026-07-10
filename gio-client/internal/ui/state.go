@@ -135,12 +135,7 @@ func (a *App) clearLogsLocked() {
 
 func (a *App) closeSavePrompt() {
 	a.mu.Lock()
-	a.savePromptVisible = false
-	a.savePromptSourcePath = ""
-	a.savePromptSourceImageB64 = ""
-	a.savePromptSuggestedName = ""
-	a.savePromptBatchItems = nil
-	a.savePromptBatchSelection = nil
+	a.resetSavePromptStateLocked()
 	a.mu.Unlock()
 	a.invalidateNow()
 }
@@ -719,13 +714,14 @@ func (a *App) todayHistoryCountLocked() int {
 
 func (a *App) setHistoryLocked(items []sharedCompat.HistoryItem) {
 	a.history = append([]sharedCompat.HistoryItem(nil), items...)
+	historySnapshot := append([]sharedCompat.HistoryItem(nil), a.history...)
 	a.historyRev++
 	a.historyItemDisplayCache = historyItemDisplayCache{}
 	a.historyButtons = map[string]*widget.Clickable{}
 	a.historyActionButtons = map[string]*widget.Clickable{}
 	a.expandedPromptGroups = map[string]bool{}
 	a.pruneImageCacheLocked()
-	go a.startHistoryThumbBackfill()
+	go a.startHistoryThumbBackfillItems(historySnapshot, true)
 }
 
 func (a *App) setProfilesLocked(items []sharedCompat.UpstreamProfile) {
@@ -770,40 +766,35 @@ func (a *App) closeGeneralSettingsModal() {
 }
 
 func (a *App) persistGeneralSettings() error {
-	state, _, err := gioCompat.LoadState()
-	if err != nil {
-		return err
-	}
-	state = sharedCompat.Normalize(state)
-	state.Settings.ProxyMode = strings.TrimSpace(a.proxy)
-	if state.Settings.ProxyMode == "" {
-		state.Settings.ProxyMode = "system"
-	}
-	protectStreamPreview := a.protectStreamPreview
-	state.Settings.ProtectStreamPreview = &protectStreamPreview
-	autoRetryEnabled := a.autoRetryEnabled
-	state.Settings.AutoRetryEnabled = &autoRetryEnabled
-	autoRetryCount := normalizeAutoRetryCount(a.autoRetryCount)
-	state.Settings.AutoRetryCount = &autoRetryCount
-	completionSound := a.completionSound
-	state.Settings.CompletionSound = &completionSound
-	completionNotification := a.completionNotification
-	state.Settings.CompletionNotification = &completionNotification
-	state.Settings.CleanupPreviewCacheOnExit = a.cleanupPreviewCacheOnExit
-	state.Settings.KernelRuntimeMode = normalizeKernelRuntimeMode(a.kernelRuntimeMode)
-	state.Settings.FontScale = normalizeFontScale(a.fontScale)
-	state.Settings.ReducedEffects = a.reducedEffects
-	state.Settings.ProxyURL = strings.TrimSpace(a.proxyURLInput.Text())
-	state.Settings.OutputDir = strings.TrimSpace(a.outputDirInput.Text())
-	state = gioCompat.RememberTrustedOutputRoot(state, state.Settings.OutputDir)
-	state.Settings.KeepLogs = a.keepLogs
-	state.Settings.IgnoredReleaseTag = strings.TrimSpace(a.ignoredReleaseTag)
-	state.Settings.UserIdentifier = strings.TrimSpace(a.userIdentifierInput.Text())
-	state.UpdatedAt = time.Now().UnixMilli()
-	if err := gioCompat.SaveState(state); err != nil {
-		return err
-	}
-	return nil
+	return gioCompat.UpdateState(func(state *sharedCompat.State) error {
+		*state = sharedCompat.Normalize(*state)
+		state.Settings.ProxyMode = strings.TrimSpace(a.proxy)
+		if state.Settings.ProxyMode == "" {
+			state.Settings.ProxyMode = "system"
+		}
+		protectStreamPreview := a.protectStreamPreview
+		state.Settings.ProtectStreamPreview = &protectStreamPreview
+		autoRetryEnabled := a.autoRetryEnabled
+		state.Settings.AutoRetryEnabled = &autoRetryEnabled
+		autoRetryCount := normalizeAutoRetryCount(a.autoRetryCount)
+		state.Settings.AutoRetryCount = &autoRetryCount
+		completionSound := a.completionSound
+		state.Settings.CompletionSound = &completionSound
+		completionNotification := a.completionNotification
+		state.Settings.CompletionNotification = &completionNotification
+		state.Settings.CleanupPreviewCacheOnExit = a.cleanupPreviewCacheOnExit
+		state.Settings.KernelRuntimeMode = normalizeKernelRuntimeMode(a.kernelRuntimeMode)
+		state.Settings.FontScale = normalizeFontScale(a.fontScale)
+		state.Settings.ReducedEffects = a.reducedEffects
+		state.Settings.ProxyURL = strings.TrimSpace(a.proxyURLInput.Text())
+		state.Settings.OutputDir = strings.TrimSpace(a.outputDirInput.Text())
+		*state = gioCompat.RememberTrustedOutputRoot(*state, state.Settings.OutputDir)
+		state.Settings.KeepLogs = a.keepLogs
+		state.Settings.IgnoredReleaseTag = strings.TrimSpace(a.ignoredReleaseTag)
+		state.Settings.UserIdentifier = strings.TrimSpace(a.userIdentifierInput.Text())
+		state.UpdatedAt = time.Now().UnixMilli()
+		return nil
+	})
 }
 
 func (a *App) dismissFailureState() {

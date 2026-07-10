@@ -104,45 +104,45 @@ func (a *App) savePromptTemplateDraft() {
 		a.appendLog("模板标题和内容不能为空")
 		return
 	}
-	state, _, err := gioCompat.LoadState()
-	if err != nil {
-		a.appendLog("保存模板失败: " + err.Error())
-		return
-	}
-	state = sharedCompat.Normalize(state)
 	now := time.Now().UnixMilli()
 	targetID := ""
 	a.mu.Lock()
 	targetID = strings.TrimSpace(a.selectedPromptTemplateID)
 	a.mu.Unlock()
 	updated := false
-	for i := range state.Settings.PromptTemplates {
-		if strings.TrimSpace(state.Settings.PromptTemplates[i].ID) != targetID || targetID == "" {
-			continue
+	var templates []sharedCompat.PromptTemplate
+	err := gioCompat.UpdateState(func(state *sharedCompat.State) error {
+		*state = sharedCompat.Normalize(*state)
+		for i := range state.Settings.PromptTemplates {
+			if strings.TrimSpace(state.Settings.PromptTemplates[i].ID) != targetID || targetID == "" {
+				continue
+			}
+			state.Settings.PromptTemplates[i].Label = label
+			state.Settings.PromptTemplates[i].Text = text
+			state.Settings.PromptTemplates[i].UpdatedAt = now
+			updated = true
+			break
 		}
-		state.Settings.PromptTemplates[i].Label = label
-		state.Settings.PromptTemplates[i].Text = text
-		state.Settings.PromptTemplates[i].UpdatedAt = now
-		updated = true
-		break
-	}
-	if !updated {
-		targetID = fmt.Sprintf("tpl-%d", now)
-		state.Settings.PromptTemplates = append([]sharedCompat.PromptTemplate{{
-			ID:        targetID,
-			Label:     label,
-			Text:      text,
-			CreatedAt: now,
-			UpdatedAt: now,
-		}}, state.Settings.PromptTemplates...)
-	}
-	state.UpdatedAt = now
-	if err := gioCompat.SaveState(state); err != nil {
+		if !updated {
+			targetID = fmt.Sprintf("tpl-%d", now)
+			state.Settings.PromptTemplates = append([]sharedCompat.PromptTemplate{{
+				ID:        targetID,
+				Label:     label,
+				Text:      text,
+				CreatedAt: now,
+				UpdatedAt: now,
+			}}, state.Settings.PromptTemplates...)
+		}
+		state.UpdatedAt = now
+		templates = append([]sharedCompat.PromptTemplate(nil), state.Settings.PromptTemplates...)
+		return nil
+	})
+	if err != nil {
 		a.appendLog("保存模板失败: " + err.Error())
 		return
 	}
 	a.mu.Lock()
-	a.setPromptTemplatesLocked(state.Settings.PromptTemplates)
+	a.setPromptTemplatesLocked(templates)
 	a.selectedPromptTemplateID = targetID
 	a.promptTemplateManagerOpen = true
 	a.loadPromptTemplateDraftLocked(targetID)
@@ -164,35 +164,38 @@ func (a *App) deleteSelectedPromptTemplate() {
 		a.appendLog("当前没有可删除的模板")
 		return
 	}
-	state, _, err := gioCompat.LoadState()
+	var next []sharedCompat.PromptTemplate
+	removedLabel := ""
+	removed := false
+	err := gioCompat.UpdateState(func(state *sharedCompat.State) error {
+		*state = sharedCompat.Normalize(*state)
+		next = make([]sharedCompat.PromptTemplate, 0, len(state.Settings.PromptTemplates))
+		for _, item := range state.Settings.PromptTemplates {
+			if strings.TrimSpace(item.ID) == targetID {
+				removedLabel = strings.TrimSpace(item.Label)
+				removed = true
+				continue
+			}
+			next = append(next, item)
+		}
+		if removed {
+			state.Settings.PromptTemplates = next
+			state.UpdatedAt = time.Now().UnixMilli()
+		}
+		return nil
+	})
 	if err != nil {
 		a.appendLog("删除模板失败: " + err.Error())
 		return
 	}
-	state = sharedCompat.Normalize(state)
-	next := make([]sharedCompat.PromptTemplate, 0, len(state.Settings.PromptTemplates))
-	removedLabel := ""
-	for _, item := range state.Settings.PromptTemplates {
-		if strings.TrimSpace(item.ID) == targetID {
-			removedLabel = strings.TrimSpace(item.Label)
-			continue
-		}
-		next = append(next, item)
-	}
-	if len(next) == len(state.Settings.PromptTemplates) {
+	if !removed {
 		a.appendLog("当前模板不存在")
 		return
 	}
-	state.Settings.PromptTemplates = next
-	state.UpdatedAt = time.Now().UnixMilli()
-	if err := gioCompat.SaveState(state); err != nil {
-		a.appendLog("删除模板失败: " + err.Error())
-		return
-	}
 	a.mu.Lock()
-	a.setPromptTemplatesLocked(state.Settings.PromptTemplates)
-	if len(state.Settings.PromptTemplates) > 0 {
-		a.selectedPromptTemplateID = strings.TrimSpace(state.Settings.PromptTemplates[0].ID)
+	a.setPromptTemplatesLocked(next)
+	if len(next) > 0 {
+		a.selectedPromptTemplateID = strings.TrimSpace(next[0].ID)
 		a.loadPromptTemplateDraftLocked(a.selectedPromptTemplateID)
 	} else {
 		a.selectedPromptTemplateID = ""

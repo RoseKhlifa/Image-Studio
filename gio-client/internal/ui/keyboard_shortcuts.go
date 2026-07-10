@@ -43,6 +43,7 @@ func (a *App) anyTextEditorFocused(gtx layout.Context) bool {
 		&a.loopAutoSaveDirInput,
 		&a.batchInputDirInput,
 		&a.batchOutputDirInput,
+		&a.batchOutputPrefixInput,
 		&a.batchConcurrencyInput,
 		&a.upstreamQuickImportInput,
 		&a.rawResponseViewerInput,

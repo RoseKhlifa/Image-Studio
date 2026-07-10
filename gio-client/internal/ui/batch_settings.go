@@ -9,6 +9,7 @@ import (
 const (
 	defaultBatchProcessConcurrency = 2
 	maxBatchProcessConcurrency     = 9
+	defaultBatchOutputPrefix       = "processed-"
 	batchOutputModeSourceDir       = "source_dir"
 	batchOutputModeCustomDir       = "custom_dir"
 )
@@ -39,6 +40,24 @@ func (a *App) syncBatchSettingsFromInputs() {
 			a.batchConcurrencyInput.SetText(normalizedText)
 		}
 	}
+	normalizedPrefix := normalizeBatchOutputPrefix(a.batchOutputPrefixInput.Text())
+	if normalizedPrefix != a.batchOutputPrefixInput.Text() {
+		a.batchOutputPrefixInput.SetText(normalizedPrefix)
+	}
+}
+
+func normalizeBatchOutputPrefix(value string) string {
+	value = strings.TrimSpace(value)
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 || strings.ContainsRune(`<>:"/\|?*`, r) {
+			return '-'
+		}
+		return r
+	}, value)
+}
+
+func (a *App) effectiveBatchOutputPrefix() string {
+	return normalizeBatchOutputPrefix(a.batchOutputPrefixInput.Text())
 }
 
 func normalizeBatchOutputMode(value string) string {

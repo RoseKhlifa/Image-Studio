@@ -1298,45 +1298,52 @@ func (a *App) switchActiveProfile(profileID string) {
 		return
 	}
 	a.saveCurrentConfig()
-	state, _, err := gioCompat.LoadState()
+	var stateSnapshot sharedCompat.State
+	found := false
+	resetHistorySelection := false
+	err := gioCompat.UpdateState(func(state *sharedCompat.State) error {
+		*state = sharedCompat.Normalize(*state)
+		if _, ok := historyItemByID(state.History, a.selectedHistoryID); !ok && len(state.History) > 0 {
+			resetHistorySelection = true
+		}
+		for _, profile := range state.Profiles {
+			if profile.ID == profileID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil
+		}
+		state.ActiveProfile = profileID
+		state.UpdatedAt = time.Now().UnixMilli()
+		stateSnapshot = *state
+		return nil
+	})
 	if err != nil {
 		a.appendLog("读取上游配置失败: " + err.Error())
 		return
 	}
-	state = sharedCompat.Normalize(state)
-	if _, ok := historyItemByID(state.History, a.selectedHistoryID); !ok && len(state.History) > 0 {
-		a.selectedHistoryID = state.History[0].ID
-	}
-	found := false
-	for _, profile := range state.Profiles {
-		if profile.ID == profileID {
-			found = true
-			break
-		}
-	}
 	if !found {
 		return
 	}
-	state.ActiveProfile = profileID
-	state.UpdatedAt = time.Now().UnixMilli()
-	if err := gioCompat.SaveState(state); err != nil {
-		a.appendLog("切换上游失败: " + err.Error())
-		return
+	if resetHistorySelection {
+		a.selectedHistoryID = stateSnapshot.History[0].ID
 	}
-	cfg := gioCompat.ConfigFromState(kernel.DefaultConfig(), state)
+	cfg := gioCompat.ConfigFromState(kernel.DefaultConfig(), stateSnapshot)
 	a.applyRuntimeConfig(cfg)
 	a.mu.Lock()
-	a.setProfilesLocked(state.Profiles)
+	a.setProfilesLocked(stateSnapshot.Profiles)
 	a.activeProfileID = profileID
 	a.settingsSelectedProfileID = profileID
-	if profile, ok := profileByID(state.Profiles, profileID); ok {
+	if profile, ok := profileByID(stateSnapshot.Profiles, profileID); ok {
 		a.fallbackProfileID = strings.TrimSpace(profile.FallbackProfileID)
 	}
-	a.status = "已切换上游: " + activeProfileName(state.Profiles, profileID)
-	a.appendLogLocked("切换上游配置: " + activeProfileName(state.Profiles, profileID))
+	a.status = "已切换上游: " + activeProfileName(stateSnapshot.Profiles, profileID)
+	a.appendLogLocked("切换上游配置: " + activeProfileName(stateSnapshot.Profiles, profileID))
 	a.mu.Unlock()
-	a.profileNameInput.SetText(activeProfileName(state.Profiles, profileID))
-	if limit := activeProfileConcurrencyLimit(state.Profiles, profileID); limit > 0 {
+	a.profileNameInput.SetText(activeProfileName(stateSnapshot.Profiles, profileID))
+	if limit := activeProfileConcurrencyLimit(stateSnapshot.Profiles, profileID); limit > 0 {
 		a.concurrencyLimitInput.SetText(strconv.Itoa(limit))
 	} else {
 		a.concurrencyLimitInput.SetText("")
@@ -1642,125 +1649,135 @@ func (a *App) closeSettingsModal() {
 }
 
 func (a *App) saveSettingsSelection() error {
-	state, _, err := gioCompat.LoadState()
+	var stateSnapshot sharedCompat.State
+	selectedID := ""
+	updated := false
+	err := gioCompat.UpdateState(func(state *sharedCompat.State) error {
+		*state = sharedCompat.Normalize(*state)
+		selectedID = normalizeSettingsSelectedProfileID(*state, a.settingsSelectedProfileID)
+		if selectedID == "" {
+			return nil
+		}
+		now := time.Now().UnixMilli()
+		for i := range state.Profiles {
+			if state.Profiles[i].ID != selectedID {
+				continue
+			}
+			name := strings.TrimSpace(a.profileNameInput.Text())
+			if name == "" {
+				name = strings.TrimSpace(state.Profiles[i].Name)
+			}
+			if name == "" {
+				name = nextProfileName(state.Profiles)
+			}
+			concurrencyLimit := 0
+			if raw := strings.TrimSpace(a.concurrencyLimitInput.Text()); raw != "" {
+				if value, err := strconv.Atoi(raw); err == nil && value > 0 {
+					concurrencyLimit = value
+				}
+			}
+			state.Profiles[i].Name = name
+			state.Profiles[i].APIMode = normalizeProfileAPIMode(a.api)
+			state.Profiles[i].RequestPolicy = normalizeProfilePolicy(a.policy)
+			state.Profiles[i].ResponsesTransport = normalizeProfileResponsesTransport(a.responsesTransport)
+			state.Profiles[i].ReasoningEffort = normalizeReasoningEffort(a.reasoningEffort)
+			state.Profiles[i].FallbackProfileID = strings.TrimSpace(a.fallbackProfileID)
+			state.Profiles[i].ImagesNewAPICompat = a.imagesNewAPICompat
+			state.Profiles[i].BaseURL = strings.TrimSpace(a.baseURLInput.Text())
+			state.Profiles[i].TextModelID = strings.TrimSpace(a.textModelInput.Text())
+			state.Profiles[i].ImageModelID = strings.TrimSpace(a.imageModelInput.Text())
+			state.Profiles[i].ConcurrencyLimit = concurrencyLimit
+			updated = true
+			break
+		}
+		if !updated {
+			return nil
+		}
+		state.Settings.ProxyMode = strings.TrimSpace(a.proxy)
+		if state.Settings.ProxyMode == "" {
+			state.Settings.ProxyMode = client.ProxyModeSystem
+		}
+		state.Settings.ProxyURL = strings.TrimSpace(a.proxyURLInput.Text())
+		state.Settings.OutputDir = strings.TrimSpace(a.outputDirInput.Text())
+		*state = gioCompat.RememberTrustedOutputRoot(*state, state.Settings.OutputDir)
+		state.Settings.Background = strings.TrimSpace(a.background)
+		outputCompression := client.DefaultOutputCompression
+		if raw := strings.TrimSpace(a.outputCompressionInput.Text()); raw != "" {
+			if value, err := strconv.Atoi(raw); err == nil {
+				outputCompression = value
+			}
+		}
+		state.Settings.OutputCompression = &outputCompression
+		state.Settings.InputFidelity = strings.TrimSpace(a.inputFidelity)
+		state.Settings.ImageStyle = strings.TrimSpace(a.imageStyle)
+		state.Settings.Moderation = strings.TrimSpace(a.moderation)
+		state.Settings.UserIdentifier = strings.TrimSpace(a.userIdentifierInput.Text())
+		partialImages := kernel.DefaultConfig().PartialImages
+		if raw := strings.TrimSpace(a.partialImagesInput.Text()); raw != "" {
+			if value, err := strconv.Atoi(raw); err == nil {
+				partialImages = value
+			}
+		}
+		state.Settings.PartialImages = &partialImages
+		completionSound := a.completionSound
+		state.Settings.CompletionSound = &completionSound
+		completionNotification := a.completionNotification
+		state.Settings.CompletionNotification = &completionNotification
+		protectStreamPreview := a.protectStreamPreview
+		state.Settings.ProtectStreamPreview = &protectStreamPreview
+		state.Settings.KeepLogs = a.keepLogs
+		state.Settings.CleanupPreviewCacheOnExit = a.cleanupPreviewCacheOnExit
+		state.UpdatedAt = now
+		stateSnapshot = *state
+		return nil
+	})
 	if err != nil {
 		return err
 	}
-	state = sharedCompat.Normalize(state)
-	selectedID := normalizeSettingsSelectedProfileID(state, a.settingsSelectedProfileID)
-	if selectedID == "" {
-		return nil
-	}
-	now := time.Now().UnixMilli()
-	updated := false
-	for i := range state.Profiles {
-		if state.Profiles[i].ID != selectedID {
-			continue
-		}
-		name := strings.TrimSpace(a.profileNameInput.Text())
-		if name == "" {
-			name = strings.TrimSpace(state.Profiles[i].Name)
-		}
-		if name == "" {
-			name = nextProfileName(state.Profiles)
-		}
-		concurrencyLimit := 0
-		if raw := strings.TrimSpace(a.concurrencyLimitInput.Text()); raw != "" {
-			if value, err := strconv.Atoi(raw); err == nil && value > 0 {
-				concurrencyLimit = value
-			}
-		}
-		state.Profiles[i].Name = name
-		state.Profiles[i].APIMode = normalizeProfileAPIMode(a.api)
-		state.Profiles[i].RequestPolicy = normalizeProfilePolicy(a.policy)
-		state.Profiles[i].ResponsesTransport = normalizeProfileResponsesTransport(a.responsesTransport)
-		state.Profiles[i].ReasoningEffort = normalizeReasoningEffort(a.reasoningEffort)
-		state.Profiles[i].FallbackProfileID = strings.TrimSpace(a.fallbackProfileID)
-		state.Profiles[i].ImagesNewAPICompat = a.imagesNewAPICompat
-		state.Profiles[i].BaseURL = strings.TrimSpace(a.baseURLInput.Text())
-		state.Profiles[i].TextModelID = strings.TrimSpace(a.textModelInput.Text())
-		state.Profiles[i].ImageModelID = strings.TrimSpace(a.imageModelInput.Text())
-		state.Profiles[i].ConcurrencyLimit = concurrencyLimit
-		updated = true
-		break
-	}
 	if !updated {
 		return nil
-	}
-	state.Settings.ProxyMode = strings.TrimSpace(a.proxy)
-	if state.Settings.ProxyMode == "" {
-		state.Settings.ProxyMode = client.ProxyModeSystem
-	}
-	state.Settings.ProxyURL = strings.TrimSpace(a.proxyURLInput.Text())
-	state.Settings.OutputDir = strings.TrimSpace(a.outputDirInput.Text())
-	state = gioCompat.RememberTrustedOutputRoot(state, state.Settings.OutputDir)
-	state.Settings.Background = strings.TrimSpace(a.background)
-	outputCompression := client.DefaultOutputCompression
-	if raw := strings.TrimSpace(a.outputCompressionInput.Text()); raw != "" {
-		if value, err := strconv.Atoi(raw); err == nil {
-			outputCompression = value
-		}
-	}
-	state.Settings.OutputCompression = &outputCompression
-	state.Settings.InputFidelity = strings.TrimSpace(a.inputFidelity)
-	state.Settings.ImageStyle = strings.TrimSpace(a.imageStyle)
-	state.Settings.Moderation = strings.TrimSpace(a.moderation)
-	state.Settings.UserIdentifier = strings.TrimSpace(a.userIdentifierInput.Text())
-	partialImages := kernel.DefaultConfig().PartialImages
-	if raw := strings.TrimSpace(a.partialImagesInput.Text()); raw != "" {
-		if value, err := strconv.Atoi(raw); err == nil {
-			partialImages = value
-		}
-	}
-	state.Settings.PartialImages = &partialImages
-	completionSound := a.completionSound
-	state.Settings.CompletionSound = &completionSound
-	completionNotification := a.completionNotification
-	state.Settings.CompletionNotification = &completionNotification
-	protectStreamPreview := a.protectStreamPreview
-	state.Settings.ProtectStreamPreview = &protectStreamPreview
-	state.Settings.KeepLogs = a.keepLogs
-	state.Settings.CleanupPreviewCacheOnExit = a.cleanupPreviewCacheOnExit
-	state.UpdatedAt = now
-	if err := gioCompat.SaveState(state); err != nil {
-		return err
 	}
 	if err := gioCompat.WriteAPIKey(selectedID, a.apiKeyInput.Text()); err != nil {
 		return err
 	}
 	a.mu.Lock()
-	a.setProfilesLocked(state.Profiles)
+	a.setProfilesLocked(stateSnapshot.Profiles)
 	a.settingsSelectedProfileID = selectedID
-	a.status = "已保存配置: " + activeProfileName(state.Profiles, selectedID)
-	a.appendLogLocked("已保存配置: " + activeProfileName(state.Profiles, selectedID))
+	a.status = "已保存配置: " + activeProfileName(stateSnapshot.Profiles, selectedID)
+	a.appendLogLocked("已保存配置: " + activeProfileName(stateSnapshot.Profiles, selectedID))
 	a.mu.Unlock()
-	if selectedID == state.ActiveProfile {
+	if selectedID == stateSnapshot.ActiveProfile {
 		_ = a.restoreActiveRuntimeConfig(false)
 	}
 	return nil
 }
 
 func (a *App) activateStoredProfile(profileID string) error {
-	state, _, err := gioCompat.LoadState()
+	selectedID := ""
+	name := ""
+	err := gioCompat.UpdateState(func(state *sharedCompat.State) error {
+		*state = sharedCompat.Normalize(*state)
+		selectedID = normalizeSettingsSelectedProfileID(*state, profileID)
+		if selectedID == "" {
+			return nil
+		}
+		name = activeProfileName(state.Profiles, selectedID)
+		now := time.Now().UnixMilli()
+		state.ActiveProfile = selectedID
+		for i := range state.Profiles {
+			if state.Profiles[i].ID == selectedID {
+				state.Profiles[i].LastUsedAt = now
+				break
+			}
+		}
+		state.UpdatedAt = now
+		return nil
+	})
 	if err != nil {
 		return err
 	}
-	state = sharedCompat.Normalize(state)
-	selectedID := normalizeSettingsSelectedProfileID(state, profileID)
 	if selectedID == "" {
 		return nil
-	}
-	name := activeProfileName(state.Profiles, selectedID)
-	state.ActiveProfile = selectedID
-	for i := range state.Profiles {
-		if state.Profiles[i].ID == selectedID {
-			state.Profiles[i].LastUsedAt = time.Now().UnixMilli()
-			break
-		}
-	}
-	state.UpdatedAt = time.Now().UnixMilli()
-	if err := gioCompat.SaveState(state); err != nil {
-		return err
 	}
 	if err := a.restoreActiveRuntimeConfig(false); err != nil {
 		return err
@@ -1774,41 +1791,43 @@ func (a *App) activateStoredProfile(profileID string) error {
 }
 
 func (a *App) createSettingsProfile(apiMode string) error {
-	state, _, err := gioCompat.LoadState()
+	var stateSnapshot sharedCompat.State
+	var profile sharedCompat.UpstreamProfile
+	activate := false
+	err := gioCompat.UpdateState(func(state *sharedCompat.State) error {
+		*state = sharedCompat.Normalize(*state)
+		now := time.Now().UnixMilli()
+		profile = sharedCompat.UpstreamProfile{
+			ID:                 nextProfileID(state.Profiles, now),
+			Name:               nextProfileName(state.Profiles),
+			APIMode:            normalizeProfileAPIMode(apiMode),
+			ResponsesTransport: string(client.ResponsesTransportSSE),
+			RequestPolicy:      string(client.RequestPolicyOpenAI),
+			ImagesNewAPICompat: false,
+			TextModelID:        client.TextModel,
+			ImageModelID:       client.ImageModel,
+			ReasoningEffort:    client.DefaultReasoningEffort,
+			CreatedAt:          now,
+			LastUsedAt:         now,
+		}
+		state.Profiles = append(state.Profiles, profile)
+		activate = len(state.Profiles) == 1 || strings.TrimSpace(state.ActiveProfile) == ""
+		if activate {
+			state.ActiveProfile = profile.ID
+		}
+		state.UpdatedAt = now
+		stateSnapshot = *state
+		return nil
+	})
 	if err != nil {
 		return err
 	}
-	state = sharedCompat.Normalize(state)
-	now := time.Now().UnixMilli()
-	profileID := fmt.Sprintf("gio-%d", now)
-	profile := sharedCompat.UpstreamProfile{
-		ID:                 profileID,
-		Name:               nextProfileName(state.Profiles),
-		APIMode:            normalizeProfileAPIMode(apiMode),
-		ResponsesTransport: string(client.ResponsesTransportSSE),
-		RequestPolicy:      string(client.RequestPolicyOpenAI),
-		ImagesNewAPICompat: false,
-		TextModelID:        client.TextModel,
-		ImageModelID:       client.ImageModel,
-		ReasoningEffort:    client.DefaultReasoningEffort,
-		CreatedAt:          now,
-		LastUsedAt:         now,
-	}
-	state.Profiles = append(state.Profiles, profile)
-	activate := len(state.Profiles) == 1 || strings.TrimSpace(state.ActiveProfile) == ""
-	if activate {
-		state.ActiveProfile = profileID
-	}
-	state.UpdatedAt = now
-	if err := gioCompat.SaveState(state); err != nil {
-		return err
-	}
 	a.mu.Lock()
-	a.setProfilesLocked(state.Profiles)
+	a.setProfilesLocked(stateSnapshot.Profiles)
 	if activate {
-		a.activeProfileID = profileID
+		a.activeProfileID = profile.ID
 	}
-	a.settingsSelectedProfileID = profileID
+	a.settingsSelectedProfileID = profile.ID
 	a.status = "已创建配置: " + profile.Name
 	a.appendLogLocked("已创建配置: " + profile.Name)
 	a.mu.Unlock()
@@ -1816,137 +1835,158 @@ func (a *App) createSettingsProfile(apiMode string) error {
 		if err := a.restoreActiveRuntimeConfig(false); err != nil {
 			return err
 		}
-	} else if err := a.loadSettingsProfileDraft(profileID); err != nil {
+	} else if err := a.loadSettingsProfileDraft(profile.ID); err != nil {
 		return err
 	}
 	return nil
 }
 
 func (a *App) duplicateSettingsProfile() error {
-	state, _, err := gioCompat.LoadState()
+	var stateSnapshot sharedCompat.State
+	var current sharedCompat.UpstreamProfile
+	var clone sharedCompat.UpstreamProfile
+	found := false
+	err := gioCompat.UpdateState(func(state *sharedCompat.State) error {
+		*state = sharedCompat.Normalize(*state)
+		selectedID := normalizeSettingsSelectedProfileID(*state, a.settingsSelectedProfileID)
+		var ok bool
+		current, ok = profileByID(state.Profiles, selectedID)
+		if !ok {
+			return nil
+		}
+		found = true
+		now := time.Now().UnixMilli()
+		clone = current
+		clone.ID = nextProfileID(state.Profiles, now)
+		clone.Name = nextProfileName(state.Profiles)
+		clone.CreatedAt = now
+		clone.LastUsedAt = now
+		state.Profiles = append(state.Profiles, clone)
+		state.UpdatedAt = now
+		stateSnapshot = *state
+		return nil
+	})
 	if err != nil {
 		return err
 	}
-	state = sharedCompat.Normalize(state)
-	selectedID := normalizeSettingsSelectedProfileID(state, a.settingsSelectedProfileID)
-	current, ok := profileByID(state.Profiles, selectedID)
-	if !ok {
+	if !found {
 		return nil
 	}
-	now := time.Now().UnixMilli()
-	profileID := fmt.Sprintf("gio-%d", now)
-	clone := current
-	clone.ID = profileID
-	clone.Name = nextProfileName(state.Profiles)
-	clone.CreatedAt = now
-	clone.LastUsedAt = now
-	state.Profiles = append(state.Profiles, clone)
-	state.UpdatedAt = now
 	if key, _ := gioCompat.ReadAPIKey(current.ID); strings.TrimSpace(key) != "" {
-		_ = gioCompat.WriteAPIKey(profileID, key)
-	}
-	if err := gioCompat.SaveState(state); err != nil {
-		return err
+		_ = gioCompat.WriteAPIKey(clone.ID, key)
 	}
 	a.mu.Lock()
-	a.setProfilesLocked(state.Profiles)
-	a.settingsSelectedProfileID = profileID
+	a.setProfilesLocked(stateSnapshot.Profiles)
+	a.settingsSelectedProfileID = clone.ID
 	a.status = "已复制配置: " + clone.Name
 	a.appendLogLocked("已复制配置: " + clone.Name)
 	a.mu.Unlock()
-	return a.loadSettingsProfileDraft(profileID)
+	return a.loadSettingsProfileDraft(clone.ID)
 }
 
 func (a *App) deleteSettingsProfile() error {
-	state, _, err := gioCompat.LoadState()
+	var stateSnapshot sharedCompat.State
+	var current sharedCompat.UpstreamProfile
+	found := false
+	err := gioCompat.UpdateState(func(state *sharedCompat.State) error {
+		*state = sharedCompat.Normalize(*state)
+		selectedID := normalizeSettingsSelectedProfileID(*state, a.settingsSelectedProfileID)
+		var ok bool
+		current, ok = profileByID(state.Profiles, selectedID)
+		if !ok {
+			return nil
+		}
+		found = true
+		nextProfiles := make([]sharedCompat.UpstreamProfile, 0, len(state.Profiles)-1)
+		for _, profile := range state.Profiles {
+			if profile.ID == current.ID {
+				continue
+			}
+			nextProfiles = append(nextProfiles, profile)
+		}
+		state.Profiles = nextProfiles
+		if current.ID == state.ActiveProfile {
+			if len(nextProfiles) > 0 {
+				state.ActiveProfile = nextProfiles[0].ID
+			} else {
+				state.ActiveProfile = ""
+			}
+		}
+		state.UpdatedAt = time.Now().UnixMilli()
+		stateSnapshot = *state
+		return nil
+	})
 	if err != nil {
 		return err
 	}
-	state = sharedCompat.Normalize(state)
-	selectedID := normalizeSettingsSelectedProfileID(state, a.settingsSelectedProfileID)
-	current, ok := profileByID(state.Profiles, selectedID)
-	if !ok {
+	if !found {
 		return nil
 	}
-	nextProfiles := make([]sharedCompat.UpstreamProfile, 0, len(state.Profiles)-1)
-	for _, profile := range state.Profiles {
-		if profile.ID == current.ID {
-			continue
-		}
-		nextProfiles = append(nextProfiles, profile)
-	}
-	state.Profiles = nextProfiles
-	if current.ID == state.ActiveProfile {
-		if len(nextProfiles) > 0 {
-			state.ActiveProfile = nextProfiles[0].ID
-		} else {
-			state.ActiveProfile = ""
-		}
-	}
-	state.UpdatedAt = time.Now().UnixMilli()
 	_ = gioCompat.WriteAPIKey(current.ID, "")
-	if err := gioCompat.SaveState(state); err != nil {
-		return err
-	}
 	a.mu.Lock()
-	a.setProfilesLocked(state.Profiles)
-	a.activeProfileID = state.ActiveProfile
+	a.setProfilesLocked(stateSnapshot.Profiles)
+	a.activeProfileID = stateSnapshot.ActiveProfile
 	a.status = "已删除配置: " + current.Name
 	a.appendLogLocked("已删除配置: " + current.Name)
 	a.mu.Unlock()
 	nextSelectedID := ""
-	if len(state.Profiles) > 0 {
-		nextSelectedID = state.Profiles[0].ID
+	if len(stateSnapshot.Profiles) > 0 {
+		nextSelectedID = stateSnapshot.Profiles[0].ID
 	}
-	if state.ActiveProfile != "" {
+	if stateSnapshot.ActiveProfile != "" {
 		_ = a.restoreActiveRuntimeConfig(false)
 	}
 	return a.loadSettingsProfileDraft(nextSelectedID)
 }
 
 func (a *App) saveActiveProfileMetadata() error {
-	state, _, err := gioCompat.LoadState()
+	var stateSnapshot sharedCompat.State
+	updated := false
+	err := gioCompat.UpdateState(func(state *sharedCompat.State) error {
+		*state = sharedCompat.Normalize(*state)
+		current, ok := currentActiveProfile(*state)
+		if !ok {
+			return nil
+		}
+		name := strings.TrimSpace(a.profileNameInput.Text())
+		if name == "" {
+			name = strings.TrimSpace(current.Name)
+		}
+		if name == "" {
+			name = nextProfileName(state.Profiles)
+		}
+		concurrencyLimit := 0
+		if raw := strings.TrimSpace(a.concurrencyLimitInput.Text()); raw != "" {
+			if value, err := strconv.Atoi(raw); err == nil && value > 0 {
+				concurrencyLimit = value
+			}
+		}
+		now := time.Now().UnixMilli()
+		for i := range state.Profiles {
+			if state.Profiles[i].ID != current.ID {
+				continue
+			}
+			state.Profiles[i].Name = name
+			state.Profiles[i].ConcurrencyLimit = concurrencyLimit
+			state.Profiles[i].LastUsedAt = now
+			updated = true
+			break
+		}
+		if !updated {
+			return nil
+		}
+		state.UpdatedAt = now
+		stateSnapshot = *state
+		return nil
+	})
 	if err != nil {
 		return err
-	}
-	state = sharedCompat.Normalize(state)
-	current, ok := currentActiveProfile(state)
-	if !ok {
-		return nil
-	}
-	name := strings.TrimSpace(a.profileNameInput.Text())
-	if name == "" {
-		name = strings.TrimSpace(current.Name)
-	}
-	if name == "" {
-		name = nextProfileName(state.Profiles)
-	}
-	concurrencyLimit := 0
-	if raw := strings.TrimSpace(a.concurrencyLimitInput.Text()); raw != "" {
-		if value, err := strconv.Atoi(raw); err == nil && value > 0 {
-			concurrencyLimit = value
-		}
-	}
-	updated := false
-	for i := range state.Profiles {
-		if state.Profiles[i].ID != current.ID {
-			continue
-		}
-		state.Profiles[i].Name = name
-		state.Profiles[i].ConcurrencyLimit = concurrencyLimit
-		state.Profiles[i].LastUsedAt = time.Now().UnixMilli()
-		updated = true
-		break
 	}
 	if !updated {
 		return nil
 	}
-	state.UpdatedAt = time.Now().UnixMilli()
-	if err := gioCompat.SaveState(state); err != nil {
-		return err
-	}
 	a.mu.Lock()
-	a.setProfilesLocked(state.Profiles)
+	a.setProfilesLocked(stateSnapshot.Profiles)
 	a.mu.Unlock()
 	return nil
 }
@@ -1997,45 +2037,62 @@ func nextProfileName(profiles []sharedCompat.UpstreamProfile) string {
 	}
 }
 
+func nextProfileID(profiles []sharedCompat.UpstreamProfile, now int64) string {
+	base := fmt.Sprintf("gio-%d", now)
+	used := make(map[string]struct{}, len(profiles))
+	for _, profile := range profiles {
+		used[strings.TrimSpace(profile.ID)] = struct{}{}
+	}
+	if _, ok := used[base]; !ok {
+		return base
+	}
+	for suffix := 2; ; suffix++ {
+		candidate := fmt.Sprintf("%s-%d", base, suffix)
+		if _, ok := used[candidate]; !ok {
+			return candidate
+		}
+	}
+}
+
 func (a *App) createBlankProfile() {
 	a.createBlankProfileWithMode(string(client.APIModeResponses))
 }
 
 func (a *App) createBlankProfileWithMode(apiMode string) {
 	a.saveCurrentConfig()
-	state, _, err := gioCompat.LoadState()
+	var stateSnapshot sharedCompat.State
+	var profile sharedCompat.UpstreamProfile
+	err := gioCompat.UpdateState(func(state *sharedCompat.State) error {
+		*state = sharedCompat.Normalize(*state)
+		now := time.Now().UnixMilli()
+		profile = sharedCompat.UpstreamProfile{
+			ID:                 nextProfileID(state.Profiles, now),
+			Name:               nextProfileName(state.Profiles),
+			APIMode:            apiMode,
+			ResponsesTransport: string(client.ResponsesTransportSSE),
+			RequestPolicy:      string(client.RequestPolicyOpenAI),
+			ImagesNewAPICompat: false,
+			TextModelID:        client.TextModel,
+			ImageModelID:       client.ImageModel,
+			ReasoningEffort:    client.DefaultReasoningEffort,
+			CreatedAt:          now,
+			LastUsedAt:         now,
+		}
+		state.Profiles = append(state.Profiles, profile)
+		state.ActiveProfile = profile.ID
+		state.UpdatedAt = now
+		stateSnapshot = *state
+		return nil
+	})
 	if err != nil {
 		a.appendLog("创建配置失败: " + err.Error())
 		return
 	}
-	state = sharedCompat.Normalize(state)
-	now := time.Now().UnixMilli()
-	profileID := fmt.Sprintf("gio-%d", now)
-	profile := sharedCompat.UpstreamProfile{
-		ID:                 profileID,
-		Name:               nextProfileName(state.Profiles),
-		APIMode:            apiMode,
-		ResponsesTransport: string(client.ResponsesTransportSSE),
-		RequestPolicy:      string(client.RequestPolicyOpenAI),
-		ImagesNewAPICompat: false,
-		TextModelID:        client.TextModel,
-		ImageModelID:       client.ImageModel,
-		ReasoningEffort:    client.DefaultReasoningEffort,
-		CreatedAt:          now,
-		LastUsedAt:         now,
-	}
-	state.Profiles = append(state.Profiles, profile)
-	state.ActiveProfile = profileID
-	state.UpdatedAt = now
-	if err := gioCompat.SaveState(state); err != nil {
-		a.appendLog("创建配置失败: " + err.Error())
-		return
-	}
-	cfg := gioCompat.ConfigFromState(kernel.DefaultConfig(), state)
+	cfg := gioCompat.ConfigFromState(kernel.DefaultConfig(), stateSnapshot)
 	a.applyRuntimeConfig(cfg)
 	a.mu.Lock()
-	a.setProfilesLocked(state.Profiles)
-	a.activeProfileID = profileID
+	a.setProfilesLocked(stateSnapshot.Profiles)
+	a.activeProfileID = profile.ID
 	a.fallbackProfileID = strings.TrimSpace(profile.FallbackProfileID)
 	a.status = "已创建配置: " + profile.Name
 	a.appendLogLocked("已创建配置: " + profile.Name)
@@ -2047,38 +2104,45 @@ func (a *App) createBlankProfileWithMode(apiMode string) {
 
 func (a *App) duplicateActiveProfile() {
 	a.saveCurrentConfig()
-	state, _, err := gioCompat.LoadState()
+	var stateSnapshot sharedCompat.State
+	var current sharedCompat.UpstreamProfile
+	var clone sharedCompat.UpstreamProfile
+	found := false
+	err := gioCompat.UpdateState(func(state *sharedCompat.State) error {
+		*state = sharedCompat.Normalize(*state)
+		var ok bool
+		current, ok = currentActiveProfile(*state)
+		if !ok {
+			return nil
+		}
+		found = true
+		now := time.Now().UnixMilli()
+		clone = current
+		clone.ID = nextProfileID(state.Profiles, now)
+		clone.Name = nextProfileName(state.Profiles)
+		clone.CreatedAt = now
+		clone.LastUsedAt = now
+		state.Profiles = append(state.Profiles, clone)
+		state.ActiveProfile = clone.ID
+		state.UpdatedAt = now
+		stateSnapshot = *state
+		return nil
+	})
 	if err != nil {
 		a.appendLog("复制配置失败: " + err.Error())
 		return
 	}
-	state = sharedCompat.Normalize(state)
-	current, ok := currentActiveProfile(state)
-	if !ok {
+	if !found {
 		return
 	}
-	now := time.Now().UnixMilli()
-	profileID := fmt.Sprintf("gio-%d", now)
-	clone := current
-	clone.ID = profileID
-	clone.Name = nextProfileName(state.Profiles)
-	clone.CreatedAt = now
-	clone.LastUsedAt = now
-	state.Profiles = append(state.Profiles, clone)
-	state.ActiveProfile = profileID
-	state.UpdatedAt = now
 	if key, _ := gioCompat.ReadAPIKey(current.ID); strings.TrimSpace(key) != "" {
-		_ = gioCompat.WriteAPIKey(profileID, key)
+		_ = gioCompat.WriteAPIKey(clone.ID, key)
 	}
-	if err := gioCompat.SaveState(state); err != nil {
-		a.appendLog("复制配置失败: " + err.Error())
-		return
-	}
-	cfg := gioCompat.ConfigFromState(kernel.DefaultConfig(), state)
+	cfg := gioCompat.ConfigFromState(kernel.DefaultConfig(), stateSnapshot)
 	a.applyRuntimeConfig(cfg)
 	a.mu.Lock()
-	a.setProfilesLocked(state.Profiles)
-	a.activeProfileID = profileID
+	a.setProfilesLocked(stateSnapshot.Profiles)
+	a.activeProfileID = clone.ID
 	a.fallbackProfileID = strings.TrimSpace(clone.FallbackProfileID)
 	a.status = "已复制配置: " + clone.Name
 	a.appendLogLocked("已复制配置: " + clone.Name)
@@ -2094,44 +2158,51 @@ func (a *App) duplicateActiveProfile() {
 
 func (a *App) deleteActiveProfile() {
 	a.saveCurrentConfig()
-	state, _, err := gioCompat.LoadState()
+	var stateSnapshot sharedCompat.State
+	var current sharedCompat.UpstreamProfile
+	found := false
+	err := gioCompat.UpdateState(func(state *sharedCompat.State) error {
+		*state = sharedCompat.Normalize(*state)
+		if len(state.Profiles) == 0 {
+			return nil
+		}
+		var ok bool
+		current, ok = currentActiveProfile(*state)
+		if !ok {
+			return nil
+		}
+		found = true
+		nextProfiles := make([]sharedCompat.UpstreamProfile, 0, len(state.Profiles)-1)
+		for _, profile := range state.Profiles {
+			if profile.ID == current.ID {
+				continue
+			}
+			nextProfiles = append(nextProfiles, profile)
+		}
+		state.Profiles = nextProfiles
+		if len(nextProfiles) > 0 {
+			state.ActiveProfile = nextProfiles[0].ID
+		} else {
+			state.ActiveProfile = ""
+		}
+		state.UpdatedAt = time.Now().UnixMilli()
+		stateSnapshot = *state
+		return nil
+	})
 	if err != nil {
 		a.appendLog("删除配置失败: " + err.Error())
 		return
 	}
-	state = sharedCompat.Normalize(state)
-	if len(state.Profiles) == 0 {
+	if !found {
 		return
 	}
-	current, ok := currentActiveProfile(state)
-	if !ok {
-		return
-	}
-	nextProfiles := make([]sharedCompat.UpstreamProfile, 0, len(state.Profiles)-1)
-	for _, profile := range state.Profiles {
-		if profile.ID == current.ID {
-			continue
-		}
-		nextProfiles = append(nextProfiles, profile)
-	}
-	state.Profiles = nextProfiles
-	if len(nextProfiles) > 0 {
-		state.ActiveProfile = nextProfiles[0].ID
-	} else {
-		state.ActiveProfile = ""
-	}
-	state.UpdatedAt = time.Now().UnixMilli()
 	_ = gioCompat.WriteAPIKey(current.ID, "")
-	if err := gioCompat.SaveState(state); err != nil {
-		a.appendLog("删除配置失败: " + err.Error())
-		return
-	}
-	cfg := gioCompat.ConfigFromState(kernel.DefaultConfig(), state)
+	cfg := gioCompat.ConfigFromState(kernel.DefaultConfig(), stateSnapshot)
 	a.applyRuntimeConfig(cfg)
 	a.mu.Lock()
-	a.setProfilesLocked(state.Profiles)
-	a.activeProfileID = state.ActiveProfile
-	if profile, ok := profileByID(state.Profiles, state.ActiveProfile); ok {
+	a.setProfilesLocked(stateSnapshot.Profiles)
+	a.activeProfileID = stateSnapshot.ActiveProfile
+	if profile, ok := profileByID(stateSnapshot.Profiles, stateSnapshot.ActiveProfile); ok {
 		a.fallbackProfileID = strings.TrimSpace(profile.FallbackProfileID)
 	} else {
 		a.fallbackProfileID = ""
@@ -2139,8 +2210,8 @@ func (a *App) deleteActiveProfile() {
 	a.status = "已删除配置: " + current.Name
 	a.appendLogLocked("已删除配置: " + current.Name)
 	a.mu.Unlock()
-	a.profileNameInput.SetText(activeProfileName(state.Profiles, state.ActiveProfile))
-	if limit := activeProfileConcurrencyLimit(state.Profiles, state.ActiveProfile); limit > 0 {
+	a.profileNameInput.SetText(activeProfileName(stateSnapshot.Profiles, stateSnapshot.ActiveProfile))
+	if limit := activeProfileConcurrencyLimit(stateSnapshot.Profiles, stateSnapshot.ActiveProfile); limit > 0 {
 		a.concurrencyLimitInput.SetText(strconv.Itoa(limit))
 	} else {
 		a.concurrencyLimitInput.SetText("")
@@ -2654,30 +2725,27 @@ func applyHistoryMediaUpdatesToHistoryItems(items []sharedCompat.HistoryItem, up
 }
 
 func (a *App) persistHistoryThumbBackfill(thumbUpdates map[string]historyMediaBackfillUpdate) error {
-	state, _, err := gioCompat.LoadState()
-	if err != nil {
-		return err
-	}
-	changed := false
-	for i := range state.History {
-		update, ok := thumbUpdates[state.History[i].ID]
-		if !ok {
-			continue
+	return gioCompat.UpdateState(func(state *sharedCompat.State) error {
+		changed := false
+		for i := range state.History {
+			update, ok := thumbUpdates[state.History[i].ID]
+			if !ok {
+				continue
+			}
+			if strings.TrimSpace(update.ThumbPath) != "" && strings.TrimSpace(state.History[i].ThumbPath) == "" {
+				state.History[i].ThumbPath = update.ThumbPath
+				changed = true
+			}
+			if strings.TrimSpace(update.PreviewPath) != "" && strings.TrimSpace(state.History[i].PreviewPath) == "" {
+				state.History[i].PreviewPath = update.PreviewPath
+				changed = true
+			}
 		}
-		if strings.TrimSpace(update.ThumbPath) != "" && strings.TrimSpace(state.History[i].ThumbPath) == "" {
-			state.History[i].ThumbPath = update.ThumbPath
-			changed = true
+		if changed {
+			state.UpdatedAt = time.Now().UnixMilli()
 		}
-		if strings.TrimSpace(update.PreviewPath) != "" && strings.TrimSpace(state.History[i].PreviewPath) == "" {
-			state.History[i].PreviewPath = update.PreviewPath
-			changed = true
-		}
-	}
-	if !changed {
 		return nil
-	}
-	state.UpdatedAt = time.Now().UnixMilli()
-	return gioCompat.SaveState(state)
+	})
 }
 
 func (a *App) applyHistoryThumbBackfill(thumbUpdates map[string]historyMediaBackfillUpdate) {
@@ -2890,31 +2958,32 @@ func (a *App) rememberPrompt(text string) {
 	if text == "" {
 		return
 	}
-	state, _, err := gioCompat.LoadState()
+	var next []string
+	var presets []sharedCompat.Preset
+	err := gioCompat.UpdateState(func(state *sharedCompat.State) error {
+		next = []string{text}
+		for _, existing := range state.Settings.PromptHistory {
+			normalized := strings.Join(strings.Fields(strings.TrimSpace(existing)), " ")
+			if normalized == "" || normalized == text {
+				continue
+			}
+			next = append(next, normalized)
+			if len(next) >= 50 {
+				break
+			}
+		}
+		state.Settings.PromptHistory = next
+		state.UpdatedAt = time.Now().UnixMilli()
+		presets = append([]sharedCompat.Preset(nil), state.Settings.Presets...)
+		return nil
+	})
 	if err != nil {
-		a.appendLog("更新提示词历史失败: " + err.Error())
-		return
-	}
-	next := []string{text}
-	for _, existing := range state.Settings.PromptHistory {
-		normalized := strings.Join(strings.Fields(strings.TrimSpace(existing)), " ")
-		if normalized == "" || normalized == text {
-			continue
-		}
-		next = append(next, normalized)
-		if len(next) >= 50 {
-			break
-		}
-	}
-	state.Settings.PromptHistory = next
-	state.UpdatedAt = time.Now().UnixMilli()
-	if err := gioCompat.SaveState(state); err != nil {
 		a.appendLog("保存提示词历史失败: " + err.Error())
 		return
 	}
 	a.mu.Lock()
 	a.setPromptHistoryLocked(next)
-	a.setPresetsLocked(state.Settings.Presets)
+	a.setPresetsLocked(presets)
 	a.mu.Unlock()
 	a.invalidateNow()
 }
@@ -3031,76 +3100,37 @@ func (a *App) deleteHistoryItem(id string) {
 	if id == "" {
 		return
 	}
-	state, _, err := gioCompat.LoadState()
+	var next []sharedCompat.HistoryItem
+	err := gioCompat.UpdateState(func(state *sharedCompat.State) error {
+		next = make([]sharedCompat.HistoryItem, 0, len(state.History))
+		for _, item := range state.History {
+			if item.ID == id {
+				continue
+			}
+			next = append(next, item)
+		}
+		state.History = next
+		state.UpdatedAt = time.Now().UnixMilli()
+		return nil
+	})
 	if err != nil {
 		a.appendLog("删除历史失败: " + err.Error())
 		return
 	}
-	next := make([]sharedCompat.HistoryItem, 0, len(state.History))
-	for _, item := range state.History {
-		if item.ID == id {
-			continue
-		}
-		next = append(next, item)
-	}
-	state.History = next
-	state.UpdatedAt = time.Now().UnixMilli()
-	if err := gioCompat.SaveState(state); err != nil {
-		a.appendLog("删除历史失败: " + err.Error())
-		return
-	}
-	a.mu.Lock()
-	a.setHistoryLocked(next)
-	if len(a.batchResultIDs) > 0 {
-		kept := make([]string, 0, len(a.batchResultIDs))
-		for _, batchID := range a.batchResultIDs {
-			if batchID != id {
-				kept = append(kept, batchID)
-			}
-		}
-		a.batchResultIDs = kept
-		if !a.canOpenResultGridLocked() {
-			a.resultGridOpen = false
-		}
-	}
-	if a.selectedHistoryID == id {
-		a.selectedHistoryID = ""
-	}
-	if a.compare.Item.ID == id {
-		a.compare = resultState{Rev: a.compare.Rev + 1}
-		a.compareSplitSlider.Value = 0.5
-	}
-	if a.activeResultDetail.ID == id {
-		a.activeResultDetail = sharedCompat.HistoryItem{}
-	}
-	if a.result.Item.ID == id {
-		a.result = resultState{Rev: a.result.Rev + 1}
-	}
-	if a.activePromptGroup.Key != "" && historyPromptGroupContains(a.activePromptGroup, id) {
-		a.activePromptGroup = historyPromptGroup{}
-	}
-	if a.historyActionMenuItem.ID == id {
-		a.historyActionMenuItem = sharedCompat.HistoryItem{}
-		a.historyActionMenuContext = ""
-	}
-	a.appendLogLocked("已删除历史项: " + id)
-	a.mu.Unlock()
-	a.invalidateNow()
+	a.replaceHistoryState(next, "已删除历史项: "+id)
 }
 
 func (a *App) persistThemeMode(mode string) {
-	state, _, err := gioCompat.LoadState()
-	if err != nil {
+	mode = normalizeThemeMode(mode)
+	if err := gioCompat.UpdateState(func(state *sharedCompat.State) error {
+		state.Settings.Theme = mode
+		state.UpdatedAt = time.Now().UnixMilli()
+		return nil
+	}); err != nil {
 		a.appendLog("保存主题失败: " + err.Error())
 		return
 	}
-	state.Settings.Theme = normalizeThemeMode(mode)
-	state.UpdatedAt = time.Now().UnixMilli()
-	if err := gioCompat.SaveState(state); err != nil {
-		a.appendLog("保存主题失败: " + err.Error())
-		return
-	}
-	a.applyThemeMode(state.Settings.Theme)
+	a.applyThemeMode(mode)
 }
 
 func (a *App) openPromptGroup(group historyPromptGroup) {

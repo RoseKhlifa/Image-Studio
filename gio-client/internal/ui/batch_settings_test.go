@@ -1,6 +1,10 @@
 package ui
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestSyncBatchSettingsFromInputsParsesAndClamps(t *testing.T) {
 	app := &App{}
@@ -69,20 +73,64 @@ func TestWorkspaceSnapshotPreservesBatchOutputMode(t *testing.T) {
 		batchOutputMode:   batchOutputModeCustomDir,
 	}
 	app.batchOutputDirInput.SetText("/tmp/custom")
+	app.batchOutputPrefixInput.SetText("render-")
 
 	snapshot := app.buildWorkspaceSnapshot()
 	if snapshot.BatchOutputMode != batchOutputModeCustomDir {
 		t.Fatalf("snapshot.BatchOutputMode=%q want custom_dir", snapshot.BatchOutputMode)
 	}
+	if snapshot.BatchOutputPrefix != "render-" {
+		t.Fatalf("snapshot.BatchOutputPrefix=%q want render-", snapshot.BatchOutputPrefix)
+	}
 
 	app.batchOutputMode = batchOutputModeSourceDir
 	app.batchOutputDirInput.SetText("")
+	app.batchOutputPrefixInput.SetText("")
 	app.applyWorkspace(snapshot)
 	if app.batchOutputMode != batchOutputModeCustomDir {
 		t.Fatalf("app.batchOutputMode=%q want custom_dir", app.batchOutputMode)
 	}
 	if app.batchOutputDirInput.Text() != "/tmp/custom" {
 		t.Fatalf("batchOutputDirInput=%q want /tmp/custom", app.batchOutputDirInput.Text())
+	}
+	if app.batchOutputPrefixInput.Text() != "render-" {
+		t.Fatalf("batchOutputPrefixInput=%q want render-", app.batchOutputPrefixInput.Text())
+	}
+}
+
+func TestNormalizeBatchOutputPrefixKeepsEmptyAndReplacesPathCharacters(t *testing.T) {
+	if got := normalizeBatchOutputPrefix("   "); got != "" {
+		t.Fatalf("normalizeBatchOutputPrefix(empty)=%q want empty", got)
+	}
+	if got := normalizeBatchOutputPrefix(` render/name:* `); got != "render-name--" {
+		t.Fatalf("normalizeBatchOutputPrefix(invalid)=%q want render-name--", got)
+	}
+}
+
+func TestBatchResultTargetPathUsesPrefixAndAvoidsCollisions(t *testing.T) {
+	sourceDir := t.TempDir()
+	outputDir := t.TempDir()
+	sourcePath := filepath.Join(sourceDir, "photo.png")
+	if err := os.WriteFile(sourcePath, []byte("source"), 0o600); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+
+	first := batchResultTargetPath(sourcePath, outputDir, "render-")
+	if want := filepath.Join(outputDir, "render-photo.png"); first != want {
+		t.Fatalf("first target=%q want %q", first, want)
+	}
+	if err := os.WriteFile(first, []byte("existing"), 0o600); err != nil {
+		t.Fatalf("write collision: %v", err)
+	}
+	if got, want := batchResultTargetPath(sourcePath, outputDir, "render-"), filepath.Join(outputDir, "render-photo-2.png"); got != want {
+		t.Fatalf("collision target=%q want %q", got, want)
+	}
+
+	if got, want := batchResultTargetPath(sourcePath, "", ""), filepath.Join(sourceDir, "photo-2.png"); got != want {
+		t.Fatalf("empty-prefix source target=%q want %q", got, want)
+	}
+	if got := batchResultTargetPath(sourcePath, outputDir, `../escape/`); filepath.Dir(got) != outputDir {
+		t.Fatalf("sanitized target escaped output dir: %q", got)
 	}
 }
 
