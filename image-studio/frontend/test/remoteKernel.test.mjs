@@ -929,6 +929,7 @@ test("Android shell remote kernel can use native HTTP bridge to bypass browser f
             const payload = args[0];
             if (payload.url.endsWith("/v1/responses")) {
               assert.equal(payload.streamLines, true);
+              assert.equal(payload.keepAlive, true);
               window.__imageStudioNativeProgress?.(payload.requestKey, {
                 event: {
                   type: "response.image_generation_call.partial_image",
@@ -1083,6 +1084,7 @@ test("Android shell remote kernel falls back to native HTTP when Responses webso
           if (method === "HttpRequestText") {
             const payload = args[0];
             assert.equal(payload.url, "https://upstream.example/v1/responses");
+            assert.equal(payload.keepAlive, true);
             window.__imageStudioNativeResolve?.(requestId, {
               status: 200,
               body: "",

@@ -220,7 +220,7 @@ export async function requestImagesOnce(
         built.body,
         callbacks.signal,
         consumeNativePayload,
-        { proxyMode, proxyURL: request.payload.proxyURL || "" },
+        { proxyMode, proxyURL: request.payload.proxyURL || "", keepAlive: true },
       );
       const rawBody = response.body || rawFromLines;
       const rawPath = response.rawPath || registerRawText("images", attempt, rawBody);

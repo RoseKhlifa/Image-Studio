@@ -55,6 +55,7 @@ class AndroidImageStudioBridge(
     private val webView: WebView,
     private val launchOpenImageDialog: () -> Unit,
     private val launchImportHistory: () -> Unit,
+    private val ensureBackgroundTaskNotificationPermission: () -> Unit,
 ) {
     private val prefs = context.getSharedPreferences("image_studio_android", Context.MODE_PRIVATE)
     private val outputDirKey = "output_dir"
@@ -449,6 +450,11 @@ class AndroidImageStudioBridge(
         val streamLines = payload.optBoolean("streamLines", false)
         val proxyMode = payload.optString("proxyMode", "system")
         val proxyUrl = payload.optString("proxyURL", "")
+        val keepAlive = payload.optBoolean("keepAlive", false)
+        if (keepAlive) {
+            ensureBackgroundTaskNotificationPermission()
+            GenerationForegroundService.acquire(context, requestKey)
+        }
         thread(name = "image-studio-http-$requestKey") {
             try {
                 val connection = openHttpConnection(url, proxyMode, proxyUrl).apply {
@@ -512,7 +518,11 @@ class AndroidImageStudioBridge(
             } catch (error: Exception) {
                 reject(requestId, error.message ?: error.javaClass.simpleName)
             } finally {
-                httpRequests.remove(requestKey)?.disconnect()
+                try {
+                    httpRequests.remove(requestKey)?.disconnect()
+                } finally {
+                    if (keepAlive) GenerationForegroundService.release(context, requestKey)
+                }
             }
         }
         throw EarlyResolve()
@@ -673,13 +683,22 @@ class AndroidImageStudioBridge(
         val rawLines = mutableListOf<String>()
         val streamResult = arrayOfNulls<NativeHttpStreamResultSnapshot>(1)
         val settled = java.util.concurrent.atomic.AtomicBoolean(false)
-        val socket = client.newWebSocket(
-            Request.Builder()
-                .url(wsUrl)
-                .addHeader("Authorization", "Bearer $apiKey")
-                .addHeader("User-Agent", "image-studio-android")
-                .build(),
-            object : WebSocketListener() {
+        val keepAliveReleased = java.util.concurrent.atomic.AtomicBoolean(false)
+        val releaseKeepAlive = {
+            if (keepAliveReleased.compareAndSet(false, true)) {
+                GenerationForegroundService.release(context, requestKey)
+            }
+        }
+        ensureBackgroundTaskNotificationPermission()
+        GenerationForegroundService.acquire(context, requestKey)
+        val socket = try {
+            client.newWebSocket(
+                Request.Builder()
+                    .url(wsUrl)
+                    .addHeader("Authorization", "Bearer $apiKey")
+                    .addHeader("User-Agent", "image-studio-android")
+                    .build(),
+                object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
                     webSocketRequests[requestKey] = webSocket
                     webSocket.send(payloadText)
@@ -713,6 +732,7 @@ class AndroidImageStudioBridge(
                                     ))
                                     webSocket.close(1000, "completed")
                                     webSocketRequests.remove(requestKey)
+                                    releaseKeepAlive()
                                 }
                             }
                             "error" -> {
@@ -720,6 +740,7 @@ class AndroidImageStudioBridge(
                                     reject(requestId, line)
                                     webSocket.cancel()
                                     webSocketRequests.remove(requestKey)
+                                    releaseKeepAlive()
                                 }
                             }
                         }
@@ -729,6 +750,7 @@ class AndroidImageStudioBridge(
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                     webSocketRequests.remove(requestKey)
+                    releaseKeepAlive()
                     if (settled.compareAndSet(false, true)) {
                         reject(requestId, t.message ?: "websocket failure")
                     }
@@ -736,6 +758,7 @@ class AndroidImageStudioBridge(
 
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                     webSocketRequests.remove(requestKey)
+                    releaseKeepAlive()
                     if (settled.compareAndSet(false, true)) {
                         if (streamResult[0]?.imageB64?.isNotBlank() == true) {
                             val rawBody = rawLines.joinToString("\n")
@@ -754,8 +777,12 @@ class AndroidImageStudioBridge(
                         }
                     }
                 }
-            }
-        )
+                },
+            )
+        } catch (error: Exception) {
+            releaseKeepAlive()
+            throw error
+        }
         webSocketRequests[requestKey] = socket
         throw EarlyResolve()
     }
