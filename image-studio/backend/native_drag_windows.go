@@ -22,17 +22,26 @@ const (
 	dragDropSUseDefaultCursors  uintptr = 0x00040102
 	dropEffectCopy              uintptr = 0x00000001
 	mouseKeyStateLeftButtonDown uintptr = 0x00000001
+	globalAllocMoveableZeroInit uintptr = 0x00000042
+	cfHDrop                     uint16  = 15
+	dvAspectContent             uint32  = 1
+	tymedHGlobal                uint32  = 1
 )
 
 var (
 	ole32                  = windows.NewLazySystemDLL("ole32.dll")
 	shell32                = windows.NewLazySystemDLL("shell32.dll")
+	kernel32               = windows.NewLazySystemDLL("kernel32.dll")
 	procOleInitialize      = ole32.NewProc("OleInitialize")
 	procOleUninitialize    = ole32.NewProc("OleUninitialize")
 	procDoDragDrop         = ole32.NewProc("DoDragDrop")
 	procSHCreateDataObject = shell32.NewProc("SHCreateDataObject")
 	procILCreateFromPathW  = shell32.NewProc("ILCreateFromPathW")
 	procILFree             = shell32.NewProc("ILFree")
+	procGlobalAlloc        = kernel32.NewProc("GlobalAlloc")
+	procGlobalLock         = kernel32.NewProc("GlobalLock")
+	procGlobalUnlock       = kernel32.NewProc("GlobalUnlock")
+	procGlobalFree         = kernel32.NewProc("GlobalFree")
 
 	iidIUnknown = windows.GUID{Data1: 0x00000000, Data2: 0x0000, Data3: 0x0000, Data4: [8]byte{0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46}}
 	iidIDataObj = windows.GUID{Data1: 0x0000010e, Data2: 0x0000, Data3: 0x0000, Data4: [8]byte{0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46}}
@@ -101,6 +110,9 @@ func beginNativeFileDrag(path string) error {
 		return fmt.Errorf("SHCreateDataObject failed: 0x%08x", uint32(hr))
 	}
 	defer releaseIUnknown(dataObject)
+	if err := addHDropFormat(dataObject, cleanPath); err != nil {
+		return err
+	}
 
 	source := &dropSource{lpVtbl: &nativeDropSourceVtbl, refs: 1}
 	var effect uintptr
@@ -116,6 +128,83 @@ func beginNativeFileDrag(path string) error {
 	}
 	if failedHRESULT(hr) {
 		return fmt.Errorf("DoDragDrop failed: 0x%08x", uint32(hr))
+	}
+	return nil
+}
+
+type formatEtc struct {
+	cfFormat uint16
+	ptd      uintptr
+	dwAspect uint32
+	lindex   int32
+	tymed    uint32
+}
+
+type stgMedium struct {
+	tymed          uint32
+	data           uintptr
+	pUnkForRelease uintptr
+}
+
+type dataObjectVtbl struct {
+	queryInterface        uintptr
+	addRef                uintptr
+	release               uintptr
+	getData               uintptr
+	getDataHere           uintptr
+	queryGetData          uintptr
+	getCanonicalFormatEtc uintptr
+	setData               uintptr
+}
+
+func addHDropFormat(dataObject uintptr, path string) error {
+	// SHCreateDataObject guarantees a Shell ID list, but some third-party file
+	// managers only accept existing files advertised through CF_HDROP.
+	payload, err := buildHDropPayload(path)
+	if err != nil {
+		return err
+	}
+	hGlobal, _, allocErr := procGlobalAlloc.Call(globalAllocMoveableZeroInit, uintptr(len(payload)))
+	if hGlobal == 0 {
+		return fmt.Errorf("GlobalAlloc for CF_HDROP failed: %v", allocErr)
+	}
+
+	locked, _, lockErr := procGlobalLock.Call(hGlobal)
+	if locked == 0 {
+		procGlobalFree.Call(hGlobal)
+		return fmt.Errorf("GlobalLock for CF_HDROP failed: %v", lockErr)
+	}
+	copy(unsafe.Slice((*byte)(unsafe.Pointer(locked)), len(payload)), payload)
+	procGlobalUnlock.Call(hGlobal)
+	runtime.KeepAlive(payload)
+
+	format := formatEtc{
+		cfFormat: cfHDrop,
+		dwAspect: dvAspectContent,
+		lindex:   -1,
+		tymed:    tymedHGlobal,
+	}
+	medium := stgMedium{
+		tymed: tymedHGlobal,
+		data:  hGlobal,
+	}
+	vtbl := *(**dataObjectVtbl)(unsafe.Pointer(dataObject))
+	if vtbl == nil || vtbl.setData == 0 {
+		procGlobalFree.Call(hGlobal)
+		return fmt.Errorf("IDataObject.SetData is unavailable")
+	}
+	hr, _, _ := syscall.SyscallN(
+		vtbl.setData,
+		dataObject,
+		uintptr(unsafe.Pointer(&format)),
+		uintptr(unsafe.Pointer(&medium)),
+		1,
+	)
+	runtime.KeepAlive(format)
+	runtime.KeepAlive(medium)
+	if failedHRESULT(hr) {
+		procGlobalFree.Call(hGlobal)
+		return fmt.Errorf("IDataObject.SetData(CF_HDROP) failed: 0x%08x", uint32(hr))
 	}
 	return nil
 }

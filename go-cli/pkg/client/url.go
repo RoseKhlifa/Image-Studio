@@ -65,6 +65,37 @@ func isVersionedOpenAICompatibilityBaseURL(raw string) bool {
 	return strings.HasSuffix(path, "/openai")
 }
 
+func isOfficialGoogleGeminiBaseURL(raw string) bool {
+	u, err := url.Parse(strings.TrimRight(strings.TrimSpace(raw), "/"))
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(u.Scheme, "https") && strings.EqualFold(u.Hostname(), "generativelanguage.googleapis.com")
+}
+
+func isGoogleNativeNanoBanana2Model(model string) bool {
+	return strings.EqualFold(strings.TrimSpace(model), "gemini-3.1-flash-image")
+}
+
+func shouldUseGoogleNativeInteractions(baseURL, model string) bool {
+	return isOfficialGoogleGeminiBaseURL(baseURL) && isGoogleNativeNanoBanana2Model(model)
+}
+
+func googleInteractionsEndpoint(baseURL string) (string, error) {
+	if !isOfficialGoogleGeminiBaseURL(baseURL) {
+		return "", fmt.Errorf("Google Interactions 仅支持官方 generativelanguage.googleapis.com 主机")
+	}
+	u, err := url.Parse(strings.TrimRight(strings.TrimSpace(baseURL), "/"))
+	if err != nil {
+		return "", err
+	}
+	u.Path = "/v1beta/interactions"
+	u.RawPath = ""
+	u.RawQuery = ""
+	u.Fragment = ""
+	return u.String(), nil
+}
+
 func isLoopbackHost(host string) bool {
 	if host == "" {
 		return false

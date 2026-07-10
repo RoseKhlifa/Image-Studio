@@ -43,3 +43,11 @@ test("windows fluent titlebar token matches native Wails titlebar colors", async
   assert.match(css, /\.app-header\s*\{[\s\S]*?background:\s*var\(--window-titlebar-bg\);/m);
   assert.match(css, /\.workspace-bar\s*\{[\s\S]*?background:\s*var\(--window-titlebar-bg\);/m);
 });
+
+test("windows appearance changes keep the native Wails titlebar in sync", async () => {
+  const themeSource = await readFile(new URL("../src/state/studioStore.shared.ts", import.meta.url), "utf8");
+
+  assert.match(themeSource, /if \(theme === "system"\) WindowSetSystemDefaultTheme\(\);/);
+  assert.match(themeSource, /else if \(theme === "dark"\) WindowSetDarkTheme\(\);/);
+  assert.match(themeSource, /else WindowSetLightTheme\(\);/);
+});

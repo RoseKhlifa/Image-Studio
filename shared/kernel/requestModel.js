@@ -48,6 +48,32 @@ export function openAIAPIEndpoint(baseURL, endpointPath) {
   return `${normalized}/v1/${path}`;
 }
 
+export function isOfficialGoogleGeminiBaseURL(raw) {
+  try {
+    const parsed = new URL(normalizeBaseURL(raw));
+    return parsed.protocol === "https:" && parsed.hostname.toLowerCase() === "generativelanguage.googleapis.com";
+  } catch {
+    return false;
+  }
+}
+
+export function isGoogleNativeNanoBanana2Model(imageModelID) {
+  return normalizeImageModel(imageModelID).toLowerCase() === "gemini-3.1-flash-image";
+}
+
+export function shouldUseGoogleNativeInteractions(baseURL, imageModelID) {
+  return isOfficialGoogleGeminiBaseURL(baseURL) && isGoogleNativeNanoBanana2Model(imageModelID);
+}
+
+export function googleInteractionsEndpoint(baseURL) {
+  if (!isOfficialGoogleGeminiBaseURL(baseURL)) return "";
+  const parsed = new URL(normalizeBaseURL(baseURL));
+  parsed.pathname = "/v1beta/interactions";
+  parsed.search = "";
+  parsed.hash = "";
+  return parsed.toString();
+}
+
 export function normalizeAPIMode(apiMode) {
   return apiMode === "images" ? "images" : "responses";
 }

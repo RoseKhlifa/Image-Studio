@@ -315,6 +315,7 @@ type App struct {
 	maskEraseButton                          widget.Clickable
 	maskBrushSizeDownButton                  widget.Clickable
 	maskBrushSizeUpButton                    widget.Clickable
+	importMaskButton                         widget.Clickable
 	clearMaskButton                          widget.Clickable
 	annotateRectButton                       widget.Clickable
 	annotateArrowButton                      widget.Clickable
@@ -574,6 +575,7 @@ type App struct {
 	canvasTool                     canvasToolMode
 	canvasBrushMode                canvasBrushMode
 	canvasBrushSize                int
+	canvasImportedMaskB64          string
 	canvasMaskStrokes              []canvasMaskStroke
 	canvasMaskDraft                *canvasMaskStroke
 	canvasMaskUndo                 [][]canvasMaskStroke

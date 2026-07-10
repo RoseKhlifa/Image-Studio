@@ -30,7 +30,7 @@ export type DateFilter = RelativeHistoryDateFilter;
 
 export function HistoryRail() {
   const {
-    history, currentImage, reuseAsSource, deleteHistoryItem, setField,
+    history, currentImage, reuseAsSource, deleteHistoryItem, clearHistory, setField,
     compareB, setCompareB, pushToast, fullscreen,
     applyHistoryParams, regenerateFromHistory,
     openResultDetail, apiKey, baseURL, apiMode,
@@ -44,6 +44,7 @@ export function HistoryRail() {
   const [modeF, setModeF] = useState<ModeFilter>("all");
   const [dateF, setDateF] = useState<DateFilter>("all");
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [historyClearing, setHistoryClearing] = useState(false);
   const [activePromptGroup, setActivePromptGroup] = useState<HistoryPromptGroup | null>(null);
   const { isAndroidPhone, isAndroidPad, isMac, isWindows, usesFluentUI, usesAndroidUI, usesAppleUI } = usePlatform();
   // 防快速连点产生竞态:每次点击递增 epoch,后台 materialize 全图 resolve
@@ -80,17 +81,22 @@ export function HistoryRail() {
   }, [historyFiltersActive, historyHasMore, historyLoading, loadMoreHistory]);
 
   async function clearAllHistory() {
-    await loadMoreHistory();
-    const loadedHistory = useStudioStore.getState().history;
-    if (loadedHistory.length === 0) {
+    if (historyClearing) return;
+    if (history.length === 0 && !historyHasMore) {
       pushToast("当前没有可删除的历史", "info");
       return;
     }
-    if (!window.confirm(`确定清除 ${loadedHistory.length} 条历史记录吗?`)) return;
-    for (const item of loadedHistory) {
-      await useStudioStore.getState().deleteHistoryItem(item.id);
+    if (!window.confirm("确定删除全部历史记录吗?\n\n此操作会清空本地数据库中的所有历史，且无法撤销。")) return;
+    setHistoryClearing(true);
+    try {
+      const removed = await clearHistory();
+      setActivePromptGroup(null);
+      pushToast(removed > 0 ? `已删除全部 ${removed} 条历史` : "已清空全部历史", "success");
+    } catch (error) {
+      pushToast(`清空历史失败:${error instanceof Error ? error.message : String(error)}`, "error", 5000);
+    } finally {
+      setHistoryClearing(false);
     }
-    pushToast("已清空全部历史", "success");
   }
 
   async function selectCurrent(h: HistoryItem) {
@@ -161,6 +167,7 @@ export function HistoryRail() {
           history={history}
           historyHasMore={historyHasMore}
           historyLoading={historyLoading}
+          historyClearing={historyClearing}
           historyFiltersActive={historyFiltersActive}
           historyRailCollapsed={historyRailCollapsed}
           isTestingKey={isTestingKey}
@@ -182,6 +189,7 @@ export function HistoryRail() {
           setQ={setQ}
           testAPIKey={testAPIKey}
           onOpenPromptGroup={setActivePromptGroup}
+          onClearAllHistory={() => void clearAllHistory()}
         />
         <HistoryPromptGroupModal
           group={activePromptGroup}
@@ -381,8 +389,8 @@ export function HistoryRail() {
           <button type="button" onClick={() => latestHistory && void regenerateFromHistory(latestHistory)} disabled={!latestHistory}>
             <RotateCcw className="h-4 w-4" /> 重跑最近
           </button>
-          <button type="button" onClick={() => void clearAllHistory()} disabled={history.length === 0}>
-            <Trash2 className="h-4 w-4" /> 全部删除
+          <button type="button" onClick={() => void clearAllHistory()} disabled={historyClearing || (history.length === 0 && !historyHasMore)}>
+            {historyClearing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />} 全部删除
           </button>
           <button
             type="button"
@@ -604,9 +612,10 @@ export function HistoryRail() {
           <button
             type="button"
             onClick={() => void clearAllHistory()}
+            disabled={historyClearing || (history.length === 0 && !historyHasMore)}
             className={`platform-pill inline-flex min-h-[34px] flex-1 items-center justify-center gap-1.5 border border-black/[0.08] bg-[var(--surface)] px-3 text-[12px] text-zinc-600 transition-colors hover:border-red-400/40 hover:text-red-400 dark:border-white/[0.08] dark:text-zinc-300 ${usesFluentUI ? "rounded-[8px]" : "rounded-full"}`}
           >
-            <Trash2 className="h-3.5 w-3.5" /> 全部删除
+            {historyClearing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />} 全部删除
           </button>
         </div>
       ) : null}

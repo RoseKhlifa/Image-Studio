@@ -112,7 +112,7 @@ export function FAQModal({ open, onClose }: { open: boolean; onClose: () => void
               <li>
                 <strong>Images API</strong> 只用<strong>一个</strong>模型 ID:
                 <ul>
-                  <li><strong>图像模型 ID</strong>(默认 <code>gpt-image-2</code>):直接传给 <code>/v1/images/generations</code> 的 <code>model</code> 字段。文本模型 ID 在此模式下不读。Gemini / Imagen 图像模型会自动使用非流式兼容请求。</li>
+                  <li><strong>图像模型 ID</strong>(默认 <code>gpt-image-2</code>):通常直接传给 <code>/v1/images/generations</code> 的 <code>model</code> 字段。Google 官方主机上的 <code>gemini-3.1-flash-image</code> 会按官方 Interactions API 请求；第三方 Gemini / Imagen 中转仍使用非流式 Images 兼容请求。文本模型 ID 在此模式下不读。</li>
                 </ul>
               </li>
             </ul>

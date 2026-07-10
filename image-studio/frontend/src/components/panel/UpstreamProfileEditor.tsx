@@ -168,7 +168,7 @@ export function UpstreamProfileEditor({
         />
         {baseURLError ? <Hint>{baseURLError}</Hint> : null}
         <Hint>
-          只填中转站的站点根地址。应用会按当前 API 形态自动拼接 <code className="font-mono-token">/v1/responses</code>(Responses)或 <code className="font-mono-token">/v1/images/generations</code> / <code className="font-mono-token">/v1/images/edits</code>(Images),<strong>不要</strong>把这些路径手动贴进来。
+          中转站只填站点根地址，应用会自动拼接当前 API 路径；Google 官方 Images 配置填写 <code className="font-mono-token">https://generativelanguage.googleapis.com/v1beta/openai</code>。除该官方兼容地址外，<strong>不要</strong>手动贴入具体接口路径。
         </Hint>
       </Field>
 
@@ -416,7 +416,7 @@ export function UpstreamProfileEditor({
       {draft.apiMode === "images" ? (
         <div className={`${usesAppleUI ? "liquid-glass-panel" : ""} flex items-start gap-2 border border-[color:var(--accent)]/20 bg-[var(--accent-soft)] px-3 py-2 text-[11px] text-[var(--accent)] ${usesFluentUI ? "rounded-[10px]" : "rounded-[14px]"}`}>
           <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          <span className="min-w-0 break-words [overflow-wrap:anywhere]">Images API 路径走标准 <code className="font-mono-token">/v1/images/generations</code> + <code className="font-mono-token">/v1/images/edits</code>,无 SSE 保活,长推理 CF 524 风险更高,但兼容性最广。</span>
+          <span className="min-w-0 break-words [overflow-wrap:anywhere]">Images API 通常走标准 <code className="font-mono-token">/v1/images/generations</code> + <code className="font-mono-token">/v1/images/edits</code>；Google 官方 <code className="font-mono-token">gemini-3.1-flash-image</code> 例外走 Interactions API。两者都没有 SSE 保活。</span>
         </div>
       ) : null}
     </div>

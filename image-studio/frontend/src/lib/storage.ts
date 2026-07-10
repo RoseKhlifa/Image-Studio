@@ -269,6 +269,57 @@ export async function removeHistoryItem(id: string): Promise<void> {
   await txDone(fullTx);
 }
 
+async function clearLegacyHistoryStorage(): Promise<string[]> {
+  const legacy = await openLegacyDB();
+  if (!legacy.objectStoreNames.contains(LEGACY_STORE_NAME)) return [];
+
+  const tx = legacy.transaction(LEGACY_STORE_NAME, "readwrite");
+  const store = tx.objectStore(LEGACY_STORE_NAME);
+  const keysRequest = store.getAllKeys();
+  const keysPromise = reqAsPromise<IDBValidKey[]>(keysRequest);
+  const donePromise = txDone(tx);
+  const keys = await keysPromise;
+  const historyIDs = new Set<string>();
+  for (const key of keys) {
+    if (typeof key !== "string") continue;
+    if (key.startsWith("history-full:")) {
+      historyIDs.add(key.slice("history-full:".length));
+      store.delete(key);
+      continue;
+    }
+    if (key.startsWith("history:")) {
+      historyIDs.add(key.slice("history:".length));
+      store.delete(key);
+    }
+  }
+  await donePromise;
+  return Array.from(historyIDs).filter(Boolean);
+}
+
+export async function clearHistoryStorage(): Promise<string[]> {
+  // Clear the legacy records first so a later migration cannot restore history
+  // that the user explicitly deleted. Other legacy keyval data is preserved.
+  const legacyIDs = await clearLegacyHistoryStorage();
+
+  const db = await openDB();
+  const tx = db.transaction([HISTORY_STORE, HISTORY_FULL_STORE], "readwrite");
+  const historyStore = tx.objectStore(HISTORY_STORE);
+  const fullStore = tx.objectStore(HISTORY_FULL_STORE);
+  const historyKeysPromise = reqAsPromise<IDBValidKey[]>(historyStore.getAllKeys());
+  const fullKeysPromise = reqAsPromise<IDBValidKey[]>(fullStore.getAllKeys());
+  const donePromise = txDone(tx);
+  historyStore.clear();
+  fullStore.clear();
+  const [historyKeys, fullKeys] = await Promise.all([historyKeysPromise, fullKeysPromise]);
+  await donePromise;
+
+  return Array.from(new Set([
+    ...legacyIDs,
+    ...historyKeys.filter((key): key is string => typeof key === "string"),
+    ...fullKeys.filter((key): key is string => typeof key === "string"),
+  ]));
+}
+
 async function migrateLegacyHistoryIfNeeded(): Promise<void> {
   const [historyCount, fullCount] = await Promise.all([withHistoryCount(), withFullCount()]);
   if (historyCount > 0 && fullCount > 0) return;

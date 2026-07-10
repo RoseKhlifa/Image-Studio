@@ -28,7 +28,7 @@ type GenerateOptions struct {
 	// frontend builds. Folded into ImagePaths when present.
 	ImagePath string `json:"imagePath"`
 
-	MaskB64            string `json:"maskB64"`        // optional, phase 3 reservation
+	MaskB64            string `json:"maskB64"`        // optional imported or painted edit mask
 	Seed               int64  `json:"seed"`           // 0 = random
 	NegativePrompt     string `json:"negativePrompt"` // optional
 	Background         string `json:"background"`     // "auto" | "opaque" | "transparent"

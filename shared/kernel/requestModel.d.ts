@@ -52,6 +52,10 @@ export type SharedImageRequestPayload = {
 export function normalizeBaseURL(raw: string): string;
 export function isVersionedOpenAICompatibilityBaseURL(raw: string): boolean;
 export function openAIAPIEndpoint(baseURL: string, endpointPath: string): string;
+export function isOfficialGoogleGeminiBaseURL(raw: string): boolean;
+export function isGoogleNativeNanoBanana2Model(imageModelID: string): boolean;
+export function shouldUseGoogleNativeInteractions(baseURL: string, imageModelID: string): boolean;
+export function googleInteractionsEndpoint(baseURL: string): string;
 export function normalizeAPIMode(apiMode: string): "responses" | "images";
 export function normalizeRequestPolicy(requestPolicy: string): RequestPolicy;
 export function normalizeTextModel(modelID: string): string;

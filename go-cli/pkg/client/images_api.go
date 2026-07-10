@@ -254,6 +254,7 @@ func RequestImagesAPIWithPartial(
 	}
 	includeExtended := shouldSendExtendedImageParameters(opts.RequestPolicy)
 	useNewAPICompat := shouldUseImagesNonStreamingCompat(model, opts.ImagesNewAPICompat)
+	useGoogleInteractions := shouldUseGoogleNativeInteractions(baseURL, model)
 
 	var (
 		url         string
@@ -261,7 +262,25 @@ func RequestImagesAPIWithPartial(
 		contentType string
 	)
 
-	if opts.Mode == ModeEdit {
+	if useGoogleInteractions {
+		paths := []string(nil)
+		if opts.Mode == ModeEdit {
+			paths = opts.imageSourcePathsForEdit()
+			if len(paths) == 0 {
+				return ImageResult{}, errors.New("Google Interactions 图生图需要至少一张源图")
+			}
+		}
+		payload, err := buildGoogleInteractionPayload(opts, paths, model, size, outputFormat)
+		if err != nil {
+			return ImageResult{}, err
+		}
+		url, err = googleInteractionsEndpoint(baseURL)
+		if err != nil {
+			return ImageResult{}, err
+		}
+		body = bytes.NewReader(payload)
+		contentType = "application/json"
+	} else if opts.Mode == ModeEdit {
 		paths := opts.imageSourcePathsForEdit()
 		if len(paths) == 0 {
 			return ImageResult{}, errors.New("图生图模式需要至少一张源图(请在面板里添加参考图)")
@@ -324,8 +343,13 @@ func RequestImagesAPIWithPartial(
 		return ImageResult{}, err
 	}
 	req.Header.Set("Content-Type", contentType)
-	req.Header.Set("Authorization", "Bearer "+opts.APIKey)
-	req.Header.Set("Accept", "text/event-stream, application/json")
+	if useGoogleInteractions {
+		req.Header.Set("X-Goog-Api-Key", opts.APIKey)
+		req.Header.Set("Accept", "application/json")
+	} else {
+		req.Header.Set("Authorization", "Bearer "+opts.APIKey)
+		req.Header.Set("Accept", "text/event-stream, application/json")
+	}
 	req.Header.Set("User-Agent", UserAgent())
 
 	transport, err := NewHTTPTransport(opts.Proxy)
@@ -338,6 +362,10 @@ func RequestImagesAPIWithPartial(
 	}
 
 	startedAt := time.Now()
+	progressStage := "等待 Images API 返回(无 SSE 保活)"
+	if useGoogleInteractions {
+		progressStage = "等待 Google Interactions 返回(无 SSE 保活)"
+	}
 	// Progress ticker — Images API has no streaming so we just tick elapsed time.
 	stopProgress := make(chan struct{})
 	if onProgress != nil {
@@ -349,7 +377,7 @@ func RequestImagesAPIWithPartial(
 				case <-stopProgress:
 					return
 				case <-tick.C:
-					onProgress("等待 Images API 返回(无 SSE 保活)", int(time.Since(startedAt).Seconds()), 0)
+					onProgress(progressStage, int(time.Since(startedAt).Seconds()), 0)
 				}
 			}
 		}()
@@ -361,6 +389,9 @@ func RequestImagesAPIWithPartial(
 		return ImageResult{}, err
 	}
 	defer resp.Body.Close()
+	if useGoogleInteractions {
+		return readGoogleInteractionResponse(ctx, resp, httpClient, rawSink, onProgress, startedAt)
+	}
 
 	contentTypeHeader := strings.ToLower(resp.Header.Get("Content-Type"))
 	if strings.Contains(contentTypeHeader, "text/event-stream") {
@@ -435,6 +466,49 @@ func RequestImagesAPIWithPartial(
 	}
 	if d.URL != "" {
 		return downloadImagesAPIURL(ctx, httpClient, d.URL, d.RevisedPrompt, onProgress, startedAt)
+	}
+	return ImageResult{}, ErrNoImageInResponse
+}
+
+func readGoogleInteractionResponse(
+	ctx context.Context,
+	resp *http.Response,
+	httpClient *http.Client,
+	rawSink io.Writer,
+	onProgress func(stage string, elapsedSeconds int, bytesReceived int64),
+	startedAt time.Time,
+) (ImageResult, error) {
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxGoogleInteractionResponseBytes+1))
+	if err != nil {
+		return ImageResult{}, fmt.Errorf("读取 Google Interactions 响应失败:%w", err)
+	}
+	if len(data) > maxGoogleInteractionResponseBytes {
+		return ImageResult{}, fmt.Errorf("Google Interactions 响应过大(>%dB 上限)", maxGoogleInteractionResponseBytes)
+	}
+	if _, err := rawSink.Write(data); err != nil {
+		return ImageResult{}, fmt.Errorf("write raw: %w", err)
+	}
+	image, err := extractGoogleInteractionImage(data, resp.StatusCode)
+	if err != nil {
+		return ImageResult{}, err
+	}
+	if strings.TrimSpace(image.Data) != "" {
+		result, err := imageResultFromGoogleInteraction(image)
+		if err != nil {
+			return ImageResult{}, err
+		}
+		if onProgress != nil {
+			onProgress("已收到 Google Interactions 图片", int(time.Since(startedAt).Seconds()), int64(len(data)))
+		}
+		return result, nil
+	}
+	if strings.TrimSpace(image.URI) != "" {
+		result, err := downloadImagesAPIURL(ctx, httpClient, image.URI, "", onProgress, startedAt)
+		if err != nil {
+			return ImageResult{}, fmt.Errorf("下载 Google Interactions URI 图片失败:%w", err)
+		}
+		result.SourceEvent = "google_interactions_url"
+		return result, nil
 	}
 	return ImageResult{}, ErrNoImageInResponse
 }
@@ -628,22 +702,32 @@ func buildEditsMultipart(
 
 	if strings.TrimSpace(maskB64) != "" {
 		raw, err := base64.StdEncoding.DecodeString(maskB64)
-		if err == nil && len(raw) > 0 {
-			maskMimeType := detectImageMimeTypeFromBytes(raw)
-			if strings.TrimSpace(maskMimeType) == "" {
-				maskMimeType = "image/png"
-			}
-			maskExt := imageExtensionForMimeType(maskMimeType)
-			h := make(textproto.MIMEHeader)
-			h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="mask"; filename="mask.%s"`, maskExt))
-			h.Set("Content-Type", maskMimeType)
-			fw, err := w.CreatePart(h)
-			if err != nil {
-				return nil, "", err
-			}
-			if _, err := fw.Write(raw); err != nil {
-				return nil, "", err
-			}
+		if err != nil {
+			return nil, "", fmt.Errorf("蒙版图片 base64 无效:%w", err)
+		}
+		if len(raw) == 0 {
+			return nil, "", errors.New("蒙版图片为空")
+		}
+		if len(raw) > MaxInputImageBytes {
+			return nil, "", fmt.Errorf("蒙版图片过大(%dB > %dB 上限)", len(raw), MaxInputImageBytes)
+		}
+		// Preserve the actual PNG/JPEG/WebP type for compatible relays instead
+		// of relabeling arbitrary bytes as PNG. Official OpenAI users can still
+		// supply a PNG mask when their selected model requires it.
+		maskMimeType := detectImageMimeTypeFromBytes(raw)
+		if strings.TrimSpace(maskMimeType) == "" {
+			return nil, "", errors.New("蒙版图片不是支持的 PNG/JPEG/WebP 格式")
+		}
+		maskExt := imageExtensionForMimeType(maskMimeType)
+		h := make(textproto.MIMEHeader)
+		h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="mask"; filename="mask.%s"`, maskExt))
+		h.Set("Content-Type", maskMimeType)
+		fw, err := w.CreatePart(h)
+		if err != nil {
+			return nil, "", err
+		}
+		if _, err := fw.Write(raw); err != nil {
+			return nil, "", err
 		}
 	}
 

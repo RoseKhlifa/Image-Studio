@@ -1013,7 +1013,7 @@ func (a *App) layoutSettingsHelpModal(gtx layout.Context) layout.Dimensions {
 								return a.label(gtx, "Responses API 走 /v1/responses + image_generation 工具，SSE 保活，长推理更稳，Cloudflare 524 风险更低。", unit.Sp(11), fluent.textMuted, font.Normal)
 							}),
 							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								return a.label(gtx, "Images API 走标准 /v1/images/generations 与 /v1/images/edits，兼容性最广，但没有 SSE 保活。", unit.Sp(11), fluent.textMuted, font.Normal)
+								return a.label(gtx, "Images API 通常走 /v1/images/generations 与 /v1/images/edits；Google 官方 gemini-3.1-flash-image 例外走 Interactions API。", unit.Sp(11), fluent.textMuted, font.Normal)
 							}),
 						)
 					})
@@ -1046,7 +1046,7 @@ func (a *App) layoutSettingsHelpModal(gtx layout.Context) layout.Dimensions {
 					return a.helpInfoCard(gtx, "BASE_URL 与参数策略", "", func(gtx layout.Context) layout.Dimensions {
 						return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(unit.Dp(8))}.Layout(gtx,
 							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								return a.label(gtx, "BASE_URL 只填中转站根地址。应用会按当前 API 形态自动拼接 /v1/...，不要手动把完整路径贴进来。", unit.Sp(11), fluent.textMuted, font.Normal)
+								return a.label(gtx, "中转站只填根地址；Google 官方 Images 配置填写 https://generativelanguage.googleapis.com/v1beta/openai。", unit.Sp(11), fluent.textMuted, font.Normal)
 							}),
 							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 								return a.label(gtx, "OpenAI 标准只发官方公开字段；兼容中转扩展会额外附带 relay 常见扩展字段，例如 seed / negative_prompt。", unit.Sp(11), fluent.textMuted, font.Normal)
@@ -2886,7 +2886,7 @@ func (a *App) layoutSettingsEditorPane(gtx layout.Context, snap snapshot) layout
 				return a.technicalField(gtx, "上游 BASE_URL", &a.baseURLInput, "https://example.com", unit.Dp(40))
 			}),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return a.label(gtx, "只填中转站根地址。应用会按当前 API 形态自动拼接 /v1/...，不要把完整接口路径手动贴进来。", unit.Sp(10), fluent.textDim, font.Normal)
+				return a.label(gtx, "中转站只填根地址；Google 官方 Images 配置填写 https://generativelanguage.googleapis.com/v1beta/openai。", unit.Sp(10), fluent.textDim, font.Normal)
 			}),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				return a.layoutSettingsAPIKeyField(gtx)
@@ -3130,7 +3130,7 @@ func (a *App) layoutSettingsEditorPane(gtx layout.Context, snap snapshot) layout
 								})
 							}),
 							layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-								return a.label(gtx, "Images API 路径走标准 /v1/images/generations 与 /v1/images/edits，没有 SSE 保活，长推理 CF 524 风险更高，但兼容性最广。", unit.Sp(10), fluent.accent, font.Normal)
+								return a.label(gtx, "Images API 通常走标准 Images 端点；Google 官方 gemini-3.1-flash-image 例外走 Interactions API。两者都没有 SSE 保活。", unit.Sp(10), fluent.accent, font.Normal)
 							}),
 						)
 					})
@@ -5389,7 +5389,7 @@ func promptLabels(values []string) []promptHelperItem {
 	for idx, value := range values {
 		items = append(items, promptHelperItem{
 			ID:     fmt.Sprintf("%d", idx),
-			Title:  shortPrompt(value),
+			Title:  fmt.Sprintf("历史 %d", idx+1),
 			Detail: value,
 			Kind:   "history",
 		})

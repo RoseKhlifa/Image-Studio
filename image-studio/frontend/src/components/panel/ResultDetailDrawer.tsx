@@ -5,6 +5,7 @@ import { submitShortcutLabel } from "../../platform";
 import { historyPreviewSrc, useBlobURL } from "../../lib/images";
 import {
   buildHistoryItemDragExport,
+  shouldUseNativeFileDrag,
   writeImageFileDragData,
   writeInternalHistoryItemDragData,
 } from "../../lib/dragExport.ts";
@@ -19,7 +20,7 @@ export function ResultDetailDrawer() {
   const close = useStudioStore((s) => s.closeResultDetail);
   const setField = useStudioStore((s) => s.setField);
   const pushToast = useStudioStore((s) => s.pushToast);
-  const { usesFluentUI, isMac } = usePlatform();
+  const { usesFluentUI, targetPlatform } = usePlatform();
 
   if (!item) return null;
   const detail = item;
@@ -35,7 +36,7 @@ export function ResultDetailDrawer() {
       return;
     }
     event.stopPropagation();
-    if (isMac && detail.savedPath) {
+    if (shouldUseNativeFileDrag(targetPlatform, detail.savedPath)) {
       event.preventDefault();
       void BeginNativeFileDrag(detail.savedPath).catch((error) => {
         console.error("[drag-export] native-file-drag failed", error);

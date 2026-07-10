@@ -2,6 +2,7 @@ import { Ellipsis, X } from "lucide-react";
 import type React from "react";
 import {
   buildHistoryItemDragExport,
+  shouldUseNativeFileDrag,
   writeImageFileDragData,
   writeInternalHistoryItemDragData,
 } from "../../lib/dragExport.ts";
@@ -34,7 +35,7 @@ export function HistoryTile({
   onOpenMenu: (x: number, y: number) => void;
   variant?: "default" | "phone" | "phoneFeature" | "windowsFeature" | "windowsList";
 }) {
-  const { isMac, usesFluentUI } = usePlatform();
+  const { isMac, targetPlatform, usesFluentUI } = usePlatform();
   const previewURL = useBlobURL(item.previewBlob ?? item.imageBlob ?? null, item.imageB64 ?? null);
   const imageSrc = historyPreviewSrc(item, previewURL);
   const imageLoadState = useImageLoadState(imageSrc || null);
@@ -65,7 +66,7 @@ export function HistoryTile({
   function handleImageDragStart(e: React.DragEvent<HTMLElement>) {
     if (!dragSpec) return;
     e.stopPropagation();
-    if (isMac && item.savedPath) {
+    if (shouldUseNativeFileDrag(targetPlatform, item.savedPath)) {
       e.preventDefault();
       console.debug("[drag-export] native-file-drag", item.savedPath);
       void BeginNativeFileDrag(item.savedPath).catch((error) => {

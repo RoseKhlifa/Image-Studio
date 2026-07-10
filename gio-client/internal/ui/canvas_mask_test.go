@@ -74,3 +74,30 @@ func TestCurrentConfigIncludesMaskB64ForEditMode(t *testing.T) {
 		t.Fatalf("mask bounds=%v want 2x2 source dims", img.Bounds())
 	}
 }
+
+func TestImportedCanvasMaskFlowsIntoEditRequestAndCanBeCleared(t *testing.T) {
+	dir := t.TempDir()
+	sourcePath := filepath.Join(dir, "source.png")
+	maskPath := filepath.Join(dir, "mask.png")
+	writeSolidTestPNG(t, sourcePath, color.NRGBA{R: 0x22, G: 0x44, B: 0x66, A: 0xff})
+	writeSolidTestPNG(t, maskPath, color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff})
+	app := &App{mode: "edit"}
+	app.sourcePathsInput.SetText(sourcePath)
+
+	if err := app.importCanvasMask(maskPath); err != nil {
+		t.Fatal(err)
+	}
+	if !app.hasImportedCanvasMask() {
+		t.Fatal("expected imported mask state")
+	}
+	cfg := app.currentConfig()
+	if cfg.MaskB64 == "" {
+		t.Fatal("expected imported mask in edit config")
+	}
+	decodeMaskImage(t, cfg.MaskB64)
+
+	app.clearCanvasMask()
+	if app.currentConfig().MaskB64 != "" {
+		t.Fatal("clear mask should remove imported mask from edit config")
+	}
+}

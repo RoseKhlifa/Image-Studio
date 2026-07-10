@@ -1,24 +1,24 @@
 # Issue 进展记录
 
-更新时间：2026-07-05
+更新时间：2026-07-10
 
-GitHub issue 状态已按 2026-07-05 当天的 GitHub API 重新核对。
+GitHub issue 状态已按 2026-07-10 当天的 GitHub API 重新核对。
 
-## 2026-07-05 当前 open issue 补充
+## 2026-07-10 当前 open issue 补充
 
 本轮重新核对到当前仍 open 的 issue 为 `#14` `#24` `#30` `#44` `#49` `#50` `#51` `#52` `#53`。
 
 | 编号 | 标题 | 当前仓库状态 | 下一步 |
 |---|---|---|---|
-| `#53` | 支持发送蒙版的 API 参数 | 已补主前端导入蒙版图片入口；提交时复用现有 `maskB64`，Responses 与 Images API 都会发送蒙版 | 可在真实 Images edits / Responses edit 上游做一次手工验证后关闭 |
-| `#52` | OneCommander 拖拽结果图片另存为异常 | 已补 Windows 原生 OLE 文件拖拽实现，前端拖拽数据也改成本地文件路径优先，避免落成 `.url` | 需要 Windows + OneCommander 实机拖拽验证 |
-| `#51` | 兼容 Google nano banana2 | 已支持 Google 官方 OpenAI 兼容 base URL 形态；`gemini-*` / `imagen-*` 图像模型自动走非流式 Images API 兼容请求，模型列表也能识别为图像模型 | 用 Google 官方 key 验证 `https://generativelanguage.googleapis.com/v1beta/openai` + `gemini-3.1-flash-image` |
-| `#50` | Images API 返回 URL 生图兼容 | 已支持 `data[0].url` 下载并转为 base64，桌面 Go client 与远程内核 JSON 路径都覆盖 50MB 上限和图片类型检查 | 可用返回 URL 的中转站做一次真实生成 |
-| `#49` | 模板/历史里的历史条数混乱 | 同提示词分组卡片显示序号范围，详情弹窗继续保留单项序号 | 可关闭 |
+| `#53` | 支持发送蒙版的 API 参数 | Wails、Android 与 Gio 都有蒙版导入/清除入口；提交时复用 `maskB64`，Responses 按 `input_image_mask`、Images edits 按 multipart `mask` 文件发送，并校验真实图片 MIME | 代码与自动化测试已完成，可关闭；真实上游 smoke 作为发布验证 |
+| `#52` | OneCommander 拖拽结果图片另存为异常 | 五个结果拖出入口已统一走 Windows 原生 OLE；`IDataObject` 显式提供 Unicode `CF_HDROP`、完整路径和双 NUL 文件列表，不再回退成 URL | 保持 open，等待 Windows + OneCommander 实机拖拽验证 |
+| `#51` | 兼容 Google nano banana2 | 对 Google 官方主机 + `gemini-3.1-flash-image` 窄路由到官方 `POST /v1beta/interactions`，按 `x-goog-api-key`、`input`、`response_format`、`store=false` 请求并解析 `steps[].content[].data/uri`；第三方 relay 仍走标准 Images API，不假定其支持 Google 原生协议 | 代码与官方 fixture 测试已完成，可关闭；真实可用性仍取决于 key / relay 模型权限 |
+| `#50` | Images API 返回 URL 生图兼容 | 已支持 `data[0].url` 下载并转为 base64，桌面 Go client、浏览器远程内核与 Android 原生二进制下载路径都覆盖 50MB 上限和图片类型检查 | 代码与自动化测试已完成，可关闭；真实 relay smoke 作为发布验证 |
+| `#49` | 模板/历史里的历史条数混乱 | Prompt 历史改为带 `01 / 02 / ...` 序号和明确分隔线的有序列表，Android 与 Gio 使用同一编号语义 | 可关闭 |
 | `#44` | 添加批处理功能 | 批处理已有基础实现；本轮补可编辑输出文件名前缀，保留原文件名并继续自动去重 | 可关闭；更复杂命名模板可作为新增强 issue |
-| `#30` | 标题背景与标题栏颜色不一致 | 仍沿用 6 月结论：代码已修，缺 Windows 真机视觉确认 | 需要 Windows 真机确认 |
-| `#24` | 支持全部删除 | 当前历史栏已有“全部删除”入口，仍可关闭 | 可关闭 |
-| `#14` | 有 Web 端吗 | 仍沿用 6 月结论：无独立在线 Web 版，当前交付形态是桌面端和 Android 壳层 | 保持搁置或评论说明后关闭 |
+| `#30` | 标题背景与标题栏颜色不一致 | 原生 Wails light/dark 标题栏色与 CSS token 已有自动化一致性验证 | 保持 open，等待 Windows 真机视觉确认 |
+| `#24` | 支持全部删除 | `history` / `historyFull` 原子 bulk clear，并同步清理旧库、分页、画布、详情、待保存队列和全部 workspace 引用 | 可关闭 |
+| `#14` | 有 Web 端吗 | 无独立在线 Web 版；这是已回答的产品问答，没有可从当前描述推导出的功能验收标准 | 保持搁置或评论说明后关闭 |
 
 ## 全部 issue 总表
 

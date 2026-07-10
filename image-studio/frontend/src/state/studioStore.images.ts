@@ -10,7 +10,7 @@ import {
 } from "../platform/runtime/host";
 import { saveImageForPlatform } from "../platform/android/bridge";
 import { base64ToBlob } from "../lib/images";
-import { removeHistoryItem } from "../lib/storage";
+import { clearHistoryStorage, removeHistoryItem } from "../lib/storage";
 import type { BatchProcessSourceImage, HistoryItem, SourceImage } from "../types/domain";
 import type { StudioState } from "./studioStore.types";
 import {
@@ -22,6 +22,7 @@ import {
 } from "./studioStore.runtime";
 import { patchWorkspaceRuntime } from "./workspaceRuntime";
 import { genId } from "./studioStore.shared";
+import { buildHistoryCleanupPatch, waitForActiveHistoryLoad } from "./historyCleanup";
 
 type StateAdapter = {
   getState: () => StudioState;
@@ -246,6 +247,26 @@ export function createImageActions(store: StateAdapter) {
           resultGridOpen: nextBatch.length > 1 && (patch.resultGridOpen ?? state.resultGridOpen),
         }),
       }));
+    },
+
+    async clearHistory() {
+      await waitForActiveHistoryLoad(store.getState);
+      const before = store.getState();
+      const loadedIDs = before.history.map((item) => item.id);
+      store.setState({ historyHasMore: false, historyLoading: true });
+      try {
+        const storedIDs = await clearHistoryStorage();
+        const clearedIDs = new Set([...loadedIDs, ...storedIDs]);
+        store.setState((state) => buildHistoryCleanupPatch(state, clearedIDs));
+        return clearedIDs.size;
+      } catch (error) {
+        store.setState({
+          historyHasMore: before.historyHasMore,
+          historyLoading: before.historyLoading,
+          historyCursorBeforeDayStart: before.historyCursorBeforeDayStart,
+        });
+        throw error;
+      }
     },
 
     async saveCurrentImageAs() {

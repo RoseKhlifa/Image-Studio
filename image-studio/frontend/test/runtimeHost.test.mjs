@@ -782,6 +782,10 @@ test("runtimeHost can use Android invoke host capabilities directly", async () =
     assert.equal(picked.path, "/sdcard/imports/picked.png");
     assert.equal(picked.imageB64, "YWJj");
 
+    const mask = await runtimeHost.OpenMaskImageDialog();
+    assert.equal(mask.path, "/sdcard/imports/picked.png");
+    assert.equal(mask.imageB64, "YWJj");
+
     const imported = await runtimeHost.ImportImageFromB64("YWJj", "source.png");
     assert.equal(imported.path, "/sdcard/imports/source.png");
     assert.equal(await runtimeHost.ReadImageAsBase64(imported.path), "YWJj");

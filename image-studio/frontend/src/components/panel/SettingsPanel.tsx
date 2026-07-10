@@ -85,7 +85,7 @@ export function SettingsPanel({ open, onClose }: { open: boolean; onClose: () =>
     theme, fontScale,
     setField, setAPIKey, setProxyConfig,
     history,
-    loadMoreHistory,
+    clearHistory: clearStoredHistory,
     exportHistory, importHistory,
     pruneHistoryOlderThanDays,
     setTheme, setFontScale,
@@ -170,11 +170,12 @@ export function SettingsPanel({ open, onClose }: { open: boolean; onClose: () =>
   }
 
   async function clearHistory() {
-    await loadMoreHistory();
-    const loadedHistory = useStudioStore.getState().history;
-    if (!confirm(`确定清除 ${loadedHistory.length} 条历史记录吗?(本地数据库也会删除)`)) return;
-    for (const h of loadedHistory) {
-      await useStudioStore.getState().deleteHistoryItem(h.id);
+    if (!confirm("确定删除全部历史记录吗?\n\n此操作会清空本地数据库中的所有历史，且无法撤销。")) return;
+    try {
+      const removed = await clearStoredHistory();
+      pushToast(removed > 0 ? `已删除全部 ${removed} 条历史` : "已清空全部历史", "success");
+    } catch (error) {
+      pushToast(`清空历史失败:${error instanceof Error ? error.message : String(error)}`, "error", 5000);
     }
   }
 

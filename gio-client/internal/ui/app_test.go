@@ -1497,15 +1497,15 @@ func TestAdvancedSummaryRefreshesAfterRelevantChanges(t *testing.T) {
 func TestPromptLabelsCachedRefreshesAfterSuggestionChanges(t *testing.T) {
 	app := &App{}
 	first := app.promptLabelsCached([]string{"first prompt"})
-	if len(first) != 1 || first[0].Title != "first prompt" {
+	if len(first) != 1 || first[0].Title != "历史 1" || first[0].Detail != "first prompt" {
 		t.Fatalf("first=%v want single first prompt item", first)
 	}
 
 	second := app.promptLabelsCached([]string{"second prompt"})
-	if len(second) != 1 || second[0].Title != "second prompt" {
+	if len(second) != 1 || second[0].Title != "历史 1" || second[0].Detail != "second prompt" {
 		t.Fatalf("second=%v want single second prompt item", second)
 	}
-	if first[0].Title == second[0].Title {
+	if first[0].Detail == second[0].Detail {
 		t.Fatalf("prompt label cache did not refresh after suggestion changes")
 	}
 }
@@ -1540,6 +1540,19 @@ func TestPromptHelperApplyTextFallsBackToTitle(t *testing.T) {
 	item := promptHelperItem{Title: "title only", Detail: "   "}
 	if got := promptHelperApplyText(item); got != "title only" {
 		t.Fatalf("promptHelperApplyText=%q want title only", got)
+	}
+}
+
+func TestPromptLabelsNumberHistoryInDisplayOrder(t *testing.T) {
+	items := promptLabels([]string{"newest prompt", "older prompt"})
+	if len(items) != 2 {
+		t.Fatalf("len(promptLabels)=%d want 2", len(items))
+	}
+	if items[0].Title != "历史 1" || items[0].Detail != "newest prompt" {
+		t.Fatalf("first history label=%#v", items[0])
+	}
+	if items[1].Title != "历史 2" || items[1].Detail != "older prompt" {
+		t.Fatalf("second history label=%#v", items[1])
 	}
 }
 

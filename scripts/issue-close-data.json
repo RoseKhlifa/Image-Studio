@@ -1,95 +1,62 @@
 {
-  "updatedAt": "2026-06-07",
+  "updatedAt": "2026-07-10",
   "upstreamRepo": "RoseKhlifa/Image-Studio",
   "verificationBaseline": {
-    "summaryCommand": "IMAGE_STUDIO_INCLUDE_ISSUE_CLOSE_VERIFY=1 IMAGE_STUDIO_VERIFY_RESULTS_DIR=/private/tmp/verify-results-issue-close-final4 node scripts/verify-local-platform-kernel.mjs",
+    "summaryCommand": "npm test; go test ./... (image-studio, go-cli, gio-client, shared/compat-go); npm run build:windows; npm run build:android; npm run build:macos; ./gradlew :app:testDebugUnitTest; git diff --check",
     "summaryStatus": "passed",
-    "summarySteps": 11,
-    "frontendTests": "114/114",
-    "resultFiles": [
-      "/private/tmp/verify-results-issue-close-final4/platform-kernel-summary.json",
-      "/private/tmp/verify-results-issue-close-final4/live-verify.json",
-      "/private/tmp/verify-results-issue-close-final4/local-smoke.json",
-      "/private/tmp/verify-results-issue-close-final4/android-shell.json",
-      "/private/tmp/verify-results-issue-close-final4/macos-release.json",
-      "/private/tmp/verify-results-issue-close-final4/issue-close-tooling.json",
-      "/private/tmp/verify-results-issue-close-final4/issue-close-export-bundle/manifest.json"
-    ]
+    "summarySteps": 10,
+    "frontendTests": "162/162",
+    "resultFiles": []
   },
   "closable": [
     {
       "number": 24,
       "title": "支持全部删除",
-      "comment": "这个需求当前仓库已经覆盖。\n\n- 历史结果列表已支持“全部删除”。\n- 主要落点在 `image-studio/frontend/src/components/history/HistoryRail.tsx`。\n- 当前本地验证链已重新通过，2026-06-07 的 `platform-kernel` 总链状态为 `passed`。\n\n如果你这边没有新的复现条件，这个 issue 可以关闭。"
+      "comment": "这个需求当前仓库已经完整覆盖。\n\n- 历史栏与 Windows 主历史栏都有“全部删除”入口和二次确认。\n- 删除会在同一个 IndexedDB 事务中清空 `history` 与 `historyFull`，并清理旧 keyval 历史，未加载分页也不会残留。\n- 画布、对比、结果详情、待保存队列和全部 workspace 引用会同步清理；正在加载分页时会先等待既有请求，避免旧记录回写。\n\n主要落点：\n\n- `image-studio/frontend/src/lib/storage.ts`\n- `image-studio/frontend/src/state/historyCleanup.ts`\n- `image-studio/frontend/src/components/history/HistoryRail.tsx`\n- `image-studio/frontend/src/components/history/WindowsHistoryRail.tsx`\n\n最终前端全量测试为 162/162，这个 issue 可以关闭。"
     },
     {
-      "number": 25,
-      "title": "上游配置升级后的同步问题",
-      "comment": "这个问题当前仓库已经做了两层处理：\n\n- 已支持上游配置导入 / 导出。\n- 兼容状态会落到宿主侧共享路径，减轻更新后重新录入配置的问题。\n\n主要落点：\n\n- `image-studio/frontend/src/lib/upstreamConfigTransfer.ts`\n- `image-studio/backend/compatibility.go`\n\n本地验证链已在 2026-06-07 重新通过。如果你这边没有新的“升级后配置丢失”复现路径，这个 issue 可以关闭。"
+      "number": 44,
+      "title": "[Feature]: 添加批处理功能",
+      "comment": "这个需求当前仓库已经覆盖。\n\n桌面端图生图批处理现已支持：\n\n- 选择目录或多张图片作为输入。\n- 按指定并发逐张处理。\n- 默认回写源目录，或选择独立输出目录。\n- 按源图比例自动适配统一分辨率档位。\n- 保留原文件名，可编辑输出前缀，并对同名文件自动追加序号。\n- 可选失败重试。\n\n主要落点：\n\n- `image-studio/frontend/src/components/panel/BatchProcessSection.tsx`\n- `image-studio/frontend/src/state/studioStore.ts`\n- `image-studio/backend/service.go`\n- `docs/batch-img2img/README.md`\n\n批处理路径已有前后端测试覆盖，这个 issue 可以关闭；更复杂的命名模板可以单独作为增强需求。"
     },
     {
-      "number": 26,
-      "title": "失败重试开关",
-      "comment": "这个需求当前仓库已经覆盖。\n\n- 设置页已提供全局“失败自动重试”开关。\n- 桌面端和 Android 端都已有入口。\n\n主要落点：\n\n- `image-studio/frontend/src/components/panel/SettingsPanel.tsx`\n- `image-studio/frontend/src/platform/android/settings/AndroidSettingsPanel.tsx`\n\n当前本地验证链已重新通过。如果没有新的行为差异，这个 issue 可以关闭。"
+      "number": 49,
+      "title": "[Feature]: 模板/历史里面的历史条数混乱，不够清晰的看到每一条的内容",
+      "comment": "这个需求已经完成。\n\n- Prompt 历史改为带 `01 / 02 / ...` 序号和明确分隔线的有序列表。\n- Android 使用同一编号语义。\n- Gio 客户端同步显示“历史 1 / 历史 2 / ...”，不再把连续 prompt 混成一段。\n\n主要落点：\n\n- `image-studio/frontend/src/components/panel/PromptPopover.tsx`\n- `image-studio/frontend/src/lib/promptTemplates.ts`\n- `image-studio/frontend/src/platform/android/AndroidPromptTemplateModal.tsx`\n- `gio-client/internal/ui/layout_controls.go`\n\n前端与 Gio 聚焦测试均通过，这个 issue 可以关闭。"
     },
     {
-      "number": 27,
-      "title": "上游失败重试路由功能",
-      "comment": "这个需求当前仓库已经覆盖。\n\n- 失败重试现在可以路由到用户指定的备用上游。\n- 不是只做“原上游再试一次”，而是支持切到备用 profile。\n\n主要落点：\n\n- `go-cli/pkg/client/retry.go`\n- `image-studio/frontend/src/components/panel/UpstreamProfileEditor.tsx`\n\n本地验证链已重新通过。如果没有新的复现场景，这个 issue 可以关闭。"
+      "number": 50,
+      "title": "[Feature]: 生图可以支持url生图吗",
+      "comment": "Images API 返回 URL 的兼容已经完成。\n\n- `data[0].url` 会下载并转换为应用内部使用的 base64 图片。\n- 桌面 Go client、远程内核和 Android 原生 HTTP 路径均已覆盖。\n- Android 下载不再依赖 WebView `fetch`，避免 CDN CORS 阻断。\n- 下载统一限制为 50MB，并校验 HTTP 状态、URL 协议和真实 PNG/JPEG/WebP 内容。\n\n主要落点：\n\n- `go-cli/pkg/client/images_api.go`\n- `image-studio/frontend/src/platform/runtime/remote-kernel/images.ts`\n- `android-shell/app/src/main/java/top/gptcodex/imagestudio/android/AndroidImageStudioBridge.kt`\n\nfixture、Go、前端和 Android 单测均通过，这个 issue 可以关闭。"
     },
     {
-      "number": 28,
-      "title": "保存用户自定义提示词模板",
-      "comment": "这个功能当前仓库已经覆盖。\n\n已支持：\n\n- 添加提示词模板\n- 删除提示词模板\n- 修改并保存模板\n- 自定义模板标题\n- 点击模板快速填入提示词\n\n主要落点：\n\n- `image-studio/frontend/src/lib/promptTemplates.ts`\n- `image-studio/frontend/src/components/panel/PromptTemplateManagerModal.tsx`\n\n本地测试与验证链已重新通过。如果没有新的补充需求，这个 issue 可以关闭。"
+      "number": 51,
+      "title": "[Feature]: 兼容google 的nano banana2",
+      "comment": "Nano Banana 2 的客户端兼容已经完成。\n\n- Google 官方主机 + `gemini-3.1-flash-image` 会窄路由到官方 `POST /v1beta/interactions`。\n- 请求使用 `x-goog-api-key`、`input`、`response_format`、`store=false`，并解析 `steps[].content[]` 的 `image.data` / `image.uri`。\n- 第三方 relay 仍走标准 Images API，不会被误送到 Google 原生协议。\n- Interactions 报错不会静默回退，便于定位模型权限或协议问题。\n\n官方依据：\n\n- https://ai.google.dev/gemini-api/docs/image-generation\n- https://ai.google.dev/api/interactions-api\n- https://ai.google.dev/gemini-api/docs/openai\n\n主要落点：\n\n- `go-cli/pkg/client/google_interactions.go`\n- `shared/kernel/requestModel.js`\n- `image-studio/frontend/src/platform/runtime/remote-kernel/requestPayloads.ts`\n\n请求/响应 fixture 与全量测试均通过，这个 issue 可以关闭。真实模型可用性仍取决于 Google key 权限或第三方 relay 的模型支持。"
     },
     {
-      "number": 32,
-      "title": "拖结果到文件复制",
-      "comment": "这个需求当前仓库已经覆盖。\n\n- 桌面端结果图已支持直接拖出到系统文件管理器复制。\n- 导出逻辑优先走真实结果文件 / 全尺寸媒体路径，不是只拖缩略图。\n\n主要落点：\n\n- `image-studio/backend/dialogs.go`\n- `image-studio/frontend/src/lib/dragExport.ts`\n\n本地验证链已重新通过。如果你这边没有新的拖拽失败复现，这个 issue 可以关闭。"
-    },
-    {
-      "number": 35,
-      "title": "工作区的鼠标滚动方向改为横向",
-      "comment": "这个修正当前仓库已经覆盖。\n\n- 多工作区场景下，工作区栏滚轮方向已改为横向滚动。\n\n主要落点：\n\n- `image-studio/frontend/src/components/layout/WorkspaceBar.tsx`\n\n本地测试与验证链已重新通过。如果没有新的滚动行为问题，这个 issue 可以关闭。"
-    },
-    {
-      "number": 37,
-      "title": "结果里生成的多张图片查看问题",
-      "comment": "这个需求当前仓库已经覆盖。\n\n- 当前已支持在画板里对同批生成结果做左右切换浏览。\n- 不需要再回到结果列表逐张找。\n\n主要落点：\n\n- `image-studio/frontend/src/components/canvas/useCanvasShortcuts.ts`\n- `image-studio/frontend/src/state/studioStore.media.ts`\n\n本地测试与验证链已重新通过。如果没有新的查看路径问题，这个 issue 可以关闭。"
-    },
-    {
-      "number": 40,
-      "title": "多图张数按钮选择",
-      "comment": "这个需求当前仓库已经覆盖。\n\n- Android 端多图张数选择已从滑杆改为带边界的按钮选择。\n\n主要落点：\n\n- `image-studio/frontend/src/platform/android/AndroidPhoneComposePanel.tsx`\n- `image-studio/frontend/src/platform/android/AndroidPadComposePanel.tsx`\n\n本地验证链已重新通过。如果没有新的交互差异，这个 issue 可以关闭。"
-    },
-    {
-      "number": 42,
-      "title": "一些功能需求",
-      "comment": "这个需求集合当前仓库已覆盖主要条目。\n\n已支持：\n\n1. 有参考图时，图生图默认切到 `Auto` 比例。\n2. 会根据参考图比例推导最接近的 2K / 4K 分辨率。\n3. 支持自定义提示词模板与快捷填入。\n4. 已支持结果图与参考图对比查看。\n\n主要落点：\n\n- `image-studio/frontend/src/components/panel/sizeCapabilities.ts`\n- `image-studio/frontend/src/components/panel/PromptTemplateManagerModal.tsx`\n- `image-studio/frontend/src/components/canvas/CompareOverlay.tsx`\n\n本地验证链已重新通过。如果没有新的补充项或复现场景，这个 issue 可以关闭。"
+      "number": 53,
+      "title": "[Feature]: 支持发送蒙版的API参数",
+      "comment": "可选蒙版图片功能已经完成。\n\n- Wails、Android 与 Gio 都可导入和清除蒙版图片。\n- 画布绘制蒙版与导入蒙版复用同一 `maskB64` 请求字段。\n- Responses API 按 `input_image_mask` data URL 发送。\n- Images edits 按 multipart `mask` 文件发送，并保留图片真实 MIME。\n- 无效或空蒙版会明确报错，不再静默忽略。\n\n主要落点：\n\n- `image-studio/frontend/src/state/studioStore.ts`\n- `image-studio/frontend/src/platform/android/canvas/AndroidCanvasWorkspace.tsx`\n- `gio-client/internal/ui/canvas_mask.go`\n- `go-cli/pkg/client/images_api.go`\n- `shared/kernel/requestModel.js`\n\n前端、Go、Gio 与 Android 单测均通过，这个 issue 可以关闭。官方上游若要求 PNG、同尺寸或 alpha 通道，仍需提供符合模型约束的蒙版。"
     }
   ],
   "holdOpen": [
     {
       "number": 30,
       "title": "[bug]窗口标题背景与标题栏颜色不一致",
-      "reason": "代码已修，但仍缺 Windows 真机视觉确认"
+      "reason": "原生 Wails light/dark 标题栏颜色与 CSS token 已有自动化一致性验证，但仍缺 Windows 真机视觉确认"
     },
     {
-      "number": 36,
-      "title": "生成图片问题：生成图片经常模糊。在多张并发期间尤为明显",
-      "reason": "核心修复已落地，但仍缺 Android / Windows 真机和真实高并发上游长链路证明"
+      "number": 52,
+      "title": "[Bug]: 在第三方（OneCommander）资源管理器里拖拽结果图片另存为异常",
+      "reason": "五个拖出入口已统一走 Windows 原生 OLE，IDataObject 也显式提供 Unicode CF_HDROP；仍缺 Windows + OneCommander 实机确认"
     }
   ],
   "deferred": [
     {
-      "number": 23,
-      "title": "不生图",
-      "reason": "按当前任务约定视为上游问题，不纳入本轮收口"
-    },
-    {
       "number": 14,
       "title": "有web端吗",
-      "reason": "独立在线 Web 版已明确搁置"
+      "reason": "这是已回答的产品问答；当前没有独立在线 Web 版，也没有可据此实现的功能验收标准"
     }
   ]
 }

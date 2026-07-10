@@ -156,6 +156,18 @@ func (a *App) canvasToolbar(gtx layout.Context, snap snapshot) layout.Dimensions
 	for a.maskBrushSizeUpButton.Clicked(gtx) {
 		a.adjustCanvasBrushSize(5)
 	}
+	for a.importMaskButton.Clicked(gtx) {
+		paths, err := chooseImageFiles()
+		if err != nil {
+			a.appendLog("选择蒙版失败: " + err.Error())
+		} else if len(paths) > 0 {
+			if err := a.importCanvasMask(paths[0]); err != nil {
+				a.appendLog("导入蒙版失败: " + err.Error())
+			} else {
+				a.appendLog("已导入蒙版图片: " + filepath.Base(paths[0]))
+			}
+		}
+	}
 	for a.clearMaskButton.Clicked(gtx) {
 		a.clearCanvasMask()
 	}
@@ -167,6 +179,7 @@ func (a *App) canvasToolbar(gtx layout.Context, snap snapshot) layout.Dimensions
 	currentTool := a.currentCanvasInteractionTool()
 	currentBrushMode := a.currentCanvasBrushMode()
 	currentBrushSize := a.currentCanvasBrushSize()
+	hasImportedMask := a.hasImportedCanvasMask()
 	currentAnnotationKind := a.currentCanvasAnnotationKind()
 	currentAnnotationColor := a.currentCanvasAnnotationColor()
 	canUndoCanvas := a.canUndoCanvasAction()
@@ -276,6 +289,9 @@ func (a *App) canvasToolbar(gtx layout.Context, snap snapshot) layout.Dimensions
 										}),
 										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 											return a.toolbarTextButton(gtx, &a.maskEraseButton, uiIconDelete, "橡皮", currentBrushMode == canvasBrushErase)
+										}),
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											return a.toolbarTextButton(gtx, &a.importMaskButton, uiIconSource, "导入蒙版", hasImportedMask)
 										}),
 										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 											return a.toolbarIconButton(gtx, &a.maskBrushSizeDownButton, uiIconChevronLeft, false)

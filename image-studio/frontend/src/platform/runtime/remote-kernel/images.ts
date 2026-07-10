@@ -1,4 +1,5 @@
-import { buildImagesRequestBody } from "./requestPayloads.ts";
+import { detectImageMimeTypeFromBase64 } from "../../../lib/images.ts";
+import { buildImagesRequestBody, type ImagesRequestProtocol } from "./requestPayloads.ts";
 import {
   nowSeconds,
   registerRawText,
@@ -109,7 +110,19 @@ function parseImagesResponseSync(raw: string, status: number): ExtractedImageRes
   };
 }
 
-async function imageURLToBase64(rawURL: string, signal: AbortSignal): Promise<string> {
+function ensureSupportedImageBase64(imageB64: string, source: string): string {
+  if (!imageB64 || !detectImageMimeTypeFromBase64(imageB64)) {
+    throw new RemoteKernelError(`${source}没有返回支持的 PNG/JPEG/WebP 图片`);
+  }
+  return imageB64;
+}
+
+async function imageURLToBase64(
+  rawURL: string,
+  signal: AbortSignal,
+  proxyMode = "system",
+  proxyURL = "",
+): Promise<string> {
   let parsed: URL;
   try {
     parsed = new URL(rawURL);
@@ -118,6 +131,26 @@ async function imageURLToBase64(rawURL: string, signal: AbortSignal): Promise<st
   }
   if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
     throw new RemoteKernelError(`上游返回的图片 URL 协议不支持:${parsed.protocol.replace(":", "")}`);
+  }
+  if (shouldUseAndroidNativeHTTP()) {
+    const native = await nativeHttpRequestText(
+      parsed.toString(),
+      "GET",
+      { Accept: "image/png, image/jpeg, image/webp, */*" },
+      null,
+      signal,
+      undefined,
+      {
+        proxyMode,
+        proxyURL,
+        responseBase64: true,
+        maxResponseBytes: MAX_IMAGE_URL_BYTES,
+      },
+    );
+    if (native.status < 200 || native.status >= 300) {
+      throw new RemoteKernelError(`下载上游 URL 图片返回 HTTP ${native.status}`);
+    }
+    return ensureSupportedImageBase64(native.resultImageB64 || "", "上游 URL");
   }
   const response = await fetch(parsed.toString(), {
     method: "GET",
@@ -141,10 +174,74 @@ async function imageURLToBase64(rawURL: string, signal: AbortSignal): Promise<st
   for (let i = 0; i < bytes.length; i += chunk) {
     binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
   }
-  return btoa(binary);
+  return ensureSupportedImageBase64(btoa(binary), "上游 URL");
 }
 
-async function parseImagesResponse(raw: string, status: number, signal: AbortSignal): Promise<ExtractedImageResult> {
+async function parseGoogleInteractionResponse(
+  raw: string,
+  status: number,
+  signal: AbortSignal,
+  proxyMode: string,
+  proxyURL: string,
+): Promise<ExtractedImageResult> {
+  let parsed: any;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    if (status >= 400) throw new RemoteKernelError(`Google Interactions 返回 HTTP ${status}: ${raw.slice(0, 400)}`);
+    throw new RemoteKernelError(`解析 Google Interactions 响应失败:${(error as any)?.message || error}`);
+  }
+  if (status >= 400 || parsed?.error) {
+    const message = parsed?.error?.message || parsed?.message || `HTTP ${status}`;
+    throw new RemoteKernelError(`Google Interactions 返回错误:${message}`);
+  }
+
+  const candidates: any[] = [];
+  if (parsed?.output_image) candidates.push(parsed.output_image);
+  if (Array.isArray(parsed?.steps)) {
+    for (let stepIndex = parsed.steps.length - 1; stepIndex >= 0; stepIndex--) {
+      const content = parsed.steps[stepIndex]?.content;
+      if (!Array.isArray(content)) continue;
+      for (let contentIndex = content.length - 1; contentIndex >= 0; contentIndex--) {
+        if (content[contentIndex]?.type === "image") candidates.push(content[contentIndex]);
+      }
+    }
+  }
+  for (const image of candidates) {
+    if (typeof image?.data === "string" && image.data.trim()) {
+      return {
+        imageB64: ensureSupportedImageBase64(image.data.trim(), "Google Interactions"),
+        revisedPrompt: "",
+        sourceEvent: "google_interactions",
+      };
+    }
+    if (typeof image?.uri === "string" && image.uri.trim()) {
+      return {
+        imageB64: await imageURLToBase64(image.uri, signal, proxyMode, proxyURL),
+        revisedPrompt: "",
+        sourceEvent: "google_interactions_url",
+      };
+    }
+  }
+  const text = Array.isArray(parsed?.steps)
+    ? parsed.steps.flatMap((step: any) => Array.isArray(step?.content) ? step.content : [])
+      .find((content: any) => content?.type === "text" && typeof content?.text === "string")?.text
+    : "";
+  const suffix = text ? `:${String(text).slice(0, 240)}` : "";
+  throw new RemoteKernelError(`Google Interactions 响应未包含 image data/uri${suffix}`);
+}
+
+async function parseImagesResponse(
+  raw: string,
+  status: number,
+  signal: AbortSignal,
+  protocol: ImagesRequestProtocol,
+  proxyMode: string,
+  proxyURL: string,
+): Promise<ExtractedImageResult> {
+  if (protocol === "google-interactions") {
+    return parseGoogleInteractionResponse(raw, status, signal, proxyMode, proxyURL);
+  }
   let parsed: any;
   try {
     parsed = JSON.parse(raw);
@@ -154,7 +251,7 @@ async function parseImagesResponse(raw: string, status: number, signal: AbortSig
   const first = Array.isArray(parsed?.data) ? parsed.data[0] : null;
   if (status < 400 && first?.url && !first.b64_json) {
     return {
-      imageB64: await imageURLToBase64(first.url, signal),
+      imageB64: await imageURLToBase64(first.url, signal, proxyMode, proxyURL),
       revisedPrompt: first.revised_prompt || "",
       sourceEvent: "images_api_url",
     };
@@ -186,10 +283,11 @@ export async function requestImagesOnce(
   const sourceDataURLs = await resolveSourceDataURLs(request.sourceImages, request.payload);
   const built = await buildImagesRequestBody(request, sourceDataURLs);
   const startedAt = Date.now();
-  callbacks.onLog?.(`[Images API] 第 ${attempt}/${maxAttempts} 次请求...`);
-  callbacks.onProgress?.("等待 Images API 返回(无 SSE 保活)", 0, 0);
+  const protocolLabel = built.protocol === "google-interactions" ? "Google Interactions" : "Images API";
+  callbacks.onLog?.(`[${protocolLabel}] 第 ${attempt}/${maxAttempts} 次请求...`);
+  callbacks.onProgress?.(`等待 ${protocolLabel} 返回(无 SSE 保活)`, 0, 0);
   const ticker = globalThis.setInterval(() => {
-    callbacks.onProgress?.("等待 Images API 返回(无 SSE 保活)", nowSeconds(startedAt), 0);
+    callbacks.onProgress?.(`等待 ${protocolLabel} 返回(无 SSE 保活)`, nowSeconds(startedAt), 0);
   }, STATUS_INTERVAL_MS);
   try {
     const proxyMode = request.payload.proxyMode === "none" || request.payload.proxyMode === "custom" ? request.payload.proxyMode : "system";
@@ -213,13 +311,13 @@ export async function requestImagesOnce(
         built.url,
         "POST",
         {
-          Authorization: `Bearer ${request.payload.apiKey}`,
+          ...(built.protocol === "openai-images" ? { Authorization: `Bearer ${request.payload.apiKey}` } : {}),
           Accept: "text/event-stream, application/json",
           ...(built.headers ?? {}),
         },
         built.body,
         callbacks.signal,
-        consumeNativePayload,
+        built.protocol === "openai-images" ? consumeNativePayload : undefined,
         { proxyMode, proxyURL: request.payload.proxyURL || "", keepAlive: true },
       );
       const rawBody = response.body || rawFromLines;
@@ -237,7 +335,14 @@ export async function requestImagesOnce(
       }
       const result = isStream
         ? nativeStreamResult ?? (receivedNativeStreamPayload ? null : parseImagesStreamRaw(rawBody, callbacks))
-        : await parseImagesResponse(rawBody, response.status, callbacks.signal);
+        : await parseImagesResponse(
+            rawBody,
+            response.status,
+            callbacks.signal,
+            built.protocol,
+            proxyMode,
+            request.payload.proxyURL || "",
+          );
       if (!result) throw new RemoteKernelError("上游没有返回可用图片", rawPath);
       return { ...result, rawPath, prompt: request.payload.prompt, mode: request.payload.mode };
     }
@@ -247,7 +352,7 @@ export async function requestImagesOnce(
     const response = await fetch(built.url, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${request.payload.apiKey}`,
+        ...(built.protocol === "openai-images" ? { Authorization: `Bearer ${request.payload.apiKey}` } : {}),
         Accept: "text/event-stream, application/json",
         ...(built.headers ?? {}),
       },
@@ -305,7 +410,14 @@ export async function requestImagesOnce(
     }
     const raw = await response.text();
     const rawPath = registerRawText("images", attempt, raw);
-    const result = await parseImagesResponse(raw, response.status, callbacks.signal);
+    const result = await parseImagesResponse(
+      raw,
+      response.status,
+      callbacks.signal,
+      built.protocol,
+      proxyMode,
+      request.payload.proxyURL || "",
+    );
     return { ...result, rawPath, prompt: request.payload.prompt, mode: request.payload.mode };
   } catch (error) {
     if (error instanceof RemoteKernelError) throw error;

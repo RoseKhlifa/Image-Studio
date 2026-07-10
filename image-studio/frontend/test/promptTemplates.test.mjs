@@ -3,6 +3,13 @@ import test from "node:test";
 
 const promptTemplates = await import("../src/lib/promptTemplates.ts");
 
+test("buildPromptHistoryEntries numbers prompts in display order", () => {
+  assert.deepEqual(promptTemplates.buildPromptHistoryEntries(["newest", "older"]), [
+    { position: 1, text: "newest" },
+    { position: 2, text: "older" },
+  ]);
+});
+
 test("normalizePromptTemplates keeps only valid templates", () => {
   const normalized = promptTemplates.normalizePromptTemplates([
     { id: "a", label: "模板1", text: "cat", createdAt: 1, updatedAt: 2 },
