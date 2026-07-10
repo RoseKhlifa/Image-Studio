@@ -36,22 +36,30 @@ func (s *Service) BeginNativeFileDrag(path string) error {
 // thumbnail generation succeeds.
 const maxDialogReadBytes int64 = 50 * 1024 * 1024
 
-func (s *Service) OpenImageDialog() (SelectFileResponse, error) {
+func (s *Service) openSingleImageDialog(title string) (string, os.FileInfo, error) {
 	path, err := runtime.OpenFileDialog(s.ctx, runtime.OpenDialogOptions{
-		Title: "选择源图片",
+		Title: title,
 		Filters: []runtime.FileFilter{
 			{DisplayName: "支持的图片 (*.png;*.jpg;*.jpeg;*.webp)", Pattern: "*.png;*.jpg;*.jpeg;*.webp"},
 			{DisplayName: "所有文件 (*.*)", Pattern: "*.*"},
 		},
 	})
 	if err != nil {
-		return SelectFileResponse{}, err
+		return "", nil, err
 	}
 	if path == "" {
-		return SelectFileResponse{}, nil
+		return "", nil, nil
 	}
 	info, err := os.Stat(path)
 	if err != nil {
+		return "", nil, err
+	}
+	return path, info, nil
+}
+
+func (s *Service) OpenImageDialog() (SelectFileResponse, error) {
+	path, info, err := s.openSingleImageDialog("选择源图片")
+	if err != nil || path == "" {
 		return SelectFileResponse{}, err
 	}
 	resp := SelectFileResponse{Path: path, Size: info.Size()}
@@ -64,6 +72,28 @@ func (s *Service) OpenImageDialog() (SelectFileResponse, error) {
 		}
 	}
 	return resp, nil
+}
+
+func (s *Service) OpenMaskImageDialog() (SelectFileResponse, error) {
+	path, info, err := s.openSingleImageDialog("选择蒙版图片")
+	if err != nil || path == "" {
+		return SelectFileResponse{}, err
+	}
+	if info.Size() <= 0 {
+		return SelectFileResponse{}, errors.New("蒙版图片为空")
+	}
+	if info.Size() > maxDialogReadBytes {
+		return SelectFileResponse{}, fmt.Errorf("蒙版图片过大，不能超过 %dMB", maxDialogReadBytes/(1024*1024))
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return SelectFileResponse{}, err
+	}
+	return SelectFileResponse{
+		Path:     path,
+		Size:     info.Size(),
+		ImageB64: base64.StdEncoding.EncodeToString(data),
+	}, nil
 }
 
 func (s *Service) OpenImagesDialog() (SelectFilesResponse, error) {

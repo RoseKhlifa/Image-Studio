@@ -34,6 +34,8 @@ export function OpenFile(arg1:string):Promise<void>;
 
 export function OpenImageDialog():Promise<backend.SelectFileResponse>;
 
+export function OpenMaskImageDialog():Promise<backend.SelectFileResponse>;
+
 export function OpenOutputDir():Promise<void>;
 
 export function OptimizePrompt(arg1:backend.PromptOptimizeOptions):Promise<string>;

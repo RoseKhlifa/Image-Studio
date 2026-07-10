@@ -14,8 +14,7 @@ import {
   GetOutputDir,
   DeleteStoredAPIKey,
   GetStoredAPIKey,
-  OpenImageDialog,
-  ReadImageAsBase64,
+  OpenMaskImageDialog,
   SetStoredAPIKey,
   RegisterMediaAsset,
   RegisterImportedImageAsset,
@@ -1945,9 +1944,9 @@ export const useStudioStore = create<StudioState>((set, get) => ({
 
   importMaskImage: async () => {
     try {
-      const res = await OpenImageDialog();
+      const res = await OpenMaskImageDialog();
       if (!res?.path) return;
-      const b64 = res.imageB64 || await ReadImageAsBase64(res.path);
+      const b64 = res.imageB64;
       if (!b64) throw new Error("未读取到图片内容");
       const beforeStrokes = get().strokes;
       const beforeMaskDataURL = get().maskDataURL;

@@ -359,6 +359,16 @@ export function OpenImageDialog(): Promise<SelectFileResponseLike> {
   return openImageDialogFallback();
 }
 
+export function OpenMaskImageDialog(): Promise<SelectFileResponseLike> {
+  if (hasServiceMethod("OpenMaskImageDialog")) {
+    return invokeService<SelectFileResponseLike>(unsupportedMessage, "OpenMaskImageDialog").catch(() => OpenImageDialog());
+  }
+  if (canInvokeAndroidMethod("OpenMaskImageDialog")) {
+    return invokeAndroid<SelectFileResponseLike>(unsupportedMessage, "OpenMaskImageDialog").catch(() => OpenImageDialog());
+  }
+  return openImageDialogFallback();
+}
+
 export function OpenImagesDialog(): Promise<SelectFilesResponseLike> {
   if (hasServiceMethod("OpenImagesDialog")) {
     return invokeService<SelectFilesResponseLike>(unsupportedMessage, "OpenImagesDialog");

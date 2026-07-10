@@ -66,6 +66,10 @@ export function OpenImageDialog() {
   return window['go']['backend']['Service']['OpenImageDialog']();
 }
 
+export function OpenMaskImageDialog() {
+  return window['go']['backend']['Service']['OpenMaskImageDialog']();
+}
+
 export function OpenOutputDir() {
   return window['go']['backend']['Service']['OpenOutputDir']();
 }
