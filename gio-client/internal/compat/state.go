@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"image-studio/gio-client/internal/kernel"
@@ -19,7 +20,15 @@ import (
 
 const keyringServiceName = "Image Studio"
 
+var stateFileMu sync.Mutex
+
 func LoadState() (shared.State, string, error) {
+	stateFileMu.Lock()
+	defer stateFileMu.Unlock()
+	return loadStateUnlocked()
+}
+
+func loadStateUnlocked() (shared.State, string, error) {
 	root, err := StableDataRoot()
 	if err != nil {
 		return shared.EmptyState(), "", err
@@ -33,6 +42,12 @@ func LoadState() (shared.State, string, error) {
 }
 
 func SaveState(state shared.State) error {
+	stateFileMu.Lock()
+	defer stateFileMu.Unlock()
+	return saveStateUnlocked(state)
+}
+
+func saveStateUnlocked(state shared.State) error {
 	root, err := StableDataRoot()
 	if err != nil {
 		return err
@@ -44,6 +59,22 @@ func SaveState(state shared.State) error {
 	state.HistoryFull = pruneHistoryFull(state.HistoryFull, state.History)
 	state = dehydrateHistoryFull(state)
 	return shared.Save(shared.StatePath(root), state)
+}
+
+func UpdateState(update func(*shared.State) error) error {
+	if update == nil {
+		return nil
+	}
+	stateFileMu.Lock()
+	defer stateFileMu.Unlock()
+	state, _, err := loadStateUnlocked()
+	if err != nil {
+		return err
+	}
+	if err := update(&state); err != nil {
+		return err
+	}
+	return saveStateUnlocked(state)
 }
 
 func ConfigFromState(cfg kernel.Config, state shared.State) kernel.Config {
@@ -124,32 +155,28 @@ func SaveConfigAndHistory(cfg kernel.Config, result kernel.Result, elapsedSec fl
 }
 
 func SaveConfigAndHistoryWithPreviewMode(cfg kernel.Config, result kernel.Result, elapsedSec float64, previewOnly bool) error {
-	state, _, err := LoadState()
-	if err != nil {
-		return err
-	}
-	state = UpsertConfig(state, cfg)
-	if strings.TrimSpace(result.SavedPath) != "" || strings.TrimSpace(result.ImageB64) != "" {
-		item := HistoryItemFromRun(cfg, result, elapsedSec, previewOnly)
-		state.History = mergeHistory(item, state.History)
-		if previewOnly && strings.TrimSpace(result.ImageB64) != "" {
-			state.HistoryFull = mergeHistoryFull(shared.HistoryFullItem{ID: item.ID, ImageB64: strings.TrimSpace(result.ImageB64)}, state.HistoryFull, state.History)
-		} else {
-			state.HistoryFull = pruneHistoryFull(state.HistoryFull, state.History)
+	return UpdateState(func(state *shared.State) error {
+		*state = UpsertConfig(*state, cfg)
+		if strings.TrimSpace(result.SavedPath) != "" || strings.TrimSpace(result.ImageB64) != "" {
+			item := HistoryItemFromRun(cfg, result, elapsedSec, previewOnly)
+			state.History = mergeHistory(item, state.History)
+			if previewOnly && strings.TrimSpace(result.ImageB64) != "" {
+				state.HistoryFull = mergeHistoryFull(shared.HistoryFullItem{ID: item.ID, ImageB64: strings.TrimSpace(result.ImageB64)}, state.HistoryFull, state.History)
+			} else {
+				state.HistoryFull = pruneHistoryFull(state.HistoryFull, state.History)
+			}
 		}
-	}
-	state.UpdatedAt = time.Now().UnixMilli()
-	return SaveState(state)
+		state.UpdatedAt = time.Now().UnixMilli()
+		return nil
+	})
 }
 
 func SaveConfig(cfg kernel.Config) error {
-	state, _, err := LoadState()
-	if err != nil {
-		return err
-	}
-	state = UpsertConfig(state, cfg)
-	state.UpdatedAt = time.Now().UnixMilli()
-	return SaveState(state)
+	return UpdateState(func(state *shared.State) error {
+		*state = UpsertConfig(*state, cfg)
+		state.UpdatedAt = time.Now().UnixMilli()
+		return nil
+	})
 }
 
 func SavePromptSuppressed(state shared.State) bool {
@@ -157,13 +184,11 @@ func SavePromptSuppressed(state shared.State) bool {
 }
 
 func SetSavePromptSuppressed(value bool) error {
-	state, _, err := LoadState()
-	if err != nil {
-		return err
-	}
-	state.Settings.SavePromptSuppressed = value
-	state.UpdatedAt = time.Now().UnixMilli()
-	return SaveState(state)
+	return UpdateState(func(state *shared.State) error {
+		state.Settings.SavePromptSuppressed = value
+		state.UpdatedAt = time.Now().UnixMilli()
+		return nil
+	})
 }
 
 func RememberTrustedOutputRoot(state shared.State, root string) shared.State {

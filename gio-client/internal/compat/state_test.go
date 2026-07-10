@@ -1,7 +1,9 @@
 package compat
 
 import (
+	"fmt"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"image-studio/gio-client/internal/kernel"
@@ -211,6 +213,58 @@ func TestSaveConfigAndHistoryWithPreviewModeStoresHistoryFullAndHydratesImageB64
 	}
 	if state.HistoryFull[0].ImageB64 != "aW1n" {
 		t.Fatalf("historyFull image=%q want aW1n", state.HistoryFull[0].ImageB64)
+	}
+}
+
+func TestSaveConfigAndHistorySerializesConcurrentHistoryUpdates(t *testing.T) {
+	root := t.TempDir()
+	origStable := stableDataRootFunc
+	stableDataRootFunc = func() (string, error) { return root, nil }
+	defer func() { stableDataRootFunc = origStable }()
+
+	const total = 24
+	errCh := make(chan error, total)
+	var wg sync.WaitGroup
+	for index := 0; index < total; index++ {
+		index := index
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			prompt := fmt.Sprintf("prompt-%02d", index)
+			errCh <- SaveConfigAndHistoryWithPreviewMode(kernel.Config{
+				Prompt:       prompt,
+				Mode:         client.ModeGenerate,
+				OutputFormat: "png",
+				OutputDir:    filepath.Join(root, "images"),
+			}, kernel.Result{
+				SavedPath: filepath.Join(root, "images", fmt.Sprintf("result-%02d.png", index)),
+			}, 1, false)
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		if err != nil {
+			t.Fatalf("concurrent history save: %v", err)
+		}
+	}
+
+	state, _, err := LoadState()
+	if err != nil {
+		t.Fatalf("LoadState: %v", err)
+	}
+	if len(state.History) != total {
+		t.Fatalf("history len=%d want %d", len(state.History), total)
+	}
+	seen := make(map[string]bool, total)
+	for _, item := range state.History {
+		seen[item.Prompt] = true
+	}
+	for index := 0; index < total; index++ {
+		prompt := fmt.Sprintf("prompt-%02d", index)
+		if !seen[prompt] {
+			t.Fatalf("missing concurrent history item %q", prompt)
+		}
 	}
 }
 

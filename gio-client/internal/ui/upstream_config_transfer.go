@@ -362,107 +362,108 @@ func boolValue(raw any) bool {
 }
 
 func (a *App) applyParsedUpstreamConfigImport(parsed parsedUpstreamConfigImport) (int, string, error) {
-	state, _, err := gioCompat.LoadState()
-	if err != nil {
-		return 0, "", err
-	}
-	state = sharedCompat.Normalize(state)
-	existingByName := map[string]int{}
-	for i, profile := range state.Profiles {
-		existingByName[strings.TrimSpace(profile.Name)] = i
-	}
-	originalToActualID := map[string]string{}
-	type fallbackLink struct {
-		actualID           string
-		originalFallbackID string
-	}
-	links := make([]fallbackLink, 0, len(parsed.Profiles))
+	var stateSnapshot sharedCompat.State
+	activeProfileID := ""
 	importedIDs := make([]string, 0, len(parsed.Profiles))
-	now := time.Now().UnixMilli()
+	err := gioCompat.UpdateState(func(state *sharedCompat.State) error {
+		*state = sharedCompat.Normalize(*state)
+		existingByName := map[string]int{}
+		for i, profile := range state.Profiles {
+			existingByName[strings.TrimSpace(profile.Name)] = i
+		}
+		originalToActualID := map[string]string{}
+		type fallbackLink struct {
+			actualID           string
+			originalFallbackID string
+		}
+		links := make([]fallbackLink, 0, len(parsed.Profiles))
+		now := time.Now().UnixMilli()
 
-	for idx, incoming := range parsed.Profiles {
-		if existingIndex, ok := existingByName[strings.TrimSpace(incoming.Name)]; ok {
-			profile := state.Profiles[existingIndex]
-			profile.Name = strings.TrimSpace(incoming.Name)
-			profile.APIMode = normalizeProfileAPIMode(incoming.APIMode)
-			profile.ResponsesTransport = normalizeProfileResponsesTransport(incoming.ResponsesTransport)
-			profile.RequestPolicy = normalizeProfilePolicy(incoming.RequestPolicy)
-			profile.ImagesNewAPICompat = incoming.ImagesNewAPICompat
-			profile.BaseURL = normalizeImportedBaseURL(incoming.BaseURL)
-			profile.TextModelID = strings.TrimSpace(incoming.TextModelID)
-			profile.ImageModelID = strings.TrimSpace(incoming.ImageModelID)
-			profile.ReasoningEffort = normalizeReasoningEffort(incoming.ReasoningEffort)
-			profile.ConcurrencyLimit = incoming.ConcurrencyLimit
-			profile.LastUsedAt = incoming.LastUsedAt
-			state.Profiles[existingIndex] = profile
-			if strings.TrimSpace(incoming.APIKey) != "" {
-				_ = gioCompat.WriteAPIKey(profile.ID, strings.TrimSpace(incoming.APIKey))
+		for idx, incoming := range parsed.Profiles {
+			if existingIndex, ok := existingByName[strings.TrimSpace(incoming.Name)]; ok {
+				profile := state.Profiles[existingIndex]
+				profile.Name = strings.TrimSpace(incoming.Name)
+				profile.APIMode = normalizeProfileAPIMode(incoming.APIMode)
+				profile.ResponsesTransport = normalizeProfileResponsesTransport(incoming.ResponsesTransport)
+				profile.RequestPolicy = normalizeProfilePolicy(incoming.RequestPolicy)
+				profile.ImagesNewAPICompat = incoming.ImagesNewAPICompat
+				profile.BaseURL = normalizeImportedBaseURL(incoming.BaseURL)
+				profile.TextModelID = strings.TrimSpace(incoming.TextModelID)
+				profile.ImageModelID = strings.TrimSpace(incoming.ImageModelID)
+				profile.ReasoningEffort = normalizeReasoningEffort(incoming.ReasoningEffort)
+				profile.ConcurrencyLimit = incoming.ConcurrencyLimit
+				profile.LastUsedAt = incoming.LastUsedAt
+				state.Profiles[existingIndex] = profile
+				if strings.TrimSpace(incoming.APIKey) != "" {
+					_ = gioCompat.WriteAPIKey(profile.ID, strings.TrimSpace(incoming.APIKey))
+				}
+				originalToActualID[incoming.ID] = profile.ID
+				importedIDs = append(importedIDs, profile.ID)
+				links = append(links, fallbackLink{actualID: profile.ID, originalFallbackID: strings.TrimSpace(incoming.FallbackProfileID)})
+				continue
 			}
-			originalToActualID[incoming.ID] = profile.ID
-			importedIDs = append(importedIDs, profile.ID)
-			links = append(links, fallbackLink{actualID: profile.ID, originalFallbackID: strings.TrimSpace(incoming.FallbackProfileID)})
-			continue
+
+			actualID := fmt.Sprintf("gio-import-%d-%d", now, idx+1)
+			profile := sharedCompat.UpstreamProfile{
+				ID:                 actualID,
+				Name:               strings.TrimSpace(incoming.Name),
+				APIMode:            normalizeProfileAPIMode(incoming.APIMode),
+				ResponsesTransport: normalizeProfileResponsesTransport(incoming.ResponsesTransport),
+				RequestPolicy:      normalizeProfilePolicy(incoming.RequestPolicy),
+				ImagesNewAPICompat: incoming.ImagesNewAPICompat,
+				BaseURL:            normalizeImportedBaseURL(incoming.BaseURL),
+				TextModelID:        strings.TrimSpace(incoming.TextModelID),
+				ImageModelID:       strings.TrimSpace(incoming.ImageModelID),
+				ReasoningEffort:    normalizeReasoningEffort(incoming.ReasoningEffort),
+				ConcurrencyLimit:   incoming.ConcurrencyLimit,
+				CreatedAt:          now,
+				LastUsedAt:         incoming.LastUsedAt,
+			}
+			state.Profiles = append(state.Profiles, profile)
+			if strings.TrimSpace(incoming.APIKey) != "" {
+				_ = gioCompat.WriteAPIKey(actualID, strings.TrimSpace(incoming.APIKey))
+			}
+			existingByName[profile.Name] = len(state.Profiles) - 1
+			originalToActualID[incoming.ID] = actualID
+			importedIDs = append(importedIDs, actualID)
+			links = append(links, fallbackLink{actualID: actualID, originalFallbackID: strings.TrimSpace(incoming.FallbackProfileID)})
 		}
 
-		actualID := fmt.Sprintf("gio-import-%d-%d", now, idx+1)
-		profile := sharedCompat.UpstreamProfile{
-			ID:                 actualID,
-			Name:               strings.TrimSpace(incoming.Name),
-			APIMode:            normalizeProfileAPIMode(incoming.APIMode),
-			ResponsesTransport: normalizeProfileResponsesTransport(incoming.ResponsesTransport),
-			RequestPolicy:      normalizeProfilePolicy(incoming.RequestPolicy),
-			ImagesNewAPICompat: incoming.ImagesNewAPICompat,
-			BaseURL:            normalizeImportedBaseURL(incoming.BaseURL),
-			TextModelID:        strings.TrimSpace(incoming.TextModelID),
-			ImageModelID:       strings.TrimSpace(incoming.ImageModelID),
-			ReasoningEffort:    normalizeReasoningEffort(incoming.ReasoningEffort),
-			ConcurrencyLimit:   incoming.ConcurrencyLimit,
-			CreatedAt:          now,
-			LastUsedAt:         incoming.LastUsedAt,
-		}
-		state.Profiles = append(state.Profiles, profile)
-		if strings.TrimSpace(incoming.APIKey) != "" {
-			_ = gioCompat.WriteAPIKey(actualID, strings.TrimSpace(incoming.APIKey))
-		}
-		existingByName[profile.Name] = len(state.Profiles) - 1
-		originalToActualID[incoming.ID] = actualID
-		importedIDs = append(importedIDs, actualID)
-		links = append(links, fallbackLink{actualID: actualID, originalFallbackID: strings.TrimSpace(incoming.FallbackProfileID)})
-	}
-
-	for _, link := range links {
-		if strings.TrimSpace(link.originalFallbackID) == "" {
-			continue
-		}
-		resolved := originalToActualID[strings.TrimSpace(link.originalFallbackID)]
-		if resolved == "" {
-			for _, profile := range state.Profiles {
-				if profile.ID == strings.TrimSpace(link.originalFallbackID) {
-					resolved = profile.ID
+		for _, link := range links {
+			if strings.TrimSpace(link.originalFallbackID) == "" {
+				continue
+			}
+			resolved := originalToActualID[strings.TrimSpace(link.originalFallbackID)]
+			if resolved == "" {
+				for _, profile := range state.Profiles {
+					if profile.ID == strings.TrimSpace(link.originalFallbackID) {
+						resolved = profile.ID
+						break
+					}
+				}
+			}
+			if resolved == "" {
+				continue
+			}
+			for i := range state.Profiles {
+				if state.Profiles[i].ID == link.actualID {
+					state.Profiles[i].FallbackProfileID = resolved
 					break
 				}
 			}
 		}
-		if resolved == "" {
-			continue
-		}
-		for i := range state.Profiles {
-			if state.Profiles[i].ID == link.actualID {
-				state.Profiles[i].FallbackProfileID = resolved
-				break
-			}
-		}
-	}
 
-	activeProfileID := ""
-	if strings.TrimSpace(parsed.ActiveProfileID) != "" {
-		activeProfileID = originalToActualID[strings.TrimSpace(parsed.ActiveProfileID)]
-	}
-	if activeProfileID != "" {
-		state.ActiveProfile = activeProfileID
-	}
-	state.UpdatedAt = now
-	if err := gioCompat.SaveState(state); err != nil {
+		if strings.TrimSpace(parsed.ActiveProfileID) != "" {
+			activeProfileID = originalToActualID[strings.TrimSpace(parsed.ActiveProfileID)]
+		}
+		if activeProfileID != "" {
+			state.ActiveProfile = activeProfileID
+		}
+		state.UpdatedAt = now
+		stateSnapshot = *state
+		return nil
+	})
+	if err != nil {
 		return 0, "", err
 	}
 	if activeProfileID != "" {
@@ -478,8 +479,8 @@ func (a *App) applyParsedUpstreamConfigImport(parsed parsedUpstreamConfigImport)
 		}
 	}
 	a.mu.Lock()
-	a.setProfilesLocked(state.Profiles)
-	a.settingsSelectedProfileID = normalizeSettingsSelectedProfileID(state, activeProfileID)
+	a.setProfilesLocked(stateSnapshot.Profiles)
+	a.settingsSelectedProfileID = normalizeSettingsSelectedProfileID(stateSnapshot, activeProfileID)
 	a.mu.Unlock()
 	return len(parsed.Profiles), activeProfileID, nil
 }

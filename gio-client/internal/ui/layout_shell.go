@@ -40,7 +40,7 @@ func (a *App) layout(gtx layout.Context) layout.Dimensions {
 		bodyStart := withAlpha(fluent.white, 0x08)
 		bodyEnd := withAlpha(fluent.bg2, 0x18)
 		topGlow := withAlpha(fluent.white, 0x70)
-		if resolveThemeMode(a.themeMode) == "dark" {
+		if a.isDarkTheme() {
 			bodyStart = rgba(0xffffff, 0x00)
 			bodyEnd = withAlpha(fluent.bg2, 0x22)
 			topGlow = withAlpha(fluent.white, 0x09)

@@ -16,6 +16,8 @@ import (
 	"gioui.org/f32"
 	"gioui.org/io/key"
 	"gioui.org/layout"
+	"gioui.org/op"
+	"gioui.org/unit"
 	"gioui.org/widget"
 	"github.com/yuanhua/image-gptcodex/pkg/client"
 	giodCompat "image-studio/gio-client/internal/compat"
@@ -849,6 +851,16 @@ func TestNextProfileNameFindsSmallestMissingNumber(t *testing.T) {
 	}
 	if got := nextProfileName(profiles); got != "配置2" {
 		t.Fatalf("nextProfileName=%q want 配置2", got)
+	}
+}
+
+func TestNextProfileIDAvoidsSameMillisecondCollision(t *testing.T) {
+	profiles := []sharedCompat.UpstreamProfile{
+		{ID: "gio-1234"},
+		{ID: "gio-1234-2"},
+	}
+	if got := nextProfileID(profiles, 1234); got != "gio-1234-3" {
+		t.Fatalf("nextProfileID=%q want gio-1234-3", got)
 	}
 }
 
@@ -2664,6 +2676,87 @@ func TestResolveThemeMode(t *testing.T) {
 	}
 	if got := normalizeThemeMode("unknown"); got != "system" {
 		t.Fatalf("normalizeThemeMode(unknown)=%q", got)
+	}
+}
+
+func TestIsDarkThemeUsesCachedResolution(t *testing.T) {
+	prev := systemThemeResolver
+	resolverCalls := 0
+	systemThemeResolver = func() string {
+		resolverCalls++
+		return "light"
+	}
+	defer func() { systemThemeResolver = prev }()
+
+	app := &App{themeMode: "system", resolvedThemeMode: "dark"}
+	for i := 0; i < 10; i++ {
+		if !app.isDarkTheme() {
+			t.Fatal("cached dark theme should remain dark")
+		}
+	}
+	if resolverCalls != 0 {
+		t.Fatalf("system theme resolver called %d times from render hot path", resolverCalls)
+	}
+}
+
+func TestRefreshSystemThemeOnlyResolvesSystemMode(t *testing.T) {
+	prevResolver := systemThemeResolver
+	prevPalette := fluent
+	resolverCalls := 0
+	systemThemeResolver = func() string {
+		resolverCalls++
+		return "dark"
+	}
+	defer func() {
+		systemThemeResolver = prevResolver
+		fluent = prevPalette
+	}()
+
+	app := &App{themeMode: "light", resolvedThemeMode: "light"}
+	app.refreshSystemTheme()
+	if resolverCalls != 0 {
+		t.Fatalf("fixed theme unexpectedly queried system resolver %d times", resolverCalls)
+	}
+	app.themeMode = "system"
+	app.refreshSystemTheme()
+	if resolverCalls != 1 || app.resolvedThemeMode != "dark" {
+		t.Fatalf("refresh calls=%d resolved=%q want 1,dark", resolverCalls, app.resolvedThemeMode)
+	}
+}
+
+func TestDesktopFramesDoNotResolveSystemTheme(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	prevResolver := systemThemeResolver
+	prevPalette := fluent
+	resolverCalls := 0
+	systemThemeResolver = func() string {
+		resolverCalls++
+		return "dark"
+	}
+	defer func() {
+		systemThemeResolver = prevResolver
+		fluent = prevPalette
+	}()
+
+	app := New()
+	if resolverCalls != 1 {
+		t.Fatalf("New resolved system theme %d times want 1", resolverCalls)
+	}
+	resolverCalls = 0
+	var ops op.Ops
+	gtx := layout.Context{
+		Ops:         &ops,
+		Constraints: layout.Exact(image.Pt(1920, 1080)),
+		Metric:      unit.Metric{PxPerDp: 1, PxPerSp: 1},
+		Now:         time.Now(),
+	}
+	for frame := 0; frame < 3; frame++ {
+		ops.Reset()
+		gtx.Now = gtx.Now.Add(time.Second / 60)
+		app.layout(gtx)
+	}
+	if resolverCalls != 0 {
+		t.Fatalf("desktop frames resolved system theme %d times want 0", resolverCalls)
 	}
 }
 

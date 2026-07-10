@@ -5,7 +5,6 @@ package main
 import (
 	"fmt"
 	"log"
-	"net/url"
 	"os"
 
 	"image-studio/gio-client/internal/promptipc"

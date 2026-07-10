@@ -370,24 +370,24 @@ func (a *App) savePresetAsNew() {
 		a.appendLog("预设名称不能为空")
 		return
 	}
-	state, _, err := gioCompat.LoadState()
-	if err != nil {
-		a.appendLog("保存预设失败: " + err.Error())
-		return
-	}
-	state = sharedCompat.Normalize(state)
 	now := time.Now().UnixMilli()
 	preset := a.currentPresetSnapshot()
 	preset.ID = fmt.Sprintf("preset-%d", now)
 	preset.Name = name
-	state.Settings.Presets = append([]sharedCompat.Preset{preset}, state.Settings.Presets...)
-	state.UpdatedAt = now
-	if err := gioCompat.SaveState(state); err != nil {
+	var presets []sharedCompat.Preset
+	err := gioCompat.UpdateState(func(state *sharedCompat.State) error {
+		*state = sharedCompat.Normalize(*state)
+		state.Settings.Presets = append([]sharedCompat.Preset{preset}, state.Settings.Presets...)
+		state.UpdatedAt = now
+		presets = append([]sharedCompat.Preset(nil), state.Settings.Presets...)
+		return nil
+	})
+	if err != nil {
 		a.appendLog("保存预设失败: " + err.Error())
 		return
 	}
 	a.mu.Lock()
-	a.setPresetsLocked(state.Settings.Presets)
+	a.setPresetsLocked(presets)
 	a.selectedPresetID = preset.ID
 	a.presetNameInput.SetText(preset.Name)
 	a.mu.Unlock()
@@ -420,39 +420,41 @@ func (a *App) overwriteSelectedPreset() {
 		a.appendLog("当前没有可覆盖的预设")
 		return
 	}
-	state, _, err := gioCompat.LoadState()
-	if err != nil {
-		a.appendLog("更新预设失败: " + err.Error())
-		return
-	}
-	state = sharedCompat.Normalize(state)
 	nameDraft := strings.TrimSpace(a.presetNameInput.Text())
 	size, quality, outputFormat, batchCount, styleTag := a.currentPresetDraftValues()
 	updated := false
 	name := ""
-	for i := range state.Settings.Presets {
-		if strings.TrimSpace(state.Settings.Presets[i].ID) != targetID {
-			continue
+	var presets []sharedCompat.Preset
+	err := gioCompat.UpdateState(func(state *sharedCompat.State) error {
+		*state = sharedCompat.Normalize(*state)
+		for i := range state.Settings.Presets {
+			if strings.TrimSpace(state.Settings.Presets[i].ID) != targetID {
+				continue
+			}
+			name = strings.TrimSpace(state.Settings.Presets[i].Name)
+			if nameDraft != "" {
+				name = nameDraft
+			}
+			state.Settings.Presets[i] = buildUpdatedPresetFromDraft(state.Settings.Presets[i], name, size, quality, outputFormat, batchCount, styleTag)
+			updated = true
+			break
 		}
-		name = strings.TrimSpace(state.Settings.Presets[i].Name)
-		if nameDraft != "" {
-			name = nameDraft
+		if updated {
+			state.UpdatedAt = time.Now().UnixMilli()
 		}
-		state.Settings.Presets[i] = buildUpdatedPresetFromDraft(state.Settings.Presets[i], name, size, quality, outputFormat, batchCount, styleTag)
-		updated = true
-		break
+		presets = append([]sharedCompat.Preset(nil), state.Settings.Presets...)
+		return nil
+	})
+	if err != nil {
+		a.appendLog("更新预设失败: " + err.Error())
+		return
 	}
 	if !updated {
 		a.appendLog("当前预设不存在")
 		return
 	}
-	state.UpdatedAt = time.Now().UnixMilli()
-	if err := gioCompat.SaveState(state); err != nil {
-		a.appendLog("更新预设失败: " + err.Error())
-		return
-	}
 	a.mu.Lock()
-	a.setPresetsLocked(state.Settings.Presets)
+	a.setPresetsLocked(presets)
 	a.selectedPresetID = targetID
 	a.presetNameInput.SetText(name)
 	a.mu.Unlock()
@@ -469,36 +471,39 @@ func (a *App) deleteSelectedPreset() {
 		a.appendLog("当前没有可删除的预设")
 		return
 	}
-	state, _, err := gioCompat.LoadState()
+	var next []sharedCompat.Preset
+	removedName := ""
+	removed := false
+	err := gioCompat.UpdateState(func(state *sharedCompat.State) error {
+		*state = sharedCompat.Normalize(*state)
+		next = make([]sharedCompat.Preset, 0, len(state.Settings.Presets))
+		for _, item := range state.Settings.Presets {
+			if strings.TrimSpace(item.ID) == targetID {
+				removedName = strings.TrimSpace(item.Name)
+				removed = true
+				continue
+			}
+			next = append(next, item)
+		}
+		if removed {
+			state.Settings.Presets = next
+			state.UpdatedAt = time.Now().UnixMilli()
+		}
+		return nil
+	})
 	if err != nil {
 		a.appendLog("删除预设失败: " + err.Error())
 		return
 	}
-	state = sharedCompat.Normalize(state)
-	next := make([]sharedCompat.Preset, 0, len(state.Settings.Presets))
-	removedName := ""
-	for _, item := range state.Settings.Presets {
-		if strings.TrimSpace(item.ID) == targetID {
-			removedName = strings.TrimSpace(item.Name)
-			continue
-		}
-		next = append(next, item)
-	}
-	if len(next) == len(state.Settings.Presets) {
+	if !removed {
 		a.appendLog("当前预设不存在")
 		return
 	}
-	state.Settings.Presets = next
-	state.UpdatedAt = time.Now().UnixMilli()
-	if err := gioCompat.SaveState(state); err != nil {
-		a.appendLog("删除预设失败: " + err.Error())
-		return
-	}
 	a.mu.Lock()
-	a.setPresetsLocked(state.Settings.Presets)
-	if len(state.Settings.Presets) > 0 {
-		a.selectedPresetID = strings.TrimSpace(state.Settings.Presets[0].ID)
-		a.presetNameInput.SetText(strings.TrimSpace(state.Settings.Presets[0].Name))
+	a.setPresetsLocked(next)
+	if len(next) > 0 {
+		a.selectedPresetID = strings.TrimSpace(next[0].ID)
+		a.presetNameInput.SetText(strings.TrimSpace(next[0].Name))
 	} else {
 		a.selectedPresetID = ""
 		a.presetNameInput.SetText(nextPresetName(nil))

@@ -91,18 +91,6 @@ func (a *App) addCustomAspectRatio() {
 		a.appendLog("这个比例已经内置了")
 		return
 	}
-	state, _, err := gioCompat.LoadState()
-	if err != nil {
-		a.appendLog("保存自定义比例失败: " + err.Error())
-		return
-	}
-	state = sharedCompat.Normalize(state)
-	for _, ratio := range state.Settings.CustomAspectRatios {
-		if strings.TrimSpace(ratio.ID) == id {
-			a.appendLog("比例已存在: " + id)
-			return
-		}
-	}
 	w, h := reduceCustomAspectRatio(width, height)
 	ratio := sharedCompat.CustomAspectRatio{
 		ID:        id,
@@ -111,14 +99,32 @@ func (a *App) addCustomAspectRatio() {
 		Height:    h,
 		CreatedAt: time.Now().UnixMilli(),
 	}
-	state.Settings.CustomAspectRatios = append(state.Settings.CustomAspectRatios, ratio)
-	state.UpdatedAt = time.Now().UnixMilli()
-	if err := gioCompat.SaveState(state); err != nil {
+	exists := false
+	var ratios []sharedCompat.CustomAspectRatio
+	err := gioCompat.UpdateState(func(state *sharedCompat.State) error {
+		*state = sharedCompat.Normalize(*state)
+		for _, existing := range state.Settings.CustomAspectRatios {
+			if strings.TrimSpace(existing.ID) == id {
+				exists = true
+				ratios = append([]sharedCompat.CustomAspectRatio(nil), state.Settings.CustomAspectRatios...)
+				return nil
+			}
+		}
+		state.Settings.CustomAspectRatios = append(state.Settings.CustomAspectRatios, ratio)
+		state.UpdatedAt = time.Now().UnixMilli()
+		ratios = append([]sharedCompat.CustomAspectRatio(nil), state.Settings.CustomAspectRatios...)
+		return nil
+	})
+	if err != nil {
 		a.appendLog("保存自定义比例失败: " + err.Error())
 		return
 	}
+	if exists {
+		a.appendLog("比例已存在: " + id)
+		return
+	}
 	a.mu.Lock()
-	a.customAspectRatios = append([]sharedCompat.CustomAspectRatio(nil), state.Settings.CustomAspectRatios...)
+	a.customAspectRatios = ratios
 	a.selectedCustomAspectRatioID = ratio.ID
 	a.customAspectWidthInput.SetText("")
 	a.customAspectHeightInput.SetText("")
@@ -136,29 +142,30 @@ func (a *App) deleteSelectedCustomAspectRatio() {
 		a.appendLog("当前没有可删除的自定义比例")
 		return
 	}
-	state, _, err := gioCompat.LoadState()
+	var next []sharedCompat.CustomAspectRatio
+	removed := false
+	err := gioCompat.UpdateState(func(state *sharedCompat.State) error {
+		*state = sharedCompat.Normalize(*state)
+		next = make([]sharedCompat.CustomAspectRatio, 0, len(state.Settings.CustomAspectRatios))
+		for _, ratio := range state.Settings.CustomAspectRatios {
+			if strings.TrimSpace(ratio.ID) == targetID {
+				removed = true
+				continue
+			}
+			next = append(next, ratio)
+		}
+		if removed {
+			state.Settings.CustomAspectRatios = next
+			state.UpdatedAt = time.Now().UnixMilli()
+		}
+		return nil
+	})
 	if err != nil {
 		a.appendLog("删除自定义比例失败: " + err.Error())
 		return
 	}
-	state = sharedCompat.Normalize(state)
-	next := make([]sharedCompat.CustomAspectRatio, 0, len(state.Settings.CustomAspectRatios))
-	removed := false
-	for _, ratio := range state.Settings.CustomAspectRatios {
-		if strings.TrimSpace(ratio.ID) == targetID {
-			removed = true
-			continue
-		}
-		next = append(next, ratio)
-	}
 	if !removed {
 		a.appendLog("当前自定义比例不存在")
-		return
-	}
-	state.Settings.CustomAspectRatios = next
-	state.UpdatedAt = time.Now().UnixMilli()
-	if err := gioCompat.SaveState(state); err != nil {
-		a.appendLog("删除自定义比例失败: " + err.Error())
 		return
 	}
 	a.mu.Lock()

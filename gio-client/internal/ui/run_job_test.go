@@ -29,6 +29,41 @@ func TestRequestedRunConcurrencyUsesLoopSetting(t *testing.T) {
 	}
 }
 
+func TestBuildRunExecutionPlanKeepsModeSpecificTotalsAndConcurrency(t *testing.T) {
+	total, concurrency := buildRunExecutionPlan(17, true, 3, false, 0)
+	if total != 17 || concurrency != 3 {
+		t.Fatalf("batch plan=(%d,%d) want (17,3)", total, concurrency)
+	}
+
+	total, concurrency = buildRunExecutionPlan(42, false, 0, true, 4)
+	if total != 42 || concurrency != 4 {
+		t.Fatalf("loop plan=(%d,%d) want (42,4)", total, concurrency)
+	}
+
+	total, concurrency = buildRunExecutionPlan(17, false, 0, false, 0)
+	if total != 9 || concurrency != 9 {
+		t.Fatalf("regular plan=(%d,%d) want (9,9)", total, concurrency)
+	}
+}
+
+func TestRunPreviewSlotPoolOnlyReusesReleasedSlots(t *testing.T) {
+	slots := newRunPreviewSlotPool(2)
+	first := <-slots
+	second := <-slots
+	if first != 0 || second != 1 {
+		t.Fatalf("initial slots=(%d,%d) want (0,1)", first, second)
+	}
+	select {
+	case slot := <-slots:
+		t.Fatalf("received occupied slot %d", slot)
+	default:
+	}
+	slots <- second
+	if got := <-slots; got != second {
+		t.Fatalf("reused slot=%d want %d", got, second)
+	}
+}
+
 func TestRunConcurrencyLimitErrorMatchesMode(t *testing.T) {
 	if got := runConcurrencyLimitError(client.APIModeResponses, 2, 4, false, false); got != "Responses API 并发限制 2,当前还可提交 2 个,本次需要 4 个。" {
 		t.Fatalf("regular error=%q", got)

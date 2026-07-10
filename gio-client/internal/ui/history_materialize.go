@@ -41,9 +41,8 @@ func mergeMaterializedHistoryItem(dst *sharedCompat.HistoryItem, src sharedCompa
 func (a *App) persistMaterializedHistoryItem(next sharedCompat.HistoryItem) {
 	nextID := strings.TrimSpace(next.ID)
 	if nextID != "" {
-		state, _, err := gioCompat.LoadState()
-		if err == nil {
-			state = sharedCompat.Normalize(state)
+		err := gioCompat.UpdateState(func(state *sharedCompat.State) error {
+			*state = sharedCompat.Normalize(*state)
 			changed := false
 			for idx := range state.History {
 				if strings.TrimSpace(state.History[idx].ID) != nextID {
@@ -53,10 +52,11 @@ func (a *App) persistMaterializedHistoryItem(next sharedCompat.HistoryItem) {
 			}
 			if changed {
 				state.UpdatedAt = 0
-				if err := gioCompat.SaveState(state); err != nil {
-					a.appendLog("保存落盘历史失败: " + err.Error())
-				}
 			}
+			return nil
+		})
+		if err != nil {
+			a.appendLog("保存落盘历史失败: " + err.Error())
 		}
 	}
 

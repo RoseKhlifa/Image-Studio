@@ -155,6 +155,7 @@ type workspaceState struct {
 	BatchInputDir            string
 	BatchOutputDir           string
 	BatchOutputMode          string
+	BatchOutputPrefix        string
 	BatchConcurrency         int
 	BatchRetryOnFail         bool
 	BatchAutoAspect          string
@@ -219,6 +220,7 @@ type App struct {
 	loopAutoSaveDirInput           widget.Editor
 	batchInputDirInput             widget.Editor
 	batchOutputDirInput            widget.Editor
+	batchOutputPrefixInput         widget.Editor
 	batchConcurrencyInput          widget.Editor
 	upstreamQuickImportInput       widget.Editor
 	rawResponseViewerInput         widget.Editor
@@ -263,6 +265,7 @@ type App struct {
 	batchAutoAspect          string
 	editAutoAspectResolution string
 	themeMode                string
+	resolvedThemeMode        string
 	fontScale                float64
 	reducedEffects           bool
 	imagesNewAPICompat       bool
@@ -787,8 +790,9 @@ func New() *App {
 		cfg = gioCompat.ConfigFromState(cfg, compatState)
 	}
 	themeMode := normalizeThemeMode(compatState.Settings.Theme)
+	resolvedThemeMode := resolveThemeMode(themeMode)
 	fontScale := normalizeFontScale(compatState.Settings.FontScale)
-	fluent = themePalette(resolveThemeMode(themeMode))
+	fluent = themePalette(resolvedThemeMode)
 	th := material.NewTheme()
 	collection := bundledFontCollection()
 	if len(collection) > 0 {
@@ -839,6 +843,7 @@ func New() *App {
 		batchAutoAspect:                         "",
 		editAutoAspectResolution:                "",
 		themeMode:                               themeMode,
+		resolvedThemeMode:                       resolvedThemeMode,
 		fontScale:                               fontScale,
 		reducedEffects:                          compatState.Settings.ReducedEffects,
 		imagesNewAPICompat:                      cfg.ImagesNewAPICompat,
@@ -1002,6 +1007,7 @@ func New() *App {
 	a.historyTimelinePickedDateInput.SingleLine = true
 	a.batchConcurrencyInput.SingleLine = true
 	a.batchConcurrencyInput.SetText(strconv.Itoa(normalizeBatchProcessConcurrency(a.batchConcurrency)))
+	a.batchOutputPrefixInput.SetText(defaultBatchOutputPrefix)
 	a.runStartupHistoryThumbPrewarm()
 	a.startHistoryPreviewWarmup()
 	if latest, ok := newestHistoryItem(a.history); ok {
@@ -1044,6 +1050,7 @@ func (a *App) configureEditors(cfg kernel.Config) {
 		&a.loopAutoSaveDirInput,
 		&a.batchInputDirInput,
 		&a.batchOutputDirInput,
+		&a.batchOutputPrefixInput,
 		&a.batchConcurrencyInput,
 		&a.historyQueryInput,
 		&a.historyTimelineQueryInput,
@@ -1129,8 +1136,12 @@ func (a *App) Run(w *app.Window) error {
 			a.handlePlatformViewEvent(e)
 		case app.ConfigEvent:
 			a.mu.Lock()
+			wasFocused := a.windowFocused
 			a.windowFocused = e.Config.Focused
 			a.mu.Unlock()
+			if e.Config.Focused && !wasFocused {
+				a.refreshSystemTheme()
+			}
 		case app.DestroyEvent:
 			a.saveCurrentConfig()
 			a.cancelRun()

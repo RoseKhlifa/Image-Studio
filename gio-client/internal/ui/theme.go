@@ -132,7 +132,20 @@ func resolveThemeMode(mode string) string {
 	case "light":
 		return "light"
 	}
-	return systemThemeResolver()
+	if systemThemeResolver() == "dark" {
+		return "dark"
+	}
+	return "light"
+}
+
+func (a *App) isDarkTheme() bool {
+	if a == nil {
+		return false
+	}
+	if a.resolvedThemeMode != "" {
+		return a.resolvedThemeMode == "dark"
+	}
+	return normalizeThemeMode(a.themeMode) == "dark"
 }
 
 func normalizeFontScale(scale float64) float64 {
@@ -164,14 +177,37 @@ func (a *App) applyFontScale(scale float64) {
 
 func (a *App) applyThemeMode(mode string) {
 	a.themeMode = normalizeThemeMode(mode)
-	fluent = themePalette(resolveThemeMode(a.themeMode))
+	a.installResolvedTheme(resolveThemeMode(a.themeMode))
+	a.invalidateNow()
+}
+
+func (a *App) refreshSystemTheme() {
+	if a == nil || normalizeThemeMode(a.themeMode) != "system" {
+		return
+	}
+	resolved := resolveThemeMode("system")
+	if resolved == a.resolvedThemeMode {
+		return
+	}
+	a.installResolvedTheme(resolved)
+	a.invalidateNow()
+}
+
+func (a *App) installResolvedTheme(mode string) {
+	if mode != "dark" {
+		mode = "light"
+	}
+	a.resolvedThemeMode = mode
+	fluent = themePalette(mode)
+	if a.th == nil {
+		return
+	}
 	a.th.Palette = material.Palette{
 		Bg:         fluent.bg,
 		Fg:         fluent.text,
 		ContrastBg: fluent.accent,
 		ContrastFg: fluent.white,
 	}
-	a.invalidateNow()
 }
 
 func rgb(v uint32) color.NRGBA {

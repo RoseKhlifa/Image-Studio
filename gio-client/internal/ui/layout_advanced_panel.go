@@ -60,23 +60,21 @@ func (a *App) advancedPanelGroupPrefs() map[string]bool {
 }
 
 func (a *App) persistAdvancedPanelPrefs() error {
-	state, _, err := gioCompat.LoadState()
-	if err != nil {
-		return err
-	}
-	state = sharedCompat.Normalize(state)
 	a.mu.Lock()
 	x := a.advancedPanelPos.X
 	y := a.advancedPanelPos.Y
 	groups := a.advancedPanelGroupPrefs()
 	a.mu.Unlock()
-	state.Settings.AdvancedFloatingPanel = &sharedCompat.AdvancedFloatingPanelPrefs{
-		X:      &x,
-		Y:      &y,
-		Groups: groups,
-	}
-	state.UpdatedAt = time.Now().UnixMilli()
-	return gioCompat.SaveState(state)
+	return gioCompat.UpdateState(func(state *sharedCompat.State) error {
+		*state = sharedCompat.Normalize(*state)
+		state.Settings.AdvancedFloatingPanel = &sharedCompat.AdvancedFloatingPanelPrefs{
+			X:      &x,
+			Y:      &y,
+			Groups: groups,
+		}
+		state.UpdatedAt = time.Now().UnixMilli()
+		return nil
+	})
 }
 
 func (a *App) advancedPanelWidth(gtx layout.Context) int {

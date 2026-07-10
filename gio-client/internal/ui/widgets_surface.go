@@ -900,7 +900,7 @@ func (a *App) metaBadge(gtx layout.Context, text string, compact bool) layout.Di
 	}
 	bg := rgba(0x000000, 0x06)
 	border := rgba(0x000000, 0x0d)
-	if resolveThemeMode(a.themeMode) == "dark" {
+	if a.isDarkTheme() {
 		bg = rgba(0xffffff, 0x0d)
 		border = rgba(0xffffff, 0x0d)
 	}
@@ -1083,7 +1083,7 @@ func (a *App) card(gtx layout.Context, w layout.Widget) layout.Dimensions {
 
 func (a *App) controlCard(gtx layout.Context, w layout.Widget) layout.Dimensions {
 	bg := withAlpha(fluent.white, 0xb3)
-	if resolveThemeMode(a.themeMode) == "dark" {
+	if a.isDarkTheme() {
 		bg = fluent.surfaceElevated
 	}
 	return a.elevatedBorderedSurface(gtx, bg, unit.Dp(12), fluent.border, image.Pt(0, 1), func(gtx layout.Context) layout.Dimensions {

@@ -98,7 +98,9 @@ func parseConcurrencyLimit(raw string) int {
 }
 
 func requestedRunConcurrency(total int, batchMode bool, batchConcurrency int, loopEnabled bool, loopConcurrency int) int {
-	total = normalizeBatchCount(total)
+	if total < 1 {
+		total = 1
+	}
 	if batchMode {
 		concurrency := normalizeBatchProcessConcurrency(batchConcurrency)
 		if concurrency > total {
@@ -123,6 +125,34 @@ func requestedRunConcurrency(total int, batchMode bool, batchConcurrency int, lo
 		return 1
 	}
 	return total
+}
+
+func normalizeRunTotal(total int, batchMode bool, loopEnabled bool) int {
+	if batchMode {
+		if total < 1 {
+			return 1
+		}
+		return total
+	}
+	if loopEnabled {
+		return normalizeLoopGenerationCount(total)
+	}
+	return normalizeBatchCount(total)
+}
+
+func buildRunExecutionPlan(total int, batchMode bool, batchConcurrency int, loopEnabled bool, loopConcurrency int) (int, int) {
+	total = normalizeRunTotal(total, batchMode, loopEnabled)
+	concurrency := requestedRunConcurrency(total, batchMode, batchConcurrency, loopEnabled, loopConcurrency)
+	return total, concurrency
+}
+
+func newRunPreviewSlotPool(concurrency int) chan int {
+	concurrency = max(1, concurrency)
+	slots := make(chan int, concurrency)
+	for slotIndex := 0; slotIndex < concurrency; slotIndex++ {
+		slots <- slotIndex
+	}
+	return slots
 }
 
 func validateKernelRuntimeForRun(kernelRuntimeMode string, cfg kernel.Config) string {
@@ -169,17 +199,24 @@ func (a *App) startRunWithConfig(cfg kernel.Config, total int) {
 	if a.isRunning() {
 		return
 	}
-	total = normalizeBatchCount(total)
-	runConcurrency := total
-	if a.loopEnabled {
-		runConcurrency = normalizeLoopGenerationConcurrency(a.loopConcurrency)
-		if runConcurrency > total {
-			runConcurrency = total
-		}
+	batchMode := a.batchMode
+	loopEnabled := a.loopEnabled
+	total, runConcurrency := buildRunExecutionPlan(total, batchMode, a.batchConcurrency, loopEnabled, a.loopConcurrency)
+	batchSources := []string(nil)
+	if batchMode {
+		batchSources = a.batchSourcePaths()
 	}
-	if runConcurrency < 1 {
-		runConcurrency = 1
-	}
+	batchOutputDir := a.effectiveBatchOutputDir()
+	batchOutputPrefix := a.effectiveBatchOutputPrefix()
+	batchRetryOnFail := a.batchRetryOnFail
+	batchAutoAspect := strings.TrimSpace(a.batchAutoAspect)
+	batchAPI := a.api
+	batchPolicy := a.policy
+	batchImageModelID := a.imageModelInput.Text()
+	batchCustomAspectRatios := append([]sharedCompat.CustomAspectRatio(nil), a.customAspectRatios...)
+	loopAutoSave := a.loopAutoSave
+	loopAutoSaveDir := strings.TrimSpace(a.loopAutoSaveDirInput.Text())
+	kernelRuntimeMode := a.kernelRuntimeMode
 	a.rememberPrompt(cfg.Prompt)
 	if err := gioCompat.SaveConfig(cfg); err != nil {
 		a.appendLog("兼容配置保存失败: " + err.Error())
@@ -207,7 +244,6 @@ func (a *App) startRunWithConfig(cfg kernel.Config, total int) {
 
 	go func() {
 		batchStarted := time.Now()
-		batchSources := a.batchSourcePaths()
 		var once sync.Once
 		var firstErr atomic.Pointer[error]
 		var jobsDone atomic.Int32
@@ -219,38 +255,42 @@ func (a *App) startRunWithConfig(cfg kernel.Config, total int) {
 		if streamPreviewDisableReason == streamPreviewDisableReasonDesktopConcurrency {
 			a.appendLog(fmt.Sprintf("高并发(%d)已自动关闭流式预览，优先保证最终图完整。", concurrency))
 		}
-		jobSem := make(chan struct{}, concurrency)
+		previewSlots := newRunPreviewSlotPool(concurrency)
 		var wg sync.WaitGroup
-		nextPreviewSlotIndex := 0
 		cancelAll := func() {
 			once.Do(func() {
 				cancel()
 			})
 		}
+	jobLoop:
 		for i := 0; i < total; i++ {
 			if ctx.Err() != nil {
 				break
 			}
-			jobSem <- struct{}{}
+			previewSlotIndex := 0
+			select {
+			case previewSlotIndex = <-previewSlots:
+			case <-ctx.Done():
+				break jobLoop
+			}
 			wg.Add(1)
-			go func(i int) {
+			go func(i int, previewSlotIndex int) {
 				defer wg.Done()
-				defer func() { <-jobSem }()
+				defer func() { previewSlots <- previewSlotIndex }()
 				if err := ctx.Err(); err != nil {
 					return
 				}
 				jobCfg := cfg
 				jobCfg.BatchIndex = i
-				jobCfg.PreviewSlotIndex = nextPreviewSlotIndex
-				nextPreviewSlotIndex = (nextPreviewSlotIndex + 1) % max(1, concurrency)
+				jobCfg.PreviewSlotIndex = previewSlotIndex
 				jobCfg.Prompt = augmentPromptWithStyle(cfg.Prompt, cfg.StyleTag)
 				jobCfg.PartialImages = effectivePartialImages
-				if a.batchMode && i < len(batchSources) {
+				if batchMode && i < len(batchSources) {
 					jobCfg.SourcePaths = []string{batchSources[i]}
-					jobCfg.AutoRetryEnabled = a.batchRetryOnFail
-					if strings.TrimSpace(a.batchAutoAspect) != "" {
+					jobCfg.AutoRetryEnabled = batchRetryOnFail
+					if batchAutoAspect != "" {
 						if width, height, err := imageDimensionsFromFile(batchSources[i]); err == nil && width > 0 && height > 0 {
-							jobCfg.Size = buildReferenceResolutionSizeSelection(width, height, a.batchAutoAspect, a.api, a.policy, a.imageModelInput.Text(), a.customAspectRatios)
+							jobCfg.Size = buildReferenceResolutionSizeSelection(width, height, batchAutoAspect, batchAPI, batchPolicy, batchImageModelID, batchCustomAspectRatios)
 						}
 					}
 				}
@@ -277,7 +317,7 @@ func (a *App) startRunWithConfig(cfg kernel.Config, total int) {
 						a.applyPartialPreview(i, jobCfg.PreviewSlotIndex, partial)
 					},
 				})
-				previewOnlyRemote := normalizeKernelRuntimeMode(a.kernelRuntimeMode) == "remote"
+				previewOnlyRemote := normalizeKernelRuntimeMode(kernelRuntimeMode) == "remote"
 				if previewOnlyRemote && strings.TrimSpace(res.SavedPath) == "" && strings.TrimSpace(res.ImageB64) != "" {
 					res.SavedPath = registerVirtualImage(res.ImageB64, suggestedSaveNameForHistoryItem(sharedCompat.HistoryItem{
 						Prompt:       jobCfg.Prompt,
@@ -293,7 +333,7 @@ func (a *App) startRunWithConfig(cfg kernel.Config, total int) {
 					if errors.Is(err, context.Canceled) {
 						return
 					}
-					if a.batchMode {
+					if batchMode {
 						a.appendLog(fmt.Sprintf("[%s] 失败并跳过: %v", jobLabel, err))
 						completed := int(jobsDone.Add(1))
 						a.mu.Lock()
@@ -399,33 +439,32 @@ func (a *App) startRunWithConfig(cfg kernel.Config, total int) {
 						a.savePromptPathInput.SetText(res.SavedPath)
 					}
 				}
-				if !a.savePromptSuppressed && completed == total && total > 1 && !a.batchMode && !a.loopEnabled {
+				if !a.savePromptSuppressed && completed == total && total > 1 && !batchMode && !loopEnabled {
 					batchSaveItems = historyItemsByIDs(compatState.History, nextBatchResultIDs)
 					openBatchSavePromptAfterUnlock = len(batchSaveItems) > 0
 				}
 				a.appendLogLocked(fmt.Sprintf("生成完成 %s: %s", jobLabel, res.SavedPath))
-				if a.batchMode && i < len(batchSources) {
+				if batchMode && i < len(batchSources) {
 					saved := ""
 					var saveErr error
-					batchOutputDir := a.effectiveBatchOutputDir()
 					if previewOnlyRemote {
-						targetPath := batchResultTargetPath(batchSources[i], batchOutputDir)
+						targetPath := batchResultTargetPath(batchSources[i], batchOutputDir, batchOutputPrefix)
 						if targetPath != "" {
 							saved, saveErr = saveImageB64ToPath(res.ImageB64, filepath.Base(targetPath), targetPath)
 						}
 					} else {
-						saved, saveErr = a.copyBatchResultIfNeeded(res.SavedPath, batchSources[i])
+						saved, saveErr = a.copyBatchResultIfNeeded(res.SavedPath, batchSources[i], batchOutputDir, batchOutputPrefix)
 					}
 					if saveErr == nil && strings.TrimSpace(saved) != "" {
 						a.appendLogLocked(fmt.Sprintf("批处理已落盘 %s -> %s", filepath.Base(batchSources[i]), filepath.Base(saved)))
 					}
-				} else if a.loopEnabled && a.loopAutoSave && strings.TrimSpace(a.loopAutoSaveDirInput.Text()) != "" {
+				} else if loopEnabled && loopAutoSave && loopAutoSaveDir != "" {
 					saved := ""
 					var saveErr error
 					if previewOnlyRemote {
-						saved, saveErr = saveImageB64ToPath(res.ImageB64, suggestedSaveNameForHistoryItem(displayItem), a.loopAutoSaveDirInput.Text())
+						saved, saveErr = saveImageB64ToPath(res.ImageB64, suggestedSaveNameForHistoryItem(displayItem), loopAutoSaveDir)
 					} else {
-						saved, saveErr = copyImageFile(res.SavedPath, a.loopAutoSaveDirInput.Text())
+						saved, saveErr = copyImageFile(res.SavedPath, loopAutoSaveDir)
 					}
 					if saveErr == nil && strings.TrimSpace(saved) != "" {
 						a.appendLogLocked(fmt.Sprintf("循环结果已自动另存为 -> %s", filepath.Base(saved)))
@@ -451,7 +490,7 @@ func (a *App) startRunWithConfig(cfg kernel.Config, total int) {
 				}
 				a.invalidateNow()
 				a.startAsyncCurrentResultImageLoad(resultSavedPath, displayItem, res.SourceEvent, rev)
-			}(i)
+			}(i, previewSlotIndex)
 		}
 		wg.Wait()
 		if ctx.Err() != nil && firstErr.Load() == nil {
@@ -711,7 +750,7 @@ func (a *App) batchSourcePathsForRun() ([]string, error) {
 	return out, nil
 }
 
-func batchResultTargetPath(sourcePath string, batchOutputDir string) string {
+func batchResultTargetPath(sourcePath string, batchOutputDir string, batchOutputPrefix string) string {
 	sourcePath = strings.TrimSpace(sourcePath)
 	if sourcePath == "" {
 		return ""
@@ -724,13 +763,13 @@ func batchResultTargetPath(sourcePath string, batchOutputDir string) string {
 		return ""
 	}
 	base := filepath.Base(sourcePath)
-	targetName := "processed-" + base
+	targetName := normalizeBatchOutputPrefix(batchOutputPrefix) + base
 	dst := filepath.Join(targetDir, targetName)
 	if _, err := os.Stat(dst); err == nil {
-		ext := filepath.Ext(base)
-		stem := strings.TrimSuffix(base, ext)
+		ext := filepath.Ext(targetName)
+		stem := strings.TrimSuffix(targetName, ext)
 		for idx := 2; ; idx++ {
-			candidate := filepath.Join(targetDir, fmt.Sprintf("processed-%s-%d%s", stem, idx, ext))
+			candidate := filepath.Join(targetDir, fmt.Sprintf("%s-%d%s", stem, idx, ext))
 			if _, err := os.Stat(candidate); os.IsNotExist(err) {
 				dst = candidate
 				break
@@ -740,13 +779,13 @@ func batchResultTargetPath(sourcePath string, batchOutputDir string) string {
 	return dst
 }
 
-func (a *App) copyBatchResultIfNeeded(savedPath string, sourcePath string) (string, error) {
+func (a *App) copyBatchResultIfNeeded(savedPath string, sourcePath string, batchOutputDir string, batchOutputPrefix string) (string, error) {
 	savedPath = strings.TrimSpace(savedPath)
 	sourcePath = strings.TrimSpace(sourcePath)
 	if savedPath == "" || sourcePath == "" {
 		return "", nil
 	}
-	dst := batchResultTargetPath(sourcePath, a.effectiveBatchOutputDir())
+	dst := batchResultTargetPath(sourcePath, batchOutputDir, batchOutputPrefix)
 	if dst == "" {
 		return "", nil
 	}
