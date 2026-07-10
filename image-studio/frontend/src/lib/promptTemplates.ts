@@ -3,6 +3,15 @@ import type { PromptTemplate } from "../types/domain";
 export const PROMPT_TEMPLATES_LS_KEY = "gptcodex.promptTemplates";
 export const NEW_PROMPT_TEMPLATE_ID = "__new_prompt_template__";
 
+export type PromptHistoryEntry = {
+  position: number;
+  text: string;
+};
+
+export function buildPromptHistoryEntries(history: readonly string[]): PromptHistoryEntry[] {
+  return history.map((text, index) => ({ position: index + 1, text }));
+}
+
 export type PromptTemplateManagerSelection =
   | {
     mode: "new";

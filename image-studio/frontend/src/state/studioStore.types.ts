@@ -197,6 +197,7 @@ export interface StudioState {
   applyHistoryParams: (item: HistoryItem) => void;
   regenerateFromHistory: (item: HistoryItem) => Promise<void>;
   deleteHistoryItem: (id: string) => Promise<void>;
+  clearHistory: () => Promise<number>;
   saveCurrentImageAs: () => Promise<void>;
   bootstrap: () => Promise<void>;
   importMaskImage: () => Promise<void>;

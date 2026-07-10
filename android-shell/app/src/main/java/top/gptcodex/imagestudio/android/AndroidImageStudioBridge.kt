@@ -23,6 +23,7 @@ import org.json.JSONObject
 import org.json.JSONArray
 import android.provider.OpenableColumns
 import java.io.File
+import java.io.ByteArrayOutputStream
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.InputStream
@@ -49,6 +50,27 @@ import okhttp3.Request
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okhttp3.Response
+
+internal fun readLimitedBytes(input: InputStream, maxBytes: Int): ByteArray {
+    require(maxBytes > 0) { "maxBytes must be positive" }
+    val output = ByteArrayOutputStream(minOf(maxBytes, 64 * 1024))
+    val buffer = ByteArray(16 * 1024)
+    var total = 0
+    while (true) {
+        val read = input.read(buffer)
+        if (read < 0) break
+        total += read
+        if (total > maxBytes) throw IllegalStateException("上游 URL 图片过大(>${maxBytes}B 上限)")
+        output.write(buffer, 0, read)
+    }
+    return output.toByteArray()
+}
+
+internal fun boundedBinaryResponseLimit(requestedBytes: Long, hardMaxBytes: Long): Int {
+    require(hardMaxBytes in 1..Int.MAX_VALUE.toLong()) { "hardMaxBytes is out of range" }
+    val requested = if (requestedBytes > 0) requestedBytes else hardMaxBytes
+    return minOf(requested, hardMaxBytes).toInt()
+}
 
 class AndroidImageStudioBridge(
     private val context: Context,
@@ -77,7 +99,7 @@ class AndroidImageStudioBridge(
         try {
             val args = JSONArray(payloadJson)
             when (method) {
-                "OpenImageDialog" -> {
+                "OpenImageDialog", "OpenMaskImageDialog" -> {
                     if (pendingOpenImageRequestId != null) {
                         throw IllegalStateException("图片选择已在进行中")
                     }
@@ -451,6 +473,9 @@ class AndroidImageStudioBridge(
         val proxyMode = payload.optString("proxyMode", "system")
         val proxyUrl = payload.optString("proxyURL", "")
         val keepAlive = payload.optBoolean("keepAlive", false)
+        val responseBase64 = payload.optBoolean("responseBase64", false)
+        val requestedMaxResponseBytes = payload.optLong("maxResponseBytes", 0L)
+        val maxResponseBytes = boundedBinaryResponseLimit(requestedMaxResponseBytes, maxDialogReadBytes)
         if (keepAlive) {
             ensureBackgroundTaskNotificationPermission()
             GenerationForegroundService.acquire(context, requestKey)
@@ -487,7 +512,16 @@ class AndroidImageStudioBridge(
                 val status = connection.responseCode
                 val stream = if (status >= 400) connection.errorStream else connection.inputStream
                 var streamResult: NativeHttpStreamResultSnapshot? = null
-                val body = if (streamLines) {
+                var binaryResponseB64 = ""
+                val body = if (responseBase64 && status in 200..299) {
+                    val contentLength = connection.contentLengthLong
+                    if (contentLength > maxResponseBytes) {
+                        throw IllegalStateException("上游 URL 图片过大(${contentLength}B > ${maxResponseBytes}B 上限)")
+                    }
+                    val bytes = stream?.use { readLimitedBytes(it, maxResponseBytes) } ?: ByteArray(0)
+                    binaryResponseB64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+                    ""
+                } else if (streamLines) {
                     val bodyBuilder = StringBuilder()
                     stream?.bufferedReader()?.useLines { sequence ->
                         sequence.forEach { line ->
@@ -510,9 +544,9 @@ class AndroidImageStudioBridge(
                     "body" to if (streamResult != null) "" else body,
                     "contentType" to (connection.contentType ?: ""),
                     "rawPath" to rawPath,
-                    "resultImageB64" to (streamResult?.imageB64 ?: ""),
+                    "resultImageB64" to binaryResponseB64.ifBlank { streamResult?.imageB64 ?: "" },
                     "revisedPrompt" to (streamResult?.revisedPrompt ?: ""),
-                    "sourceEvent" to (streamResult?.sourceEvent ?: ""),
+                    "sourceEvent" to if (binaryResponseB64.isNotBlank()) "url_download" else (streamResult?.sourceEvent ?: ""),
                 )
                 resolve(requestId, result)
             } catch (error: Exception) {

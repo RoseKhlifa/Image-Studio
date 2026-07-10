@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"mime"
@@ -137,6 +138,67 @@ func TestRequestImagesAPIGeminiModelUsesNonStreamingCompatEndpoint(t *testing.T)
 	}
 	if res.ImageB64 != finalB64 {
 		t.Fatalf("ImageB64 = %q", res.ImageB64)
+	}
+}
+
+func TestBuildGoogleInteractionPayloadMatchesOfficialNanoBanana2Fixture(t *testing.T) {
+	raw, err := buildGoogleInteractionPayload(Options{
+		Prompt:       "draw a cat",
+		ImageModelID: "gemini-3.1-flash-image",
+	}, nil, "gemini-3.1-flash-image", "2048x1152", "png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["model"] != "gemini-3.1-flash-image" || payload["input"] != "draw a cat" {
+		t.Fatalf("unexpected interaction payload: %s", raw)
+	}
+	if payload["store"] != false {
+		t.Fatalf("store = %v, want false", payload["store"])
+	}
+	format, ok := payload["response_format"].(map[string]any)
+	if !ok {
+		t.Fatalf("response_format = %T", payload["response_format"])
+	}
+	if format["type"] != "image" || format["delivery"] != "inline" || format["mime_type"] != "image/png" {
+		t.Fatalf("response_format = %#v", format)
+	}
+	if format["aspect_ratio"] != "16:9" || format["image_size"] != "2K" {
+		t.Fatalf("response_format size fields = %#v", format)
+	}
+}
+
+func TestExtractGoogleInteractionImageFromModelOutputStepFixture(t *testing.T) {
+	imageBytes := []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00}
+	wantB64 := base64.StdEncoding.EncodeToString(imageBytes)
+	raw := []byte(fmt.Sprintf(`{
+		"object":"interaction",
+		"status":"completed",
+		"steps":[{"type":"model_output","content":[{"type":"image","data":%q,"mime_type":"image/png"}]}]
+	}`, wantB64))
+	image, err := extractGoogleInteractionImage(raw, http.StatusOK)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := imageResultFromGoogleInteraction(image)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ImageB64 != wantB64 || result.SourceEvent != "google_interactions" {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestBuildGoogleInteractionPayloadRejectsMaskInsteadOfSilentlyIgnoringIt(t *testing.T) {
+	_, err := buildGoogleInteractionPayload(Options{
+		Prompt:  "edit cat",
+		MaskB64: "bWFzaw==",
+	}, nil, "gemini-3.1-flash-image", "1024x1024", "png")
+	if err == nil || !strings.Contains(err.Error(), "不支持 OpenAI mask") {
+		t.Fatalf("err = %v", err)
 	}
 }
 

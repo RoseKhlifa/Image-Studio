@@ -1,6 +1,6 @@
 import {
   ChevronDown, ChevronRight, Clock3, CopyPlus, Filter, Image as ImageIcon, Loader2,
-  Search, Settings2, Split,
+  Search, Settings2, Split, Trash2,
 } from "lucide-react";
 import type { APIMode, HistoryItem } from "../../types/domain";
 import { ContextMenu } from "../common/ContextMenu";
@@ -29,6 +29,7 @@ export function WindowsHistoryRail({
   entries,
   history,
   historyHasMore,
+  historyClearing,
   historyLoading,
   historyFiltersActive,
   historyRailCollapsed,
@@ -50,6 +51,7 @@ export function WindowsHistoryRail({
   setModeF,
   setQ,
   testAPIKey,
+  onClearAllHistory,
   onOpenPromptGroup,
 }: {
   activeProfileId: string;
@@ -69,6 +71,7 @@ export function WindowsHistoryRail({
   entries: HistoryPromptEntry[];
   history: HistoryItem[];
   historyHasMore: boolean;
+  historyClearing: boolean;
   historyLoading: boolean;
   historyFiltersActive: boolean;
   historyRailCollapsed: boolean;
@@ -90,6 +93,7 @@ export function WindowsHistoryRail({
   setModeF: (value: ModeFilter) => void;
   setQ: (value: string) => void;
   testAPIKey: () => void | Promise<void>;
+  onClearAllHistory: () => void;
   onOpenPromptGroup: (group: HistoryPromptGroup) => void;
 }) {
   const latest = filtered[0] ?? null;
@@ -160,14 +164,26 @@ export function WindowsHistoryRail({
               <div className="windows-history-title">历史</div>
               <div className="windows-history-count">{filtered.length}{filtered.length !== history.length ? ` / ${historyCountLabel}` : historyHasMore ? "+" : ""} 项</div>
             </div>
-            <button
-              type="button"
-              onClick={() => setHistoryRailCollapsed(!historyRailCollapsed)}
-              className="platform-pill windows-history-collapse"
-            >
-              {historyRailCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-              {historyRailCollapsed ? "展开" : "折叠"}
-            </button>
+            <div className="windows-history-card-actions">
+              <button
+                type="button"
+                onClick={onClearAllHistory}
+                className="platform-pill windows-history-clear"
+                disabled={historyClearing || (history.length === 0 && !historyHasMore)}
+                title="删除全部历史"
+              >
+                {historyClearing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                全部删除
+              </button>
+              <button
+                type="button"
+                onClick={() => setHistoryRailCollapsed(!historyRailCollapsed)}
+                className="platform-pill windows-history-collapse"
+              >
+                {historyRailCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                {historyRailCollapsed ? "展开" : "折叠"}
+              </button>
+            </div>
           </div>
 
           <div className="windows-history-stats">

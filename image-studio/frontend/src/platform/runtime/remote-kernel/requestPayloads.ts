@@ -12,6 +12,7 @@ import {
   normalizeModeration,
   normalizeReasoningEffort,
   normalizeUserIdentifier,
+  googleInteractionsEndpoint,
   openAIAPIEndpoint,
   shouldSendExtendedImageParameters,
   supportsImageBackground,
@@ -20,10 +21,54 @@ import {
   supportsImageModeration,
   supportsOutputCompression,
   shouldUseImagesNewAPICompat,
+  shouldUseGoogleNativeInteractions,
   supportsImagesResponseFormat,
 } from "../../../../../../shared/kernel/requestModel.js";
 import { normalizeBaseURL, normalizeImageModel } from "./common.ts";
 import { RemoteKernelError, type RemoteGeneratePayload, type RemoteJobRequest } from "./types.ts";
+
+export type ImagesRequestProtocol = "openai-images" | "google-interactions";
+
+const MAX_MASK_IMAGE_BYTES = 50 * 1024 * 1024;
+const GOOGLE_INTERACTION_ASPECT_RATIOS = [
+  "1:8", "1:4", "2:3", "3:4", "4:5", "1:1", "5:4", "4:3", "3:2", "16:9", "21:9", "4:1", "8:1",
+] as const;
+
+function googleInteractionResponseFormat(size: string, outputFormat: string): Record<string, string> {
+  const format: Record<string, string> = { type: "image", delivery: "inline" };
+  if (outputFormat === "jpeg") format.mime_type = "image/jpeg";
+  else if (outputFormat === "png" || !outputFormat) format.mime_type = "image/png";
+  else throw new RemoteKernelError("Google Interactions 当前只支持 PNG/JPEG 输出，请调整输出格式后重试");
+
+  const matched = /^(\d+)x(\d+)$/i.exec(size.trim());
+  if (!matched) return format;
+  const width = Number(matched[1]);
+  const height = Number(matched[2]);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return format;
+
+  const targetRatio = width / height;
+  format.aspect_ratio = GOOGLE_INTERACTION_ASPECT_RATIOS.reduce((best, candidate) => {
+    const [left, right] = candidate.split(":").map(Number);
+    const [bestLeft, bestRight] = best.split(":").map(Number);
+    return Math.abs(Math.log((left / right) / targetRatio)) < Math.abs(Math.log((bestLeft / bestRight) / targetRatio))
+      ? candidate
+      : best;
+  }, "1:1" as (typeof GOOGLE_INTERACTION_ASPECT_RATIOS)[number]);
+  const maxSide = Math.max(width, height);
+  format.image_size = maxSide <= 768 ? "512" : maxSide >= 3072 ? "4K" : maxSide >= 1536 ? "2K" : "1K";
+  return format;
+}
+
+function googleInteractionInput(prompt: string, sourceDataURLs: string[]): string | Array<Record<string, string>> {
+  if (sourceDataURLs.length === 0) return prompt;
+  const content: Array<Record<string, string>> = [{ type: "text", text: prompt }];
+  for (const dataURL of sourceDataURLs) {
+    const match = /^data:([^;,]+);base64,(.+)$/s.exec(dataURL);
+    if (!match) throw new RemoteKernelError("Google Interactions 参考图不是有效的 base64 data URL");
+    content.push({ type: "image", mime_type: match[1], data: match[2] });
+  }
+  return content;
+}
 
 export function buildResponsesPayload(
   payload: RemoteGeneratePayload,
@@ -41,7 +86,7 @@ export function buildResponsesPayload(
 export async function buildImagesRequestBody(
   request: RemoteJobRequest,
   sourceDataURLs: string[],
-): Promise<{ url: string; headers?: Record<string, string>; body: BodyInit }> {
+): Promise<{ url: string; headers?: Record<string, string>; body: BodyInit; protocol: ImagesRequestProtocol }> {
   const baseURL = normalizeBaseURL(request.payload.baseURL);
   const mode = request.payload.mode === "edit" ? "edit" : "generate";
   const imageModel = normalizeImageModel(request.payload.imageModelID);
@@ -58,6 +103,29 @@ export async function buildImagesRequestBody(
   const partialImages = request.payload.disablePreview ? 0 : normalizePartialImages(request.payload.partialImages);
   const useNewAPICompat = shouldUseImagesNewAPICompat(request.payload);
 
+  if (shouldUseGoogleNativeInteractions(baseURL, imageModel)) {
+    if (mode === "edit" && sourceDataURLs.length === 0) {
+      throw new RemoteKernelError("Google Interactions 图生图需要至少一张源图");
+    }
+    if (request.payload.maskB64) {
+      throw new RemoteKernelError("Google Interactions 不支持 OpenAI mask 参数；请清除蒙版，或改用支持 /v1/images/edits 的中转站");
+    }
+    return {
+      url: googleInteractionsEndpoint(baseURL),
+      protocol: "google-interactions",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": request.payload.apiKey,
+      },
+      body: JSON.stringify({
+        model: imageModel,
+        input: googleInteractionInput(request.payload.prompt, sourceDataURLs),
+        response_format: googleInteractionResponseFormat(size, outputFormat),
+        store: false,
+      }),
+    };
+  }
+
   if (mode === "edit") {
     if (sourceDataURLs.length === 0) {
       throw new RemoteKernelError("图生图模式需要至少一张源图(请先添加参考图)");
@@ -71,9 +139,14 @@ export async function buildImagesRequestBody(
       form.append(i === 0 ? "image" : "image[]", new Blob([Uint8Array.from(atob(payload), (ch) => ch.charCodeAt(0))], { type: mimeType }), `source-${i + 1}.${ext}`);
     }
     if (request.payload.maskB64) {
-      const maskMime = detectImageMimeTypeFromBase64(request.payload.maskB64) || "image/png";
+      const maskMime = detectImageMimeTypeFromBase64(request.payload.maskB64);
+      if (!maskMime) throw new RemoteKernelError("蒙版图片不是支持的 PNG/JPEG/WebP 格式");
+      const maskBytes = Uint8Array.from(atob(request.payload.maskB64), (ch) => ch.charCodeAt(0));
+      if (maskBytes.byteLength > MAX_MASK_IMAGE_BYTES) {
+        throw new RemoteKernelError(`蒙版图片过大(${maskBytes.byteLength}B > ${MAX_MASK_IMAGE_BYTES}B 上限)`);
+      }
       const ext = imageExtensionForMimeType(maskMime);
-      form.append("mask", new Blob([Uint8Array.from(atob(request.payload.maskB64), (ch) => ch.charCodeAt(0))], { type: maskMime }), `mask.${ext}`);
+      form.append("mask", new Blob([maskBytes], { type: maskMime }), `mask.${ext}`);
     }
     form.append("prompt", request.payload.prompt);
     form.append("model", imageModel);
@@ -105,7 +178,7 @@ export async function buildImagesRequestBody(
     }
     if (includeExtended && request.payload.seed) form.append("seed", String(request.payload.seed));
     if (includeExtended && request.payload.negativePrompt.trim()) form.append("negative_prompt", request.payload.negativePrompt.trim());
-    return { url: openAIAPIEndpoint(baseURL, "images/edits"), body: form };
+    return { url: openAIAPIEndpoint(baseURL, "images/edits"), body: form, protocol: "openai-images" };
   }
 
   const payload: Record<string, unknown> = {
@@ -142,6 +215,7 @@ export async function buildImagesRequestBody(
   if (includeExtended && request.payload.negativePrompt.trim()) payload.negative_prompt = request.payload.negativePrompt.trim();
   return {
     url: openAIAPIEndpoint(baseURL, "images/generations"),
+    protocol: "openai-images",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   };

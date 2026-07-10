@@ -8,6 +8,7 @@ import {
   buildResponsesPayload,
   describeProblem,
   extractInvalidSize,
+  googleInteractionsEndpoint,
   isRetryableRaw,
   normalizeAutoRetryCount,
   normalizeOpenAIImageSize,
@@ -15,6 +16,7 @@ import {
   repairSizeForOpenAI,
   normalizePartialImages,
   shouldUseImagesNewAPICompat,
+  shouldUseGoogleNativeInteractions,
 } from "../../../shared/kernel/requestModel.js";
 
 test("Responses payload defaults partial_images to streaming preview count", () => {
@@ -60,6 +62,31 @@ test("Gemini and Imagen image models use non-streaming Images compat mode", () =
   assert.equal(shouldUseImagesNewAPICompat({ imageModelID: "gemini-3.1-flash-image" }), true);
   assert.equal(shouldUseImagesNewAPICompat({ imageModelID: "imagen-4.0-generate-001" }), true);
   assert.equal(shouldUseImagesNewAPICompat({ imageModelID: "gpt-image-2" }), false);
+});
+
+test("Google native Interactions routing is narrow to the official Nano Banana 2 endpoint", () => {
+  assert.equal(
+    shouldUseGoogleNativeInteractions(
+      "https://generativelanguage.googleapis.com/v1beta/openai",
+      "gemini-3.1-flash-image",
+    ),
+    true,
+  );
+  assert.equal(
+    googleInteractionsEndpoint("https://generativelanguage.googleapis.com/v1beta/openai"),
+    "https://generativelanguage.googleapis.com/v1beta/interactions",
+  );
+  assert.equal(
+    shouldUseGoogleNativeInteractions("https://relay.example.com", "gemini-3.1-flash-image"),
+    false,
+  );
+  assert.equal(
+    shouldUseGoogleNativeInteractions(
+      "https://generativelanguage.googleapis.com/v1beta/openai",
+      "gemini-2.5-flash-image",
+    ),
+    false,
+  );
 });
 
 test("Responses payload uses configured reasoning effort", () => {

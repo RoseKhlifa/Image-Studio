@@ -5,6 +5,7 @@ import { BatchResultGrid } from "../canvas/BatchResultGrid";
 import { historyPreviewSrc, useBlobURL } from "../../lib/images";
 import {
   buildHistoryItemDragExport,
+  shouldUseNativeFileDrag,
   writeImageFileDragData,
   writeInternalHistoryItemDragData,
 } from "../../lib/dragExport.ts";
@@ -20,7 +21,7 @@ export function SavePromptModal() {
   const suppressed = useStudioStore((s) => s.savePromptSuppressed);
   const setSuppressed = useStudioStore((s) => s.setSavePromptSuppressed);
   const pushToast = useStudioStore((s) => s.pushToast);
-  const { usesFluentUI, isAndroidPhone, isAndroid, isMac } = usePlatform();
+  const { usesFluentUI, isAndroidPhone, isAndroid, targetPlatform } = usePlatform();
   const [saving, setSaving] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
@@ -95,7 +96,7 @@ export function SavePromptModal() {
         return;
       }
       event.stopPropagation();
-      if (isMac && singleItem.savedPath) {
+      if (shouldUseNativeFileDrag(targetPlatform, singleItem.savedPath)) {
         event.preventDefault();
         void BeginNativeFileDrag(singleItem.savedPath).catch((error) => {
           console.error("[drag-export] native-file-drag failed", error);

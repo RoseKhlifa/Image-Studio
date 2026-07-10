@@ -3,6 +3,7 @@ package ui
 import (
 	"bytes"
 	"encoding/base64"
+	"fmt"
 	"image"
 	"image/color"
 	"image/png"
@@ -14,6 +15,7 @@ import (
 	"gioui.org/layout"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
+	"github.com/yuanhua/image-gptcodex/pkg/client"
 )
 
 type canvasBrushMode string
@@ -142,6 +144,7 @@ func (a *App) canvasMaskState() ([]canvasMaskStroke, *canvasMaskStroke, bool, bo
 }
 
 func (a *App) resetCanvasMaskLocked() {
+	a.canvasImportedMaskB64 = ""
 	a.canvasMaskStrokes = nil
 	a.canvasMaskDraft = nil
 	a.canvasMaskUndo = nil
@@ -205,12 +208,15 @@ func (a *App) commitCanvasMaskStroke() {
 
 func (a *App) clearCanvasMask() {
 	a.mu.Lock()
-	if len(a.canvasMaskStrokes) == 0 {
+	if len(a.canvasMaskStrokes) == 0 && strings.TrimSpace(a.canvasImportedMaskB64) == "" {
 		a.canvasMaskDraft = nil
 		a.mu.Unlock()
 		return
 	}
-	a.pushCanvasMaskUndoLocked()
+	if len(a.canvasMaskStrokes) > 0 {
+		a.pushCanvasMaskUndoLocked()
+	}
+	a.canvasImportedMaskB64 = ""
 	a.canvasMaskStrokes = nil
 	a.canvasMaskDraft = nil
 	a.mu.Unlock()
@@ -453,10 +459,39 @@ func (a *App) currentMaskTargetDimensions() image.Point {
 func (a *App) currentCanvasMaskB64() string {
 	a.mu.Lock()
 	strokes := cloneCanvasMaskStrokes(a.canvasMaskStrokes)
+	imported := strings.TrimSpace(a.canvasImportedMaskB64)
 	a.mu.Unlock()
 	if len(strokes) == 0 {
-		return ""
+		return imported
 	}
 	dims := a.currentMaskTargetDimensions()
 	return buildCanvasMaskB64(strokes, dims)
+}
+
+func (a *App) importCanvasMask(path string) error {
+	dataURL, err := client.ImageFileToDataURL(path)
+	if err != nil {
+		return err
+	}
+	comma := strings.Index(dataURL, ",")
+	if comma < 0 || comma == len(dataURL)-1 {
+		return fmt.Errorf("蒙版图片 data URL 无效")
+	}
+	a.mu.Lock()
+	a.canvasImportedMaskB64 = dataURL[comma+1:]
+	a.canvasMaskStrokes = nil
+	a.canvasMaskDraft = nil
+	a.canvasMaskUndo = nil
+	a.canvasMaskRedo = nil
+	a.canvasMaskUndoAt = nil
+	a.canvasMaskRedoAt = nil
+	a.mu.Unlock()
+	a.invalidateNow()
+	return nil
+}
+
+func (a *App) hasImportedCanvasMask() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return strings.TrimSpace(a.canvasImportedMaskB64) != "" && len(a.canvasMaskStrokes) == 0
 }

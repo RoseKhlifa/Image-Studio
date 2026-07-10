@@ -1499,6 +1499,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   compareSourceOnCanvas: async (index) => imageActions.compareSourceOnCanvas(index),
   reuseAsSource: async (item) => imageActions.reuseAsSource(item),
   deleteHistoryItem: async (id) => imageActions.deleteHistoryItem(id),
+  clearHistory: async () => imageActions.clearHistory(),
   saveCurrentImageAs: async () => imageActions.saveCurrentImageAs(),
 
   bootstrap: async () => {

@@ -51,3 +51,25 @@ func TestOpenAIAPIEndpointKeepsVersionedOpenAICompatibilityBase(t *testing.T) {
 		t.Fatalf("relay endpoint = %q", got)
 	}
 }
+
+func TestGoogleInteractionsEndpointIsNarrowToOfficialNanoBanana2(t *testing.T) {
+	t.Parallel()
+
+	baseURL := "https://generativelanguage.googleapis.com/v1beta/openai"
+	if !shouldUseGoogleNativeInteractions(baseURL, "gemini-3.1-flash-image") {
+		t.Fatal("expected official Nano Banana 2 to use Google Interactions")
+	}
+	endpoint, err := googleInteractionsEndpoint(baseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if endpoint != "https://generativelanguage.googleapis.com/v1beta/interactions" {
+		t.Fatalf("endpoint = %q", endpoint)
+	}
+	if shouldUseGoogleNativeInteractions("https://relay.example.com", "gemini-3.1-flash-image") {
+		t.Fatal("third-party relay must stay on the OpenAI-compatible Images path")
+	}
+	if shouldUseGoogleNativeInteractions(baseURL, "gemini-2.5-flash-image") {
+		t.Fatal("non-Nano-Banana-2 model must stay on the documented OpenAI-compatible path")
+	}
+}

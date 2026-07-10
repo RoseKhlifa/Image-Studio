@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const realWindow = globalThis.window;
@@ -160,6 +161,34 @@ test("writeImageFileDragData writes the expected drag payload formats", async ()
     ["text/uri-list", "http://wails.localhost/media/full/abc123"],
     ["text/plain", "http://wails.localhost/media/full/abc123"],
   ]);
+});
+
+test("shouldUseNativeFileDrag routes persisted Windows and macOS files through the host", async () => {
+  const dragExport = await import(`../src/lib/dragExport.ts?native-file-drag-test=${Date.now()}-${Math.random().toString(36).slice(2)}`);
+
+  assert.equal(dragExport.shouldUseNativeFileDrag("windows", "C:\\Users\\me\\Pictures\\result.png"), true);
+  assert.equal(dragExport.shouldUseNativeFileDrag("macos", "/Users/me/Pictures/result.png"), true);
+  assert.equal(dragExport.shouldUseNativeFileDrag("linux", "/home/me/Pictures/result.png"), false);
+  assert.equal(dragExport.shouldUseNativeFileDrag("windows", "  "), false);
+});
+
+test("all persisted drag export surfaces use the shared native file drag route", async () => {
+  const surfaces = [
+    "../src/components/canvas/DragExportHandle.tsx",
+    "../src/components/common/SavePromptModal.tsx",
+    "../src/components/history/HistoryPromptGroupModal.tsx",
+    "../src/components/history/HistoryTile.tsx",
+    "../src/components/panel/ResultDetailDrawer.tsx",
+  ];
+
+  for (const surface of surfaces) {
+    const source = await readFile(new URL(surface, import.meta.url), "utf8");
+    assert.match(
+      source,
+      /shouldUseNativeFileDrag\(targetPlatform,\s*[A-Za-z]+\.savedPath\)/,
+      `${surface} must route persisted desktop files through the native drag helper`,
+    );
+  }
 });
 
 test("internal history drag payload round-trips through dataTransfer", async () => {

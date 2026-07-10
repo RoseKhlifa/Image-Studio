@@ -22,12 +22,11 @@ function installBase64() {
 }
 
 function installURLStubs() {
-  const fakeURL = {
-    ...URL,
-    createObjectURL: () => "blob:mock",
-    revokeObjectURL: () => {},
-  };
-  globalThis.URL = fakeURL;
+  const NativeURL = URL;
+  class FakeURL extends NativeURL {}
+  FakeURL.createObjectURL = () => "blob:mock";
+  FakeURL.revokeObjectURL = () => {};
+  globalThis.URL = FakeURL;
 }
 
 function installStorage() {
@@ -408,6 +407,118 @@ test("runRemoteImageJob parses Images API JSON mode", async () => {
     assert.equal(result.imageB64, "img-data");
     assert.equal(result.revisedPrompt, "img-rev");
     assert.equal(result.sourceEvent, "images_api");
+  });
+});
+
+test("runRemoteImageJob uses the official Google Interactions fixture for Nano Banana 2", async () => {
+  const imageB64 = "iVBORw0KGgoAAA==";
+  let captured = null;
+  await withPatchedGlobals(async () => {
+    globalThis.fetch = async (url, init) => {
+      captured = {
+        url: String(url),
+        headers: init.headers,
+        body: JSON.parse(init.body),
+      };
+      return new Response(JSON.stringify({
+        object: "interaction",
+        status: "completed",
+        steps: [{
+          type: "model_output",
+          content: [{ type: "image", data: imageB64, mime_type: "image/png" }],
+        }],
+      }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    };
+  }, async () => {
+    const kernel = await loadRemoteKernel();
+    const result = await kernel.runRemoteImageJob(
+      {
+        payload: {
+          apiKey: "google-key",
+          mode: "generate",
+          prompt: "nano banana",
+          size: "2048x1152",
+          quality: "medium",
+          outputFormat: "png",
+          imagePaths: [],
+          imagePath: "",
+          maskB64: "",
+          seed: 0,
+          negativePrompt: "",
+          baseURL: "https://generativelanguage.googleapis.com/v1beta/openai",
+          textModelID: "",
+          imageModelID: "gemini-3.1-flash-image",
+          apiMode: "images",
+          requestPolicy: "openai",
+          noPromptRevision: false,
+        },
+      },
+      { signal: new AbortController().signal },
+    );
+    assert.equal(captured.url, "https://generativelanguage.googleapis.com/v1beta/interactions");
+    assert.equal(captured.headers["x-goog-api-key"], "google-key");
+    assert.equal("Authorization" in captured.headers, false);
+    assert.deepEqual(captured.body, {
+      model: "gemini-3.1-flash-image",
+      input: "nano banana",
+      response_format: {
+        type: "image",
+        delivery: "inline",
+        mime_type: "image/png",
+        aspect_ratio: "16:9",
+        image_size: "2K",
+      },
+      store: false,
+    });
+    assert.equal(result.imageB64, imageB64);
+    assert.equal(result.sourceEvent, "google_interactions");
+  });
+});
+
+test("Google Interactions protocol errors do not silently fall back to Images API", async () => {
+  let calls = 0;
+  await withPatchedGlobals(async () => {
+    globalThis.fetch = async () => {
+      calls += 1;
+      return new Response('{"error":{"code":400,"message":"model is not enabled","status":"INVALID_ARGUMENT"}}', {
+        status: 400,
+        headers: { "content-type": "application/json" },
+      });
+    };
+  }, async () => {
+    const kernel = await loadRemoteKernel();
+    await assert.rejects(
+      kernel.runRemoteImageJob(
+        {
+          payload: {
+            apiKey: "google-key",
+            mode: "generate",
+            prompt: "nano banana",
+            size: "1024x1024",
+            quality: "medium",
+            outputFormat: "png",
+            imagePaths: [],
+            imagePath: "",
+            maskB64: "",
+            seed: 0,
+            negativePrompt: "",
+            baseURL: "https://generativelanguage.googleapis.com/v1beta/openai",
+            textModelID: "",
+            imageModelID: "gemini-3.1-flash-image",
+            apiMode: "images",
+            requestPolicy: "openai",
+            noPromptRevision: false,
+            autoRetryEnabled: false,
+          },
+        },
+        { signal: new AbortController().signal },
+      ),
+      /Google Interactions 返回错误:model is not enabled/,
+    );
+    assert.equal(calls, 1);
   });
 });
 
@@ -1003,6 +1114,78 @@ test("Android shell remote kernel can use native HTTP bridge to bypass browser f
     assert.equal(partials[0].imageB64, "cGFydGlhbA==");
     assert.equal(partials[0].partialImageIndex, 0);
     assert.ok(progressEvents.some(([stage]) => stage === "已收到图片数据片段"));
+  });
+});
+
+test("Android shell downloads Images API URL results through the native binary host path", async () => {
+  const calls = [];
+  const imageB64 = "iVBORw0KGgoAAA==";
+  await withPatchedGlobals(async () => {
+    globalThis.window.AndroidImageStudio = {
+      invoke(requestId, method, payloadJson) {
+        const args = JSON.parse(payloadJson);
+        queueMicrotask(() => {
+          if (method === "HttpRequestText") {
+            const payload = args[0];
+            calls.push(payload);
+            if (payload.method === "POST") {
+              window.__imageStudioNativeResolve?.(requestId, {
+                status: 200,
+                body: '{"data":[{"url":"https://cdn.example.com/result.png"}]}',
+                contentType: "application/json",
+              });
+              return;
+            }
+            assert.equal(payload.url, "https://cdn.example.com/result.png");
+            assert.equal(payload.method, "GET");
+            assert.equal(payload.responseBase64, true);
+            assert.equal(payload.maxResponseBytes, 50 * 1024 * 1024);
+            window.__imageStudioNativeResolve?.(requestId, {
+              status: 200,
+              body: "",
+              contentType: "image/png",
+              resultImageB64: imageB64,
+              sourceEvent: "url_download",
+            });
+            return;
+          }
+          window.__imageStudioNativeReject?.(requestId, `unsupported ${method}`);
+        });
+      },
+    };
+    globalThis.fetch = async () => {
+      throw new Error("Android URL download must not use WebView fetch");
+    };
+  }, async () => {
+    const kernel = await loadRemoteKernel();
+    const result = await kernel.runRemoteImageJob(
+      {
+        payload: {
+          apiKey: "key",
+          mode: "generate",
+          prompt: "cat",
+          size: "1024x1024",
+          quality: "low",
+          outputFormat: "png",
+          imagePaths: [],
+          imagePath: "",
+          maskB64: "",
+          seed: 0,
+          negativePrompt: "",
+          baseURL: "https://upstream.example",
+          textModelID: "",
+          imageModelID: "relay-image-model",
+          apiMode: "images",
+          requestPolicy: "openai",
+          imagesNewAPICompat: true,
+          noPromptRevision: false,
+        },
+      },
+      { signal: new AbortController().signal },
+    );
+    assert.equal(calls.length, 2);
+    assert.equal(result.imageB64, imageB64);
+    assert.equal(result.sourceEvent, "images_api_url");
   });
 });
 

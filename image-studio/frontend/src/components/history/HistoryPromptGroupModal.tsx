@@ -4,6 +4,7 @@ import { Modal } from "../common/Modal";
 import { historyPreviewSrc, useBlobURL } from "../../lib/images";
 import {
   buildHistoryItemDragExport,
+  shouldUseNativeFileDrag,
   writeImageFileDragData,
   writeInternalHistoryItemDragData,
 } from "../../lib/dragExport.ts";
@@ -126,7 +127,7 @@ function HistoryPromptModalThumbnail({
   const imageSrc = historyPreviewSrc(item, previewURL);
   const displayIndex = typeof item.batchIndex === "number" ? item.batchIndex + 1 : index + 1;
   const dragSpec = buildHistoryItemDragExport(item);
-  const { isMac } = usePlatform();
+  const { targetPlatform } = usePlatform();
 
   function openMenu(event: React.MouseEvent) {
     event.preventDefault();
@@ -149,7 +150,7 @@ function HistoryPromptModalThumbnail({
       return;
     }
     event.stopPropagation();
-    if (isMac && item.savedPath) {
+    if (shouldUseNativeFileDrag(targetPlatform, item.savedPath)) {
       event.preventDefault();
       void BeginNativeFileDrag(item.savedPath).catch((error) => {
         console.error("[drag-export] native-file-drag failed", error);
