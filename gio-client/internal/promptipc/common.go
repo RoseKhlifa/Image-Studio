@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -27,10 +26,17 @@ const (
 )
 
 type Server struct {
-	listener net.Listener
-	network  string
-	address  string
-	once     sync.Once
+	listener     net.Listener
+	network      string
+	address      string
+	lease        endpointLease
+	once         sync.Once
+	closeErr     error
+	stateMu      sync.Mutex
+	closing      bool
+	connections  map[net.Conn]struct{}
+	callbackGate sync.RWMutex
+	workerGroup  sync.WaitGroup
 }
 
 func TryStart(handler func(Message)) (*Server, bool, error) {
@@ -38,51 +44,67 @@ func TryStart(handler func(Message)) (*Server, bool, error) {
 	if err != nil {
 		return nil, false, err
 	}
-	if network == "unix" {
-		if _, statErr := os.Stat(address); statErr == nil {
-			if err := Send(Message{Type: MessageTypePing}); err == nil {
-				return nil, true, nil
-			}
-			_ = os.Remove(address)
-		}
-	} else if err := Send(Message{Type: MessageTypePing}); err == nil {
-		return nil, true, nil
+	listener, lease, alreadyRunning, err := listenEndpoint(network, address)
+	if err != nil || alreadyRunning {
+		return nil, alreadyRunning, err
 	}
-	listener, err := net.Listen(network, address)
-	if err != nil {
-		if sendErr := Send(Message{Type: MessageTypePing}); sendErr == nil {
-			return nil, true, nil
+	if listener == nil {
+		if lease != nil {
+			_ = lease.release(address)
 		}
-		return nil, false, err
+		return nil, false, errors.New("prompt IPC listener is nil")
 	}
 	server := &Server{
-		listener: listener,
-		network:  network,
-		address:  address,
+		listener:    listener,
+		network:     network,
+		address:     address,
+		lease:       lease,
+		connections: make(map[net.Conn]struct{}),
 	}
+	server.workerGroup.Add(1)
 	go server.serve(handler)
 	return server, false, nil
+}
+
+type endpointLease interface {
+	release(address string) error
 }
 
 func (s *Server) Close() error {
 	if s == nil {
 		return nil
 	}
-	var closeErr error
 	s.once.Do(func() {
-		closeErr = s.listener.Close()
-		if s.network == "unix" {
-			_ = os.Remove(s.address)
+		// Exclude callback dispatch while changing the lifecycle state. A callback
+		// that already owns the read lock completes before shutdown proceeds.
+		s.callbackGate.Lock()
+		s.stateMu.Lock()
+		s.closing = true
+		s.stateMu.Unlock()
+		s.callbackGate.Unlock()
+
+		listenerErr := s.listener.Close()
+		s.stateMu.Lock()
+		connections := make([]net.Conn, 0, len(s.connections))
+		for conn := range s.connections {
+			connections = append(connections, conn)
 		}
+		s.stateMu.Unlock()
+		for _, conn := range connections {
+			_ = conn.Close()
+		}
+		s.workerGroup.Wait()
+
+		var releaseErr error
+		if s.lease != nil {
+			releaseErr = s.lease.release(s.address)
+		}
+		s.closeErr = errors.Join(listenerErr, releaseErr)
 	})
-	return closeErr
+	return s.closeErr
 }
 
-func Send(msg Message) error {
-	network, address, err := endpoint()
-	if err != nil {
-		return err
-	}
+func sendMessage(network, address string, msg Message) error {
 	conn, err := net.DialTimeout(network, address, 500*time.Millisecond)
 	if err != nil {
 		return err
@@ -90,6 +112,14 @@ func Send(msg Message) error {
 	defer conn.Close()
 	_ = conn.SetWriteDeadline(time.Now().Add(500 * time.Millisecond))
 	return json.NewEncoder(conn).Encode(msg)
+}
+
+func Send(msg Message) error {
+	network, address, err := endpoint()
+	if err != nil {
+		return err
+	}
+	return sendMessage(network, address, msg)
 }
 
 func SendRaise() error {
@@ -122,22 +152,53 @@ func SendOpenResult(resultID string, savedPath string) error {
 }
 
 func (s *Server) serve(handler func(Message)) {
+	defer s.workerGroup.Done()
 	for {
 		conn, err := s.listener.Accept()
 		if err != nil {
 			return
 		}
-		go func(conn net.Conn) {
-			defer conn.Close()
-			_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-			reader := bufio.NewReader(conn)
-			var msg Message
-			if err := json.NewDecoder(reader).Decode(&msg); err != nil {
-				return
-			}
-			if handler != nil {
-				handler(msg)
-			}
-		}(conn)
+		if !s.trackConnection(conn) {
+			_ = conn.Close()
+			continue
+		}
+		go s.handleConnection(conn, handler)
+	}
+}
+
+func (s *Server) trackConnection(conn net.Conn) bool {
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	if s.closing {
+		return false
+	}
+	s.connections[conn] = struct{}{}
+	// The serve goroutine remains counted until it can no longer add workers.
+	s.workerGroup.Add(1)
+	return true
+}
+
+func (s *Server) handleConnection(conn net.Conn, handler func(Message)) {
+	defer func() {
+		_ = conn.Close()
+		s.stateMu.Lock()
+		delete(s.connections, conn)
+		s.stateMu.Unlock()
+		s.workerGroup.Done()
+	}()
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	reader := bufio.NewReader(conn)
+	var msg Message
+	if err := json.NewDecoder(reader).Decode(&msg); err != nil {
+		return
+	}
+
+	s.callbackGate.RLock()
+	defer s.callbackGate.RUnlock()
+	s.stateMu.Lock()
+	closing := s.closing
+	s.stateMu.Unlock()
+	if !closing && handler != nil {
+		handler(msg)
 	}
 }

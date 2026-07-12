@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: Unlicense OR MIT
+image: openbsd/latest
+packages:
+ - libxkbcommon
+ - go
+sources:
+ - https://git.sr.ht/~eliasnaur/gio
+environment:
+ PATH: /home/build/sdk/go/bin:/bin:/usr/local/bin:/usr/bin
+tasks:
+ - install_go: |
+     mkdir -p /home/build/sdk
+     curl https://dl.google.com/go/go1.24.2.src.tar.gz | tar -C /home/build/sdk -xzf -
+     cd /home/build/sdk/go/src
+     ./make.bash
+ - test_gio: |
+     cd gio
+     go test ./...

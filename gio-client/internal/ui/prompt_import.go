@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"gioui.org/font"
-	"gioui.org/io/system"
 	"gioui.org/layout"
 	"gioui.org/unit"
 	"github.com/yuanhua/image-gptcodex/pkg/promptimport"
@@ -154,9 +153,9 @@ func (a *App) confirmPromptImport() {
 	a.promptImportPayload = nil
 	a.promptImportToken = ""
 	a.status = "已从 Image-Prompts 导入提示词"
-	a.saveActiveWorkspaceSnapshot()
 	a.appendLogLocked("已从 Image-Prompts 导入提示词")
 	a.mu.Unlock()
+	a.saveActiveWorkspaceSnapshot()
 	a.invalidateNow()
 	go a.runNextPromptImport()
 }
@@ -230,9 +229,12 @@ func (a *App) dismissPromptImportRegistrationPrompt() {
 }
 
 func (a *App) RaiseWindow() {
-	if a.window != nil {
-		a.window.Perform(system.ActionRaise)
-		a.window.Invalidate()
+	a.enqueueDesktopCommand(desktopCommand{Kind: desktopCommandRaiseMain})
+}
+
+func (a *App) performMainWindowRaise() {
+	if a.raiseMainWindow != nil {
+		a.raiseMainWindow()
 	}
 }
 

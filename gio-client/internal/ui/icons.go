@@ -55,6 +55,17 @@ var (
 	uiIconFullscreenExit = mustIcon(widget.NewIcon(mdicons.NavigationFullscreenExit))
 	uiIconChevronLeft    = mustIcon(widget.NewIcon(mdicons.NavigationChevronLeft))
 	uiIconChevronRight   = mustIcon(widget.NewIcon(mdicons.NavigationChevronRight))
+	uiIconWorkflow       = mustIcon(widget.NewIcon(mdicons.ActionTimeline))
+	uiIconDashboard      = mustIcon(widget.NewIcon(mdicons.ActionDashboard))
+	uiIconOpenWindow     = mustIcon(widget.NewIcon(mdicons.ActionOpenInNew))
+	uiIconConsole        = mustIcon(widget.NewIcon(mdicons.ActionCode))
+	uiIconProgress       = mustIcon(widget.NewIcon(mdicons.AVEqualizer))
+	uiIconWorkspace      = mustIcon(widget.NewIcon(mdicons.ActionViewQuilt))
+	uiIconZoomIn         = mustIcon(widget.NewIcon(mdicons.ActionZoomIn))
+	uiIconZoomOut        = mustIcon(widget.NewIcon(mdicons.ActionZoomOut))
+	uiIconFit            = mustIcon(widget.NewIcon(mdicons.ImageCenterFocusStrong))
+	uiIconMacOS          = mustIcon(widget.NewIcon(mdicons.HardwareDesktopMac))
+	uiIconWindows        = mustIcon(widget.NewIcon(mdicons.HardwareDesktopWindows))
 )
 
 func mustIcon(ic *widget.Icon, err error) *widget.Icon {

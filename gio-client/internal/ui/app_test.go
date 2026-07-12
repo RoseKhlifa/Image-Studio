@@ -2781,3 +2781,19 @@ func TestParseDialogPathsDeduplicatesAndTrims(t *testing.T) {
 		t.Fatalf("parseDialogPaths=%v", got)
 	}
 }
+
+func TestParseDialogPathsAcceptsAppleScriptMultiselectOutput(t *testing.T) {
+	got := parseDialogPaths("/Users/test/Pictures/first image.png\r/Users/test/Pictures/second image.jpg\r")
+	want := []string{
+		"/Users/test/Pictures/first image.png",
+		"/Users/test/Pictures/second image.jpg",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("len(parseDialogPaths)=%d want %d: %v", len(got), len(want), got)
+	}
+	for idx := range want {
+		if got[idx] != want[idx] {
+			t.Fatalf("parseDialogPaths[%d]=%q want %q", idx, got[idx], want[idx])
+		}
+	}
+}

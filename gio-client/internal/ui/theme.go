@@ -2,6 +2,7 @@ package ui
 
 import (
 	"image/color"
+	"math"
 
 	"gioui.org/unit"
 	"gioui.org/widget/material"
@@ -26,94 +27,34 @@ type fluentColors struct {
 	text            color.NRGBA
 	textMuted       color.NRGBA
 	textDim         color.NRGBA
+	accentText      color.NRGBA
+	successText     color.NRGBA
+	warningText     color.NRGBA
+	dangerText      color.NRGBA
 	cardShadow      color.NRGBA
 	cardGlow        color.NRGBA
 	bgGlow          color.NRGBA
 	canvasBg        color.NRGBA
 	canvasTile      color.NRGBA
 	success         color.NRGBA
+	warning         color.NRGBA
+	warningSoft     color.NRGBA
 	danger          color.NRGBA
 	dangerSoft      color.NRGBA
+	focusRing       color.NRGBA
 	toolHoverBg     color.NRGBA
 	toolHoverText   color.NRGBA
 	windowOutline   color.NRGBA
 	white           color.NRGBA
 }
 
-var fluentLight = fluentColors{
-	accent:          rgb(0x005fb8),
-	accent2:         rgb(0x0a6fcb),
-	accentSoft:      rgba(0x005fb8, 0x1f),
-	bg:              rgb(0xf3f3f3),
-	bg2:             rgb(0xe9e9e9),
-	panel:           rgb(0xfbfbfb),
-	panel2:          rgb(0xf6f6f6),
-	surface:         rgb(0xffffff),
-	surface2:        rgb(0xf2f2f2),
-	surfaceElevated: rgb(0xfcfcfc),
-	sidebar:         rgb(0xfbfbfb),
-	inspector:       rgb(0xf8f8f8),
-	toolbar:         rgb(0xf7f7f7),
-	border:          rgba(0x000000, 0x14),
-	border2:         rgba(0x000000, 0x24),
-	text:            rgb(0x1f1f1f),
-	textMuted:       rgba(0x1f1f1f, 0xb8),
-	textDim:         rgba(0x1f1f1f, 0x8a),
-	cardShadow:      rgba(0x000000, 0x12),
-	cardGlow:        rgba(0xffffff, 0x05),
-	bgGlow:          rgba(0xffffff, 0x28),
-	canvasBg:        rgb(0xeeeeee),
-	canvasTile:      rgb(0xdedede),
-	success:         rgb(0x0f7b0f),
-	danger:          rgb(0xc42b1c),
-	dangerSoft:      rgba(0xc42b1c, 0x1f),
-	toolHoverBg:     rgba(0x000000, 0x0a),
-	toolHoverText:   rgb(0x1f1f1f),
-	windowOutline:   rgba(0xffffff, 0x38),
-	white:           rgb(0xffffff),
-}
-
-var fluentDark = fluentColors{
-	accent:          rgb(0x60cdff),
-	accent2:         rgb(0x8bdcff),
-	accentSoft:      rgba(0x60cdff, 0x29),
-	bg:              rgb(0x202020),
-	bg2:             rgb(0x1c1c1c),
-	panel:           rgb(0x2b2b2b),
-	panel2:          rgb(0x282828),
-	surface:         rgb(0x333333),
-	surface2:        rgb(0x3b3b3b),
-	surfaceElevated: rgb(0x333333),
-	sidebar:         rgb(0x2b2b2b),
-	inspector:       rgb(0x292929),
-	toolbar:         rgb(0x2d2d2d),
-	border:          rgba(0xffffff, 0x14),
-	border2:         rgba(0xffffff, 0x24),
-	text:            rgb(0xf5f5f5),
-	textMuted:       rgba(0xf3f3f3, 0xb8),
-	textDim:         rgba(0xf3f3f3, 0x80),
-	cardShadow:      rgba(0x000000, 0x00),
-	cardGlow:        rgba(0xffffff, 0x00),
-	bgGlow:          rgba(0xffffff, 0x04),
-	canvasBg:        rgb(0x242424),
-	canvasTile:      rgb(0x343434),
-	success:         rgb(0x6ccb5f),
-	danger:          rgb(0xff99a4),
-	dangerSoft:      rgba(0xff99a4, 0x1f),
-	toolHoverBg:     rgba(0xffffff, 0x0f),
-	toolHoverText:   rgb(0xf3f3f3),
-	windowOutline:   rgba(0xffffff, 0x00),
-	white:           rgb(0xffffff),
-}
-
+var fluentLight = windowsDesktopColors(desktopColorModeLight)
+var fluentDark = windowsDesktopColors(desktopColorModeDark)
 var fluent = fluentLight
 var systemThemeResolver = systemThemeMode
 
 func themePalette(mode string) fluentColors {
-	if mode == "dark" {
-		return fluentDark
-	}
-	return fluentLight
+	return desktopThemeSpec(currentDesktopStyle(), mode).Colors
 }
 
 func normalizeThemeMode(mode string) string {
@@ -194,20 +135,60 @@ func (a *App) refreshSystemTheme() {
 }
 
 func (a *App) installResolvedTheme(mode string) {
-	if mode != "dark" {
-		mode = "light"
+	spec := installDesktopThemeSpec(currentDesktopStyle(), mode)
+	a.resolvedThemeMode = spec.ColorMode
+	a.installMaterialThemePalette(spec.Colors)
+}
+
+// installDesktopStyle switches the desktop design language without changing
+// the selected light/dark appearance. Persistence is owned by the caller.
+func (a *App) installDesktopStyle(style string) desktopThemeTokens {
+	mode := a.resolvedThemeMode
+	if mode == "" {
+		mode = resolveThemeMode(a.themeMode)
 	}
-	a.resolvedThemeMode = mode
-	fluent = themePalette(mode)
+	spec := installDesktopThemeSpec(style, mode)
+	a.resolvedThemeMode = spec.ColorMode
+	a.installMaterialThemePalette(spec.Colors)
+	if a.th != nil {
+		a.th.Face = desktopSansTypeface(spec.Style)
+	}
+	return spec
+}
+
+func (a *App) installMaterialThemePalette(colors fluentColors) {
 	if a.th == nil {
 		return
 	}
 	a.th.Palette = material.Palette{
-		Bg:         fluent.bg,
-		Fg:         fluent.text,
-		ContrastBg: fluent.accent,
-		ContrastFg: fluent.white,
+		Bg:         colors.bg,
+		Fg:         colors.text,
+		ContrastBg: colors.accent,
+		ContrastFg: desktopReadableText(colors.accent),
 	}
+}
+
+// desktopReadableText returns the black or white foreground with the higher
+// WCAG contrast against an opaque desktop control fill.
+func desktopReadableText(background color.NRGBA) color.NRGBA {
+	luminance := desktopRelativeLuminance(background)
+	blackContrast := (luminance + 0.05) / 0.05
+	whiteContrast := 1.05 / (luminance + 0.05)
+	if blackContrast >= whiteContrast {
+		return rgb(0x000000)
+	}
+	return rgb(0xffffff)
+}
+
+func desktopRelativeLuminance(value color.NRGBA) float64 {
+	linear := func(component uint8) float64 {
+		channel := float64(component) / 255
+		if channel <= 0.04045 {
+			return channel / 12.92
+		}
+		return math.Pow((channel+0.055)/1.055, 2.4)
+	}
+	return 0.2126*linear(value.R) + 0.7152*linear(value.G) + 0.0722*linear(value.B)
 }
 
 func rgb(v uint32) color.NRGBA {

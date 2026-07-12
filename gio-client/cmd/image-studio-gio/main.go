@@ -1,4 +1,4 @@
-//go:build windows || linux
+//go:build windows || (linux && !android) || (darwin && !ios)
 
 package main
 
@@ -9,6 +9,7 @@ import (
 
 	"image-studio/gio-client/internal/promptipc"
 	"image-studio/gio-client/internal/ui"
+	"image-studio/gio-client/internal/windowing"
 
 	"gioui.org/app"
 	"gioui.org/io/event"
@@ -23,6 +24,9 @@ func main() {
 		os.Exit(exitCode)
 	}
 	appUI := ui.New()
+	desktopWindows := windowing.NewManager(ui.NewDesktopWindowFactory(appUI), appUI.HandleDesktopWindowError)
+	appUI.SetDesktopWindowController(desktopWindows)
+	appUI.RestoreDesktopWindows()
 	appUI.StartBackgroundAppUpdateCheck()
 	server, alreadyRunning, err := promptipc.TryStart(func(msg promptipc.Message) {
 		switch msg.Type {
@@ -64,8 +68,15 @@ func main() {
 			app.MinSize(unit.Dp(1040), unit.Dp(720)),
 		)
 		if err := appUI.Run(w); err != nil {
-			log.Fatal(err)
+			log.Printf("main window closed with error: %v", err)
 		}
+		shutdownDesktopResources(
+			server,
+			desktopWindows,
+			desktopWindowShutdownTimeout,
+			desktopWindowShutdownPollInterval,
+			log.Printf,
+		)
 		os.Exit(0)
 	}()
 	app.Events(func(evt event.Event) bool {

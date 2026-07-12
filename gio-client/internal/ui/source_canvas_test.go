@@ -4,6 +4,7 @@ import (
 	"image/color"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/yuanhua/image-gptcodex/pkg/client"
 	sharedCompat "image-studio/shared/compat"
@@ -17,20 +18,35 @@ func TestViewSourcePathOnCanvasLoadsSourcePreview(t *testing.T) {
 	if err := app.viewSourcePathOnCanvas(sourcePath); err != nil {
 		t.Fatalf("viewSourcePathOnCanvas: %v", err)
 	}
-	if app.mode != string(client.ModeEdit) {
-		t.Fatalf("mode=%q want edit", app.mode)
-	}
-	if app.result.SourceEvent != "source-preview" || app.result.SavedPath != sourcePath {
-		t.Fatalf("result=%#v", app.result)
-	}
-	if app.result.Item.ID != "source-preview:"+sourcePath {
-		t.Fatalf("itemID=%q want source-preview:%s", app.result.Item.ID, sourcePath)
-	}
-	if app.result.Image == nil {
-		t.Fatal("expected source preview image to be loaded")
-	}
-	if app.selectedHistoryID != "" {
-		t.Fatalf("selectedHistoryID=%q want empty", app.selectedHistoryID)
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		app.mu.Lock()
+		mode := app.mode
+		sourceEvent := app.result.SourceEvent
+		savedPath := app.result.SavedPath
+		itemID := app.result.Item.ID
+		imageReady := app.result.Image != nil
+		selectedHistoryID := app.selectedHistoryID
+		app.mu.Unlock()
+		if mode != string(client.ModeEdit) {
+			t.Fatalf("mode=%q want edit", mode)
+		}
+		if sourceEvent != "source-preview" || savedPath != sourcePath {
+			t.Fatalf("result sourceEvent=%q savedPath=%q", sourceEvent, savedPath)
+		}
+		if itemID != "source-preview:"+sourcePath {
+			t.Fatalf("itemID=%q want source-preview:%s", itemID, sourcePath)
+		}
+		if selectedHistoryID != "" {
+			t.Fatalf("selectedHistoryID=%q want empty", selectedHistoryID)
+		}
+		if imageReady {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("expected source preview image to be loaded")
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 

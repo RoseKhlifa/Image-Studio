@@ -21,7 +21,10 @@ const (
 var stableDataRootFunc = stableDataRootImpl
 
 func StableDataRoot() (string, error) {
-	return stableDataRootFunc()
+	stableDataRootFuncMu.RLock()
+	fn := stableDataRootFunc
+	stableDataRootFuncMu.RUnlock()
+	return fn()
 }
 
 func stableDataRootImpl() (string, error) {

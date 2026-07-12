@@ -1,0 +1,96 @@
+# SPDX-License-Identifier: Unlicense OR MIT
+image: debian/stable
+packages:
+ - curl
+ - pkg-config
+ - gcc-multilib
+ - libwayland-dev
+ - libx11-dev
+ - libx11-xcb-dev
+ - libxkbcommon-dev
+ - libxkbcommon-x11-dev
+ - libgles2-mesa-dev
+ - libegl1-mesa-dev
+ - libffi-dev
+ - libvulkan-dev
+ - libxcursor-dev
+ - libxrandr-dev
+ - libxinerama-dev
+ - libxi-dev
+ - libxxf86vm-dev
+ - libegl-mesa0
+ - libglx-mesa0
+ - libgl1-mesa-dri
+ - mesa-libgallium
+ - libgbm1
+ - libegl1
+ - mesa-vulkan-drivers
+ - wine
+ - xvfb
+ - xdotool
+ - scrot
+ - sway
+ - grim
+ - unzip
+sources:
+ - https://git.sr.ht/~eliasnaur/gio
+environment:
+ PKG_CONFIG_PATH: /usr/lib/x86_64-linux-gnu/pkgconfig/:/usr/lib/i386-linux-gnu/pkgconfig/
+ PATH: /home/build/sdk/go/bin:/usr/bin:/home/build/go/bin:/home/build/android/tools/bin
+ ANDROID_SDK_ROOT: /home/build/android
+ android_sdk_tools_zip: sdk-tools-linux-3859397.zip
+ android_ndk_zip: android-ndk-r20-linux-x86_64.zip
+ github_mirror: git@github.com:gioui/gio
+secrets:
+ - 75d8a1eb-5fc5-4074-8a36-db6015d6ed5a
+tasks:
+ - install_go: |
+     mkdir -p /home/build/sdk
+     curl -s https://dl.google.com/go/go1.24.2.linux-amd64.tar.gz | tar -C /home/build/sdk -xzf -
+ - check_gofmt: |
+     cd gio
+     test -z "$(gofmt -s -l .)"
+ - check_sign_off: |
+     set +x -e
+     cd gio
+     for hash in $(git log -n 20 --format="%H"); do
+        message=$(git log -1 --format=%B $hash)
+        if [[ ! "$message" =~ "Signed-off-by: " ]]; then
+            echo "Missing 'Signed-off-by' in commit $hash"
+            exit 1
+        fi
+     done
+ - mirror: |
+     # mirror to github
+     ssh-keyscan github.com > "$HOME"/.ssh/known_hosts && cd gio && git push --mirror "$github_mirror" || echo "failed mirroring"
+ - add_32bit_arch: |
+     sudo dpkg --add-architecture i386
+     sudo apt-get update
+     sudo apt-get install -y "libwayland-dev:i386" "libx11-dev:i386" "libx11-xcb-dev:i386" "libxkbcommon-dev:i386" "libxkbcommon-x11-dev:i386" "libgles2-mesa-dev:i386" "libegl1-mesa-dev:i386" "libffi-dev:i386" "libvulkan-dev:i386" "libxcursor-dev:i386" "libegl-mesa0:i386" "libglx-mesa0:i386" "libgbm1:i386" "mesa-libgallium:i386" "libgl1-mesa-dri:i386"
+ - test_gio: |
+     cd gio
+     go test -race ./...
+     CGO_ENABLED=1 GOARCH=386 go test ./...
+     GOOS=windows go test -exec=wine ./...
+     GOOS=js GOARCH=wasm go build -o /dev/null ./...
+ - install_jdk8: |
+     curl -so jdk.deb "https://cdn.azul.com/zulu/bin/zulu8.42.0.21-ca-jdk8.0.232-linux_amd64.deb"
+     sudo apt-get -qq install -y -f ./jdk.deb
+ - install_android: |
+     mkdir android
+     cd android
+     curl -so sdk-tools.zip https://dl.google.com/android/repository/$android_sdk_tools_zip
+     unzip -q sdk-tools.zip
+     rm sdk-tools.zip
+     curl -so ndk.zip https://dl.google.com/android/repository/$android_ndk_zip
+     unzip -q ndk.zip
+     rm ndk.zip
+     mv android-ndk-* ndk-bundle
+     # sdkmanager needs lots of file descriptors
+     ulimit -n 10000
+     yes|sdkmanager --licenses
+     sdkmanager "platforms;android-31" "build-tools;32.0.0"
+ - test_android: |
+     cd gio
+     CC=$ANDROID_SDK_ROOT/ndk-bundle/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android29-clang GOOS=android GOARCH=arm64 CGO_ENABLED=1 go build ./...
+     CC=$ANDROID_SDK_ROOT/ndk-bundle/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi29-clang GOOS=android GOARCH=arm CGO_ENABLED=1 go build ./...
