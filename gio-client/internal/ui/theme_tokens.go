@@ -14,7 +14,8 @@ const (
 	desktopColorModeLight = "light"
 	desktopColorModeDark  = "dark"
 
-	desktopSurfaceSolid = "solid"
+	desktopSurfaceSolid       = "solid"
+	desktopSurfaceLiquidGlass = "liquid-glass"
 )
 
 type desktopThemeMetrics struct {
@@ -103,4 +104,11 @@ func currentDesktopStyle() string {
 		return normalizeDesktopStyle("")
 	}
 	return installedDesktopTheme.Style
+}
+
+func currentDesktopThemeMetrics() desktopThemeMetrics {
+	if installedDesktopTheme.Style == "" {
+		return desktopThemeSpec("", desktopColorModeLight).Metrics
+	}
+	return installedDesktopTheme.Metrics
 }

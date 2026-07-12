@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"gioui.org/font"
+	"gioui.org/io/semantic"
 	"gioui.org/layout"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
@@ -19,6 +20,101 @@ import (
 const repoURL = "https://github.com/RoseKhlifa/Image-Studio"
 const issuesURL = "https://github.com/RoseKhlifa/Image-Studio/issues"
 const licenseURL = "https://www.gnu.org/licenses/agpl-3.0.html"
+
+type simplePaneContract struct {
+	preferredLeft  unit.Dp
+	preferredRight unit.Dp
+	minimumLeft    unit.Dp
+	minimumRight   unit.Dp
+	minimumCenter  unit.Dp
+}
+
+type simplePaneWidths struct {
+	left   int
+	right  int
+	center int
+}
+
+type appleHeaderBrandContract struct {
+	iconSize     unit.Dp
+	iconRadius   unit.Dp
+	titleSize    unit.Sp
+	subtitleSize unit.Sp
+}
+
+func headerInsetsForStyle(style string) layout.Inset {
+	if normalizeDesktopStyle(style) == desktopStyleMacOS {
+		return layout.Inset{Top: 8, Bottom: 8, Left: 20, Right: 20}
+	}
+	return layout.Inset{Top: 8, Bottom: 8, Left: 12, Right: 12}
+}
+
+func appleHeaderBrandMetrics() appleHeaderBrandContract {
+	return appleHeaderBrandContract{
+		iconSize:     unit.Dp(40),
+		iconRadius:   unit.Dp(14),
+		titleSize:    unit.Sp(16),
+		subtitleSize: unit.Sp(12),
+	}
+}
+
+func shellShowsGlobalFooter(style string) bool {
+	return normalizeDesktopStyle(style) != desktopStyleMacOS
+}
+
+func shellShowsCommunityActions(style string) bool {
+	return normalizeDesktopStyle(style) != desktopStyleMacOS
+}
+
+func simplePaneContractForStyle(style string, metrics desktopThemeMetrics, compact bool) simplePaneContract {
+	if normalizeDesktopStyle(style) == desktopStyleMacOS {
+		return simplePaneContract{
+			preferredLeft:  metrics.LeftPaneWidth,
+			preferredRight: metrics.RightPaneWidth,
+			minimumLeft:    unit.Dp(352),
+			minimumRight:   unit.Dp(300),
+			minimumCenter:  unit.Dp(360),
+		}
+	}
+	contract := simplePaneContract{
+		preferredLeft:  unit.Dp(372),
+		preferredRight: unit.Dp(320),
+		minimumLeft:    unit.Dp(320),
+		minimumRight:   unit.Dp(280),
+		minimumCenter:  unit.Dp(360),
+	}
+	if compact {
+		contract.preferredLeft = unit.Dp(336)
+		contract.preferredRight = unit.Dp(300)
+	}
+	return contract
+}
+
+func fitSimplePaneWidths(available int, preferredLeft int, preferredRight int, minimumLeft int, minimumRight int, minimumCenter int) simplePaneWidths {
+	left := preferredLeft
+	right := preferredRight
+	overflow := left + right + minimumCenter - available
+	if overflow > 0 {
+		reduceRight := min(overflow, max(right-minimumRight, 0))
+		right -= reduceRight
+		overflow -= reduceRight
+		if overflow > 0 {
+			reduceLeft := min(overflow, max(left-minimumLeft, 0))
+			left -= reduceLeft
+		}
+	}
+	return simplePaneWidths{
+		left:   left,
+		right:  right,
+		center: max(available-left-right, 0),
+	}
+}
+
+func maximumWidth(gtx layout.Context, width unit.Dp, w layout.Widget) layout.Dimensions {
+	gtx.Constraints.Min.X = 0
+	gtx.Constraints.Max.X = min(gtx.Constraints.Max.X, gtx.Dp(width))
+	return w(gtx)
+}
 
 func (a *App) layout(gtx layout.Context) layout.Dimensions {
 	defer a.recordLayoutTiming(layoutTimingShell, time.Now())
@@ -53,7 +149,8 @@ func (a *App) layout(gtx layout.Context) layout.Dimensions {
 		}
 	}
 	children := []layout.FlexChild{}
-	metrics := desktopThemeSpec(a.desktopStyle, a.resolvedThemeMode).Metrics
+	spec := desktopThemeSpec(a.desktopStyle, a.resolvedThemeMode)
+	metrics := spec.Metrics
 	if !snap.Fullscreen {
 		children = append(children,
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -71,7 +168,7 @@ func (a *App) layout(gtx layout.Context) layout.Dimensions {
 	children = append(children, layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 		return a.layoutBody(gtx, snap)
 	}))
-	if !snap.Fullscreen {
+	if !snap.Fullscreen && shellShowsGlobalFooter(spec.Style) {
 		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			height := minimumTextControlHeight(gtx, metrics.StatusBarHeight, a.scaledSp(unit.Sp(10)), unit.Dp(18))
 			return fixedHeight(gtx, height, func(gtx layout.Context) layout.Dimensions {
@@ -157,6 +254,7 @@ func (a *App) shellEffectsEnabled() bool {
 }
 
 func (a *App) layoutHeader(gtx layout.Context) layout.Dimensions {
+	showCommunityActions := shellShowsCommunityActions(a.desktopStyle)
 	for idx, mode := range []string{"system", "light", "dark"} {
 		for a.themeButtons[idx].Clicked(gtx) {
 			a.persistThemeMode(mode)
@@ -164,27 +262,41 @@ func (a *App) layoutHeader(gtx layout.Context) layout.Dimensions {
 	}
 	for a.headerAddWorkspaceButton.Clicked(gtx) {
 		a.createWorkspace()
+		a.scrollWorkspaceListToEnd()
 	}
 	for a.headerQuoteButton.Clicked(gtx) {
-		a.headerQuoteIndex = nextHeaderQuoteIndex(a.headerQuoteIndex)
+		if showCommunityActions {
+			a.headerQuoteIndex = nextHeaderQuoteIndex(a.headerQuoteIndex)
+		}
 	}
 	for a.githubButton.Clicked(gtx) {
-		if err := openExternalURL(repoURL); err != nil {
-			a.appendLog("打开 GitHub 失败: " + err.Error())
+		if showCommunityActions {
+			if err := openExternalURL(repoURL); err != nil {
+				a.appendLog("打开 GitHub 失败: " + err.Error())
+			}
 		}
 	}
 	for a.headerStarButton.Clicked(gtx) {
-		if err := openExternalURL(repoURL); err != nil {
-			a.appendLog("打开 GitHub 失败: " + err.Error())
+		if showCommunityActions {
+			if err := openExternalURL(repoURL); err != nil {
+				a.appendLog("打开 GitHub 失败: " + err.Error())
+			}
 		}
 	}
 	for a.settingsButton.Clicked(gtx) {
 		a.openGeneralSettingsModal()
 	}
 
+	if normalizeDesktopStyle(a.desktopStyle) == desktopStyleMacOS {
+		return a.layoutAppleHeader(gtx)
+	}
+	return a.layoutWindowsHeader(gtx)
+}
+
+func (a *App) layoutWindowsHeader(gtx layout.Context) layout.Dimensions {
 	return a.borderedSurface(gtx, fluent.toolbar, unit.Dp(0), fluent.border, func(gtx layout.Context) layout.Dimensions {
 		gtx.Constraints.Min = gtx.Constraints.Max
-		return layout.Inset{Top: 8, Bottom: 8, Left: 12, Right: 12}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return headerInsetsForStyle(desktopStyleWindows).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 					return a.layoutHeaderBrand(gtx)
@@ -194,39 +306,11 @@ func (a *App) layoutHeader(gtx layout.Context) layout.Dimensions {
 				}),
 				layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return layout.Stack{}.Layout(gtx,
-						layout.Stacked(func(gtx layout.Context) layout.Dimensions {
-							return a.headerIconButtonIcon(gtx, &a.headerAddWorkspaceButton, uiIconAdd, false, "新建工作区")
-						}),
-						layout.Stacked(func(gtx layout.Context) layout.Dimensions {
-							if len(a.workspaces) <= 1 {
-								return layout.Dimensions{}
-							}
-							return layout.NE.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-								return layout.Inset{Top: unit.Dp(-2), Right: unit.Dp(-2)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-									return a.badge(gtx, fmt.Sprintf("%d", len(a.workspaces)), fluent.accent, desktopReadableText(fluent.accent))
-								})
-							})
-						}),
-					)
+					return a.layoutHeaderAddWorkspaceButton(gtx)
 				}),
 				layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return a.borderedSurface(gtx, fluent.surface, fluentControlRadius, accentAlpha(0x12), func(gtx layout.Context) layout.Dimensions {
-						return layout.Inset{Top: 2, Bottom: 2, Left: 2, Right: 2}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-							return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(unit.Dp(2))}.Layout(gtx,
-								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-									return a.headerIconButtonIcon(gtx, &a.themeButtons[0], uiIconSystem, a.themeMode == "system", "使用系统主题")
-								}),
-								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-									return a.headerIconButtonIcon(gtx, &a.themeButtons[1], uiIconLight, a.themeMode == "light", "切换为浅色主题")
-								}),
-								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-									return a.headerIconButtonIcon(gtx, &a.themeButtons[2], uiIconDark, a.themeMode == "dark", "切换为深色主题")
-								}),
-							)
-						})
-					})
+					return a.layoutHeaderThemeSelector(gtx)
 				}),
 				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -245,7 +329,74 @@ func (a *App) layoutHeader(gtx layout.Context) layout.Dimensions {
 	})
 }
 
+func (a *App) layoutAppleHeader(gtx layout.Context) layout.Dimensions {
+	return a.borderedSurface(gtx, fluent.toolbar, unit.Dp(0), fluent.border, func(gtx layout.Context) layout.Dimensions {
+		gtx.Constraints.Min = gtx.Constraints.Max
+		return headerInsetsForStyle(desktopStyleMacOS).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					return a.layoutHeaderBrand(gtx)
+				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return a.layoutExperienceSwitch(gtx)
+				}),
+				layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return a.layoutHeaderAddWorkspaceButton(gtx)
+				}),
+				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return a.layoutHeaderThemeSelector(gtx)
+				}),
+				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return a.headerIconButtonIcon(gtx, &a.settingsButton, uiIconSettings, a.generalSettingsOpen, "打开设置")
+				}),
+			)
+		})
+	})
+}
+
+func (a *App) layoutHeaderAddWorkspaceButton(gtx layout.Context) layout.Dimensions {
+	return layout.Stack{}.Layout(gtx,
+		layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+			return a.headerIconButtonIcon(gtx, &a.headerAddWorkspaceButton, uiIconAdd, false, "新建工作区")
+		}),
+		layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+			if len(a.workspaces) <= 1 {
+				return layout.Dimensions{}
+			}
+			return layout.NE.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return layout.Inset{Top: unit.Dp(-2), Right: unit.Dp(-2)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return a.badge(gtx, fmt.Sprintf("%d", len(a.workspaces)), fluent.accent, desktopReadableText(fluent.accent))
+				})
+			})
+		}),
+	)
+}
+
+func (a *App) layoutHeaderThemeSelector(gtx layout.Context) layout.Dimensions {
+	return a.borderedSurface(gtx, fluent.surface, fluentControlRadius, accentAlpha(0x12), func(gtx layout.Context) layout.Dimensions {
+		return layout.Inset{Top: 2, Bottom: 2, Left: 2, Right: 2}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(unit.Dp(2))}.Layout(gtx,
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return a.headerIconButtonIcon(gtx, &a.themeButtons[0], uiIconSystem, a.themeMode == "system", "使用系统主题")
+				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return a.headerIconButtonIcon(gtx, &a.themeButtons[1], uiIconLight, a.themeMode == "light", "切换为浅色主题")
+				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return a.headerIconButtonIcon(gtx, &a.themeButtons[2], uiIconDark, a.themeMode == "dark", "切换为深色主题")
+				}),
+			)
+		})
+	})
+}
+
 func (a *App) layoutHeaderBrand(gtx layout.Context) layout.Dimensions {
+	if normalizeDesktopStyle(a.desktopStyle) == desktopStyleMacOS {
+		return a.layoutAppleHeaderBrand(gtx)
+	}
 	quote := currentHeaderQuote(a.headerQuoteIndex)
 	quoteText := strings.TrimSpace(quote.Text)
 	if quoteText == "" {
@@ -275,6 +426,39 @@ func (a *App) layoutHeaderBrand(gtx layout.Context) layout.Dimensions {
 							return a.singleLineLabel(gtx, text, unit.Sp(9), fluent.textMuted, font.Normal)
 						},
 					)
+				}),
+			)
+		}),
+	)
+}
+
+func (a *App) layoutAppleHeaderBrand(gtx layout.Context) layout.Dimensions {
+	spec := desktopThemeSpec(a.desktopStyle, a.resolvedThemeMode)
+	contract := appleHeaderBrandMetrics()
+	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle, Gap: gtx.Dp(unit.Dp(14))}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return fixedWidth(gtx, contract.iconSize, func(gtx layout.Context) layout.Dimensions {
+				return fixedHeight(gtx, contract.iconSize, func(gtx layout.Context) layout.Dimensions {
+					return a.elevatedBorderedSurface(gtx, spec.Colors.surfaceElevated, contract.iconRadius, spec.Colors.border, image.Pt(0, 2), func(gtx layout.Context) layout.Dimensions {
+						return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							return fixedWidth(gtx, unit.Dp(18), func(gtx layout.Context) layout.Dimensions {
+								return fixedHeight(gtx, unit.Dp(18), func(gtx layout.Context) layout.Dimensions {
+									return uiIconPhoto.Layout(gtx, spec.Colors.accent)
+								})
+							})
+						})
+					})
+				})
+			})
+		}),
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return a.titleLabel(gtx, "Image Studio", contract.titleSize)
+				}),
+				layout.Rigid(layout.Spacer{Height: unit.Dp(3)}.Layout),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return a.singleLineLabel(gtx, "图像工作区", contract.subtitleSize, spec.Colors.textMuted, font.Normal)
 				}),
 			)
 		}),
@@ -384,27 +568,19 @@ func (a *App) layoutBody(gtx layout.Context, snap snapshot) layout.Dimensions {
 		return a.layoutWorkflowShell(gtx, snap)
 	}
 	width := gtx.Constraints.Max.X
-	centerMin := gtx.Dp(unit.Dp(360))
-	leftWidth := gtx.Dp(unit.Dp(372))
-	rightWidth := gtx.Dp(unit.Dp(320))
-	if width <= gtx.Dp(unit.Dp(1180)) {
-		leftWidth = gtx.Dp(unit.Dp(336))
-		rightWidth = gtx.Dp(unit.Dp(300))
-	}
-	if overflow := leftWidth + rightWidth + centerMin - width; overflow > 0 {
-		rightMin := gtx.Dp(unit.Dp(280))
-		leftMin := gtx.Dp(unit.Dp(320))
-		reduceRight := min(overflow, max(rightWidth-rightMin, 0))
-		rightWidth -= reduceRight
-		overflow -= reduceRight
-		if overflow > 0 {
-			reduceLeft := min(overflow, max(leftWidth-leftMin, 0))
-			leftWidth -= reduceLeft
-		}
-	}
+	spec := desktopThemeSpec(a.desktopStyle, a.resolvedThemeMode)
+	contract := simplePaneContractForStyle(spec.Style, spec.Metrics, width <= gtx.Dp(unit.Dp(1180)))
+	widths := fitSimplePaneWidths(
+		width,
+		gtx.Dp(contract.preferredLeft),
+		gtx.Dp(contract.preferredRight),
+		gtx.Dp(contract.minimumLeft),
+		gtx.Dp(contract.minimumRight),
+		gtx.Dp(contract.minimumCenter),
+	)
 	return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return fixedPixelWidth(gtx, leftWidth, func(gtx layout.Context) layout.Dimensions {
+			return fixedPixelWidth(gtx, widths.left, func(gtx layout.Context) layout.Dimensions {
 				return a.layoutControls(gtx, snap)
 			})
 		}),
@@ -412,7 +588,7 @@ func (a *App) layoutBody(gtx layout.Context, snap snapshot) layout.Dimensions {
 			return a.layoutCanvas(gtx, snap)
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return fixedPixelWidth(gtx, rightWidth, func(gtx layout.Context) layout.Dimensions {
+			return fixedPixelWidth(gtx, widths.right, func(gtx layout.Context) layout.Dimensions {
 				return a.layoutHistoryAndLogs(gtx, snap)
 			})
 		}),
@@ -432,6 +608,7 @@ func (a *App) layoutWorkspaceBar(gtx layout.Context) layout.Dimensions {
 	}
 	for a.addWorkspaceButton.Clicked(gtx) {
 		a.createWorkspace()
+		a.scrollWorkspaceListToEnd()
 	}
 	for _, ws := range a.workspaces {
 		ws := ws
@@ -445,48 +622,81 @@ func (a *App) layoutWorkspaceBar(gtx layout.Context) layout.Dimensions {
 		}
 	}
 
-	return a.borderedSurface(gtx, withAlpha(fluent.toolbar, 0xf2), unit.Dp(0), fluent.border, func(gtx layout.Context) layout.Dimensions {
+	spec := desktopThemeSpec(a.desktopStyle, a.resolvedThemeMode)
+	barFill := withAlpha(fluent.toolbar, 0xf2)
+	inset := layout.Inset{Top: 6, Bottom: 7, Left: 10, Right: 10}
+	if spec.Style == desktopStyleMacOS {
+		barFill = spec.Colors.toolbar
+		inset = layout.Inset{Top: 3, Bottom: 3, Left: 20, Right: 20}
+	}
+	return a.borderedSurface(gtx, barFill, unit.Dp(0), spec.Colors.border, func(gtx layout.Context) layout.Dimensions {
 		gtx.Constraints.Min = gtx.Constraints.Max
-		return layout.Inset{Top: 6, Bottom: 7, Left: 10, Right: 10}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			children := make([]layout.FlexChild, 0, len(a.workspaces)+1)
-			for _, ws := range a.workspaces {
-				ws := ws
-				children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return layout.Inset{Right: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						return a.layoutWorkspaceTab(gtx, ws, ws.ID == a.activeWorkspaceID)
+		return inset.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					return a.workspaceList.Layout(gtx, len(a.workspaces), func(gtx layout.Context, index int) layout.Dimensions {
+						ws := a.workspaces[index]
+						return layout.Inset{Right: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							return a.layoutWorkspaceTab(gtx, ws, ws.ID == a.activeWorkspaceID)
+						})
 					})
-				}))
-			}
-			children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return fixedWidth(gtx, unit.Dp(32), func(gtx layout.Context) layout.Dimensions {
-					return fixedHeight(gtx, unit.Dp(30), func(gtx layout.Context) layout.Dimensions {
-						return a.surfaceButton(
-							gtx,
-							&a.addWorkspaceButton,
-							rgba(0xffffff, 0x00),
-							fluent.panel,
-							rgba(0xffffff, 0x00),
-							unit.Dp(4),
-							layout.Inset{},
-							func(gtx layout.Context) layout.Dimensions {
-								return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-									return fixedWidth(gtx, unit.Dp(14), func(gtx layout.Context) layout.Dimensions {
-										return fixedHeight(gtx, unit.Dp(14), func(gtx layout.Context) layout.Dimensions {
-											return uiIconAdd.Layout(gtx, fluent.textMuted)
-										})
-									})
-								})
-							},
-						)
+				}),
+				layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return a.layoutAddWorkspaceButton(gtx, spec)
+				}),
+			)
+		})
+	})
+}
+
+func (a *App) scrollWorkspaceListToEnd() {
+	a.workspaceList.ScrollToEnd = true
+	a.workspaceList.Position.BeforeEnd = false
+}
+
+func (a *App) layoutAddWorkspaceButton(gtx layout.Context, spec desktopThemeTokens) layout.Dimensions {
+	height := unit.Dp(30)
+	radius := unit.Dp(4)
+	hover := spec.Colors.panel
+	if spec.Style == desktopStyleMacOS {
+		height = unit.Dp(32)
+		radius = unit.Dp(16)
+		hover = spec.Colors.surface2
+	}
+	return fixedWidth(gtx, unit.Dp(32), func(gtx layout.Context) layout.Dimensions {
+		return fixedHeight(gtx, height, func(gtx layout.Context) layout.Dimensions {
+			return a.surfaceButton(
+				gtx,
+				&a.addWorkspaceButton,
+				rgba(0xffffff, 0x00),
+				hover,
+				rgba(0xffffff, 0x00),
+				radius,
+				layout.Inset{},
+				func(gtx layout.Context) layout.Dimensions {
+					semantic.LabelOp("新建工作区").Add(gtx.Ops)
+					return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return fixedWidth(gtx, unit.Dp(14), func(gtx layout.Context) layout.Dimensions {
+							return fixedHeight(gtx, unit.Dp(14), func(gtx layout.Context) layout.Dimensions {
+								return uiIconAdd.Layout(gtx, spec.Colors.textMuted)
+							})
+						})
 					})
-				})
-			}))
-			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.End}.Layout(gtx, children...)
+				},
+			)
 		})
 	})
 }
 
 func (a *App) layoutWorkspaceTab(gtx layout.Context, ws workspaceState, active bool) layout.Dimensions {
+	if normalizeDesktopStyle(a.desktopStyle) == desktopStyleMacOS {
+		return a.layoutAppleWorkspaceTab(gtx, ws, active)
+	}
+	return a.layoutWindowsWorkspaceTab(gtx, ws, active)
+}
+
+func (a *App) layoutWindowsWorkspaceTab(gtx layout.Context, ws workspaceState, active bool) layout.Dimensions {
 	btn := a.workspaceButton("workspace:" + ws.ID)
 	closeBtn := a.closeWorkspaceButton("workspace-close:" + ws.ID)
 	editing := a.workspaceRenameID == ws.ID
@@ -495,6 +705,9 @@ func (a *App) layoutWorkspaceTab(gtx layout.Context, ws workspaceState, active b
 	hoverBg := chooseColor(active, fluent.surface, withAlpha(fluent.surface, 0xc6))
 	border := chooseColor(active, fluent.border, rgba(0xffffff, 0x00))
 	return btn.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		semantic.Button.Add(gtx.Ops)
+		semantic.LabelOp("工作区 " + a.displayedWorkspaceName(ws)).Add(gtx.Ops)
+		semantic.SelectedOp(active).Add(gtx.Ops)
 		fill := bg
 		if btn.Hovered() {
 			fill = hoverBg
@@ -502,7 +715,7 @@ func (a *App) layoutWorkspaceTab(gtx layout.Context, ws workspaceState, active b
 		body := func(gtx layout.Context) layout.Dimensions {
 			return layout.Inset{Top: 7, Bottom: 6, Left: 10, Right: 10}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						if editing {
 							return fixedWidth(gtx, unit.Dp(96), func(gtx layout.Context) layout.Dimensions {
 								border := fluent.border2
@@ -587,6 +800,121 @@ func (a *App) layoutWorkspaceTab(gtx layout.Context, ws workspaceState, active b
 			return a.borderedTopTabSurface(gtx, fill, border, unit.Dp(6), body)
 		}
 		return a.borderedTopTabSurface(gtx, fill, border, unit.Dp(6), body)
+	})
+}
+
+func appleWorkspaceTabHeight(active bool) unit.Dp {
+	if active {
+		return unit.Dp(34)
+	}
+	return unit.Dp(32)
+}
+
+func (a *App) layoutAppleWorkspaceTab(gtx layout.Context, ws workspaceState, active bool) layout.Dimensions {
+	spec := desktopThemeSpec(a.desktopStyle, a.resolvedThemeMode)
+	btn := a.workspaceButton("workspace:" + ws.ID)
+	closeBtn := a.closeWorkspaceButton("workspace-close:" + ws.ID)
+	editing := a.workspaceRenameID == ws.ID
+	running := a.isRunning() && ws.ID == a.activeWorkspaceID
+	height := appleWorkspaceTabHeight(active)
+	radius := height / 2
+	fill := rgba(0xffffff, 0x00)
+	border := rgba(0xffffff, 0x00)
+	if active {
+		fill = spec.Colors.surfaceElevated
+		border = spec.Colors.border
+	} else if btn.Hovered() {
+		fill = spec.Colors.surface
+	}
+
+	return fixedHeight(gtx, height, func(gtx layout.Context) layout.Dimensions {
+		return btn.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			semantic.Button.Add(gtx.Ops)
+			semantic.LabelOp("工作区 " + a.displayedWorkspaceName(ws)).Add(gtx.Ops)
+			semantic.SelectedOp(active).Add(gtx.Ops)
+			body := func(gtx layout.Context) layout.Dimensions {
+				return layout.Inset{Top: 4, Bottom: 4, Left: 14, Right: 10}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle, Gap: gtx.Dp(unit.Dp(6))}.Layout(gtx,
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							if editing {
+								return fixedWidth(gtx, unit.Dp(96), func(gtx layout.Context) layout.Dimensions {
+									inputBorder := spec.Colors.border2
+									if gtx.Focused(&a.workspaceNameInput) {
+										inputBorder = spec.Colors.focusRing
+									}
+									return a.borderedSurface(gtx, spec.Colors.surface, unit.Dp(10), inputBorder, func(gtx layout.Context) layout.Dimensions {
+										return layout.Inset{Top: 2, Bottom: 2, Left: 7, Right: 7}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+											return a.editorText(gtx, &a.workspaceNameInput, "未命名", unit.Sp(11))
+										})
+									})
+								})
+							}
+							return maximumWidth(gtx, unit.Dp(132), func(gtx layout.Context) layout.Dimensions {
+								weight := font.Medium
+								textColor := spec.Colors.textMuted
+								if active {
+									weight = font.SemiBold
+									textColor = spec.Colors.text
+								}
+								return a.singleLineLabel(gtx, a.displayedWorkspaceName(ws), unit.Sp(12), textColor, weight)
+							})
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							modeLabel := ""
+							if ws.BatchMode {
+								modeLabel = "批"
+							} else if ws.LoopEnabled {
+								modeLabel = "循"
+							}
+							return a.metaBadge(gtx, modeLabel, true)
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							if !running {
+								return layout.Dimensions{}
+							}
+							return fixedWidth(gtx, unit.Dp(6), func(gtx layout.Context) layout.Dimensions {
+								return fixedHeight(gtx, unit.Dp(6), func(gtx layout.Context) layout.Dimensions {
+									return a.surface(gtx, spec.Colors.accent, unit.Dp(3), layout.Spacer{}.Layout)
+								})
+							})
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							if len(a.workspaces) <= 1 || editing {
+								return layout.Dimensions{}
+							}
+							if !btn.Hovered() {
+								return fixedWidth(gtx, unit.Dp(20), layout.Spacer{}.Layout)
+							}
+							return fixedWidth(gtx, unit.Dp(20), func(gtx layout.Context) layout.Dimensions {
+								return fixedHeight(gtx, unit.Dp(20), func(gtx layout.Context) layout.Dimensions {
+									return a.surfaceButton(
+										gtx,
+										closeBtn,
+										rgba(0xffffff, 0x00),
+										spec.Colors.surface2,
+										rgba(0xffffff, 0x00),
+										unit.Dp(10),
+										layout.Inset{Top: 4, Bottom: 4, Left: 4, Right: 4},
+										func(gtx layout.Context) layout.Dimensions {
+											semantic.LabelOp("关闭工作区 " + a.displayedWorkspaceName(ws)).Add(gtx.Ops)
+											return fixedWidth(gtx, unit.Dp(12), func(gtx layout.Context) layout.Dimensions {
+												return fixedHeight(gtx, unit.Dp(12), func(gtx layout.Context) layout.Dimensions {
+													return uiIconClose.Layout(gtx, spec.Colors.textDim)
+												})
+											})
+										},
+									)
+								})
+							})
+						}),
+					)
+				})
+			}
+			if active {
+				return a.elevatedBorderedSurface(gtx, fill, radius, border, image.Pt(0, 1), body)
+			}
+			return a.borderedSurface(gtx, fill, radius, border, body)
+		})
 	})
 }
 

@@ -95,6 +95,19 @@ func TestWorkflowShellDisablesSimpleModeBackgroundEffects(t *testing.T) {
 	}
 }
 
+func TestSurfaceEffectsFollowReducedEffectsPreference(t *testing.T) {
+	if !(&App{}).surfaceEffectsEnabled() {
+		t.Fatal("default surfaces should retain static glass highlights and shadows")
+	}
+	if (&App{reducedEffects: true}).surfaceEffectsEnabled() {
+		t.Fatal("reduced effects must disable static glass highlights and shadows")
+	}
+	var app *App
+	if app.surfaceEffectsEnabled() {
+		t.Fatal("nil app must not enable surface effects")
+	}
+}
+
 func TestHeaderIconButtonHasStableSemanticName(t *testing.T) {
 	var (
 		ops    op.Ops
@@ -153,6 +166,119 @@ func TestCompactButtonsExposeExplicitSelectedSemantics(t *testing.T) {
 	assertSemanticSelected(t, nodes, "文本未选", false)
 	assertSemanticSelected(t, nodes, "图标已选", true)
 	assertSemanticSelected(t, nodes, "强调操作", false)
+}
+
+func TestSharedControlsUseDesktopThemeDimensions(t *testing.T) {
+	previous := installedDesktopTheme
+	t.Cleanup(func() {
+		installDesktopThemeSpec(previous.Style, previous.ColorMode)
+	})
+
+	themes := []struct {
+		name          string
+		style         string
+		controlHeight int
+		iconTarget    int
+	}{
+		{name: "macos", style: desktopStyleMacOS, controlHeight: 34, iconTarget: 32},
+		{name: "windows", style: desktopStyleWindows, controlHeight: 32, iconTarget: 32},
+	}
+	for _, theme := range themes {
+		t.Run(theme.name, func(t *testing.T) {
+			installDesktopThemeSpec(theme.style, desktopColorModeLight)
+			app := &App{th: material.NewTheme(), desktopStyle: theme.style}
+			controls := []struct {
+				name      string
+				wantWidth int
+				layout    func(layout.Context) layout.Dimensions
+			}{
+				{
+					name: "compact text",
+					layout: func(gtx layout.Context) layout.Dimensions {
+						var button widget.Clickable
+						return app.compactButton(gtx, &button, "操作", false)
+					},
+				},
+				{
+					name: "compact icon text",
+					layout: func(gtx layout.Context) layout.Dimensions {
+						var button widget.Clickable
+						return app.compactIconTextButton(gtx, &button, uiIconWorkflow, "工作流", false)
+					},
+				},
+				{
+					name:      "compact icon",
+					wantWidth: theme.iconTarget,
+					layout: func(gtx layout.Context) layout.Dimensions {
+						var button widget.Clickable
+						return app.compactIconButton(gtx, &button, uiIconWorkflow, false)
+					},
+				},
+				{
+					name: "pill text",
+					layout: func(gtx layout.Context) layout.Dimensions {
+						var button widget.Clickable
+						return app.pillButton(gtx, &button, "状态", false)
+					},
+				},
+				{
+					name: "pill icon text",
+					layout: func(gtx layout.Context) layout.Dimensions {
+						var button widget.Clickable
+						return app.pillIconTextButton(gtx, &button, uiIconWorkflow, "状态", false)
+					},
+				},
+				{
+					name:      "toolbar icon",
+					wantWidth: theme.iconTarget,
+					layout: func(gtx layout.Context) layout.Dimensions {
+						var button widget.Clickable
+						return app.toolbarIconButton(gtx, &button, uiIconWorkflow, false)
+					},
+				},
+				{
+					name: "toolbar text",
+					layout: func(gtx layout.Context) layout.Dimensions {
+						var button widget.Clickable
+						return app.toolbarTextButton(gtx, &button, uiIconWorkflow, "工作流", false)
+					},
+				},
+				{
+					name:      "header icon target",
+					wantWidth: theme.iconTarget,
+					layout: func(gtx layout.Context) layout.Dimensions {
+						var button widget.Clickable
+						return app.headerIconButtonIcon(gtx, &button, uiIconAdd, false, "新建工作区")
+					},
+				},
+			}
+			for _, control := range controls {
+				t.Run(control.name, func(t *testing.T) {
+					var (
+						ops    op.Ops
+						router input.Router
+					)
+					gtx := layout.Context{
+						Ops:         &ops,
+						Source:      router.Source(),
+						Metric:      unit.Metric{PxPerDp: 1, PxPerSp: 1},
+						Constraints: layout.Constraints{Max: image.Pt(400, 100)},
+					}
+					dims := control.layout(gtx)
+					wantHeight := theme.controlHeight
+					if control.name == "header icon target" {
+						wantHeight = theme.iconTarget
+					}
+					if dims.Size.Y != wantHeight {
+						t.Fatalf("height=%d want %d", dims.Size.Y, wantHeight)
+					}
+					if control.wantWidth > 0 && dims.Size.X != control.wantWidth {
+						t.Fatalf("width=%d want %d", dims.Size.X, control.wantWidth)
+					}
+				})
+			}
+		})
+	}
 }
 
 func TestOptionalSelectedStateRequiresExplicitValue(t *testing.T) {

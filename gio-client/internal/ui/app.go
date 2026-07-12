@@ -817,6 +817,7 @@ type App struct {
 	workflowSelectedNodes            map[string]string
 	workflowCanvas                   workflowCanvasViewState
 	workflowConsoleList              widget.List
+	macCanvasToolbarLists            [4]widget.List
 	workflowConsoleOpen              bool
 	workflowBottomTab                string
 	desktopStore                     *desktopstate.Store
@@ -1094,7 +1095,13 @@ func New() *App {
 	a.settingsProfileList.List.Axis = layout.Vertical
 	a.settingsList.List.Axis = layout.Vertical
 	a.workspaceList.List.Axis = layout.Horizontal
+	a.workspaceList.List.Alignment = layout.Middle
+	a.workspaceList.List.ScrollAnyAxis = true
 	a.workflowConsoleList.List.Axis = layout.Vertical
+	for index := range a.macCanvasToolbarLists {
+		a.macCanvasToolbarLists[index].List.Axis = layout.Horizontal
+		a.macCanvasToolbarLists[index].List.ScrollAnyAxis = true
+	}
 	a.workflowLibraryList.List.Axis = layout.Vertical
 	a.workflowInspectorList.List.Axis = layout.Vertical
 	a.compareSplitSlider.Value = 0.5

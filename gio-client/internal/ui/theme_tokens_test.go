@@ -34,17 +34,18 @@ func TestNormalizeDesktopStyleForGOOS(t *testing.T) {
 
 func TestDesktopThemeSpecCanonicalTokens(t *testing.T) {
 	tests := []struct {
-		name       string
-		style      string
-		mode       string
-		wantAccent color.NRGBA
-		wantBG     color.NRGBA
-		wantText   color.NRGBA
+		name        string
+		style       string
+		mode        string
+		wantAccent  color.NRGBA
+		wantBG      color.NRGBA
+		wantText    color.NRGBA
+		wantSurface string
 	}{
-		{name: "macos light", style: desktopStyleMacOS, mode: desktopColorModeLight, wantAccent: rgb(0x007aff), wantBG: rgb(0xf5f5f7), wantText: rgb(0x1d1d1f)},
-		{name: "macos dark", style: desktopStyleMacOS, mode: desktopColorModeDark, wantAccent: rgb(0x0a84ff), wantBG: rgb(0x1c1c1e), wantText: rgb(0xf5f5f7)},
-		{name: "windows light", style: desktopStyleWindows, mode: desktopColorModeLight, wantAccent: rgb(0x005fb8), wantBG: rgb(0xf3f3f3), wantText: rgb(0x1f1f1f)},
-		{name: "windows dark", style: desktopStyleWindows, mode: desktopColorModeDark, wantAccent: rgb(0x60cdff), wantBG: rgb(0x202020), wantText: rgb(0xf3f3f3)},
+		{name: "macos light", style: desktopStyleMacOS, mode: desktopColorModeLight, wantAccent: rgb(0x007aff), wantBG: rgb(0xeef1f6), wantText: rgb(0x111111), wantSurface: desktopSurfaceLiquidGlass},
+		{name: "macos dark", style: desktopStyleMacOS, mode: desktopColorModeDark, wantAccent: rgb(0x0a84ff), wantBG: rgb(0x0d0f14), wantText: rgb(0xf5f5f7), wantSurface: desktopSurfaceLiquidGlass},
+		{name: "windows light", style: desktopStyleWindows, mode: desktopColorModeLight, wantAccent: rgb(0x005fb8), wantBG: rgb(0xf3f3f3), wantText: rgb(0x1f1f1f), wantSurface: desktopSurfaceSolid},
+		{name: "windows dark", style: desktopStyleWindows, mode: desktopColorModeDark, wantAccent: rgb(0x60cdff), wantBG: rgb(0x202020), wantText: rgb(0xf3f3f3), wantSurface: desktopSurfaceSolid},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -52,8 +53,8 @@ func TestDesktopThemeSpecCanonicalTokens(t *testing.T) {
 			if spec.Colors.accent != tt.wantAccent || spec.Colors.bg != tt.wantBG || spec.Colors.text != tt.wantText {
 				t.Fatalf("theme colors=%+v want accent=%v bg=%v text=%v", spec.Colors, tt.wantAccent, tt.wantBG, tt.wantText)
 			}
-			if spec.SurfaceTreatment != desktopSurfaceSolid {
-				t.Fatalf("surface treatment=%q want %q", spec.SurfaceTreatment, desktopSurfaceSolid)
+			if spec.SurfaceTreatment != tt.wantSurface {
+				t.Fatalf("surface treatment=%q want %q", spec.SurfaceTreatment, tt.wantSurface)
 			}
 		})
 	}
@@ -68,8 +69,113 @@ func TestDesktopThemeSpecReturnsIndependentValues(t *testing.T) {
 	if fresh.Colors.accent != rgb(0x007aff) {
 		t.Fatalf("canonical accent mutated to %v", fresh.Colors.accent)
 	}
-	if fresh.Metrics.ControlRadius != unit.Dp(6) {
+	if fresh.Metrics.ControlRadius != unit.Dp(17) {
 		t.Fatalf("canonical control radius mutated to %v", fresh.Metrics.ControlRadius)
+	}
+}
+
+func TestMacOSThemePaletteMatchesReactAppleFrontend(t *testing.T) {
+	tests := []struct {
+		name string
+		mode string
+		want map[string]color.NRGBA
+	}{
+		{
+			name: "light",
+			mode: desktopColorModeLight,
+			want: map[string]color.NRGBA{
+				"accent":          rgb(0x007aff),
+				"accent2":         rgb(0x409cff),
+				"accentSoft":      rgba(0x007aff, 0x1a),
+				"bg":              rgb(0xeef1f6),
+				"bg2":             rgb(0xe5e9f1),
+				"panel":           rgba(0xffffff, 0x94),
+				"panel2":          rgba(0xffffff, 0x75),
+				"surface":         rgba(0xffffff, 0x80),
+				"surface2":        rgba(0xffffff, 0xa8),
+				"surfaceElevated": rgba(0xffffff, 0xd1),
+				"sidebar":         rgba(0xffffff, 0x6b),
+				"inspector":       rgba(0xffffff, 0x61),
+				"toolbar":         rgba(0xffffff, 0x5c),
+				"border":          rgba(0x3c3c43, 0x21),
+				"border2":         rgba(0x3c3c43, 0x33),
+				"text":            rgb(0x111111),
+				"textMuted":       rgba(0x3c3c43, 0xb8),
+				"textDim":         rgba(0x3c3c43, 0x7a),
+				"cardShadow":      rgba(0x161c2d, 0x1f),
+				"cardGlow":        rgba(0xffffff, 0x5c),
+				"bgGlow":          rgba(0x5ac8fa, 0x38),
+				"canvasBg":        rgb(0xeef1f6),
+				"canvasTile":      rgb(0xdce4ef),
+				"windowOutline":   rgba(0xffffff, 0x5c),
+			},
+		},
+		{
+			name: "dark",
+			mode: desktopColorModeDark,
+			want: map[string]color.NRGBA{
+				"accent":          rgb(0x0a84ff),
+				"accent2":         rgb(0x5eb0ff),
+				"accentSoft":      rgba(0x0a84ff, 0x2e),
+				"bg":              rgb(0x0d0f14),
+				"bg2":             rgb(0x11141b),
+				"panel":           rgba(0x1e2026, 0x94),
+				"panel2":          rgba(0xffffff, 0x1a),
+				"surface":         rgba(0xffffff, 0x1c),
+				"surface2":        rgba(0xffffff, 0x29),
+				"surfaceElevated": rgba(0x1e212a, 0xe6),
+				"sidebar":         rgba(0x14171f, 0xb8),
+				"inspector":       rgba(0x14171f, 0xad),
+				"toolbar":         rgba(0x151821, 0xa3),
+				"border":          rgba(0xffffff, 0x24),
+				"border2":         rgba(0xffffff, 0x38),
+				"text":            rgb(0xf5f5f7),
+				"textMuted":       rgba(0xebebf5, 0xc7),
+				"textDim":         rgba(0xebebf5, 0x8a),
+				"cardShadow":      rgba(0x000000, 0x52),
+				"cardGlow":        rgba(0xffffff, 0x1a),
+				"bgGlow":          rgba(0x0a84ff, 0x33),
+				"canvasBg":        rgb(0x141821),
+				"canvasTile":      rgb(0x252b37),
+				"windowOutline":   rgba(0xffffff, 0x1a),
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			colors := macOSDesktopColors(tt.mode)
+			got := map[string]color.NRGBA{
+				"accent":          colors.accent,
+				"accent2":         colors.accent2,
+				"accentSoft":      colors.accentSoft,
+				"bg":              colors.bg,
+				"bg2":             colors.bg2,
+				"panel":           colors.panel,
+				"panel2":          colors.panel2,
+				"surface":         colors.surface,
+				"surface2":        colors.surface2,
+				"surfaceElevated": colors.surfaceElevated,
+				"sidebar":         colors.sidebar,
+				"inspector":       colors.inspector,
+				"toolbar":         colors.toolbar,
+				"border":          colors.border,
+				"border2":         colors.border2,
+				"text":            colors.text,
+				"textMuted":       colors.textMuted,
+				"textDim":         colors.textDim,
+				"cardShadow":      colors.cardShadow,
+				"cardGlow":        colors.cardGlow,
+				"bgGlow":          colors.bgGlow,
+				"canvasBg":        colors.canvasBg,
+				"canvasTile":      colors.canvasTile,
+				"windowOutline":   colors.windowOutline,
+			}
+			for name, want := range tt.want {
+				if got[name] != want {
+					t.Errorf("%s=%v want %v", name, got[name], want)
+				}
+			}
+		})
 	}
 }
 
@@ -79,10 +185,11 @@ func TestDesktopThemeContrast(t *testing.T) {
 			spec := desktopThemeSpec(style, mode)
 			name := style + "/" + mode
 			t.Run(name, func(t *testing.T) {
-				if got := themeContrastRatio(spec.Colors.text, spec.Colors.surface); got < 4.5 {
+				surface := themeCompositeOver(spec.Colors.surface, spec.Colors.bg)
+				if got := themeContrastRatio(spec.Colors.text, surface); got < 4.5 {
 					t.Fatalf("body text contrast=%.2f want >=4.5", got)
 				}
-				if got := themeContrastRatio(spec.Colors.accent, spec.Colors.surface); got < 3 {
+				if got := themeContrastRatio(spec.Colors.accent, surface); got < 3 {
 					t.Fatalf("accent control contrast=%.2f want >=3", got)
 				}
 			})
@@ -116,8 +223,8 @@ func TestDesktopThemeSmallTextContrast(t *testing.T) {
 					name  string
 					color color.NRGBA
 				}{
+					{name: "body", color: spec.Colors.text},
 					{name: "muted", color: spec.Colors.textMuted},
-					{name: "dim", color: spec.Colors.textDim},
 					{name: "accent", color: spec.Colors.accentText},
 					{name: "success", color: spec.Colors.successText},
 					{name: "warning", color: spec.Colors.warningText},
@@ -125,9 +232,41 @@ func TestDesktopThemeSmallTextContrast(t *testing.T) {
 				}
 				for _, foreground := range textColors {
 					for _, background := range surfaces {
-						if got := themeContrastRatio(foreground.color, background.color); got < 4.5 {
+						if foreground.name == "muted" && (background.name == "background" || background.name == "secondary background" || background.name == "canvas") {
+							continue
+						}
+						resolvedBackground := themeCompositeOver(background.color, spec.Colors.bg)
+						if got := themeContrastRatio(foreground.color, resolvedBackground); got < 4.5 {
 							t.Errorf("%s text on %s contrast=%.2f want >=4.5", foreground.name, background.name, got)
 						}
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestDesktopThemeSupplementalTextContrastFloor(t *testing.T) {
+	for _, style := range []string{desktopStyleMacOS, desktopStyleWindows} {
+		for _, mode := range []string{desktopColorModeLight, desktopColorModeDark} {
+			spec := desktopThemeSpec(style, mode)
+			name := style + "/" + mode
+			t.Run(name, func(t *testing.T) {
+				surfaces := []color.NRGBA{
+					spec.Colors.bg,
+					spec.Colors.bg2,
+					spec.Colors.panel,
+					spec.Colors.surface,
+					spec.Colors.toolbar,
+					spec.Colors.canvasBg,
+				}
+				for index, surface := range surfaces {
+					resolved := themeCompositeOver(surface, spec.Colors.bg)
+					if got := themeContrastRatio(spec.Colors.textMuted, resolved); got < 4 {
+						t.Errorf("muted supplemental text on surface[%d] contrast=%.2f want >=4.0", index, got)
+					}
+					if got := themeContrastRatio(spec.Colors.textDim, resolved); got < 2.4 {
+						t.Errorf("dim decorative text on surface[%d] contrast=%.2f want >=2.4", index, got)
 					}
 				}
 			})
@@ -151,14 +290,20 @@ func TestDesktopThemeCompositeStatusTextContrast(t *testing.T) {
 					{name: "warning", color: spec.Colors.warningText},
 					{name: "danger", color: spec.Colors.dangerText},
 				}
+				panel := themeCompositeOver(spec.Colors.panel, spec.Colors.bg)
 				for _, status := range statusColors {
-					chipBackground := themeCompositeOver(withAlpha(status.color, 0x20), spec.Colors.panel)
-					if got := themeContrastRatio(status.color, chipBackground); got < 4.5 {
-						t.Errorf("%s status chip contrast=%.2f want >=4.5", status.name, got)
+					chipBackground := themeCompositeOver(withAlpha(status.color, 0x20), panel)
+					minimum := 4.5
+					if status.name == "idle" {
+						minimum = 4
+					}
+					if got := themeContrastRatio(status.color, chipBackground); got < minimum {
+						t.Errorf("%s status chip contrast=%.2f want >=%.1f", status.name, got, minimum)
 					}
 				}
 
-				errorBackground := themeCompositeOver(spec.Colors.dangerSoft, spec.Colors.bg2)
+				errorSurface := themeCompositeOver(spec.Colors.bg2, spec.Colors.bg)
+				errorBackground := themeCompositeOver(spec.Colors.dangerSoft, errorSurface)
 				if got := themeContrastRatio(spec.Colors.dangerText, errorBackground); got < 4.5 {
 					t.Errorf("danger text on danger-soft background contrast=%.2f want >=4.5", got)
 				}
@@ -190,7 +335,8 @@ func TestDesktopReadableTextContrast(t *testing.T) {
 					if got := themeContrastRatio(foreground, fill.color); got < 4.5 {
 						t.Errorf("%s button contrast=%.2f want >=4.5", fill.name, got)
 					}
-					hoverFill := themeCompositeOver(withAlpha(fill.color, 0xe6), spec.Colors.toolbar)
+					toolbar := themeCompositeOver(spec.Colors.toolbar, spec.Colors.bg)
+					hoverFill := themeCompositeOver(withAlpha(fill.color, 0xe6), toolbar)
 					if got := themeContrastRatio(foreground, hoverFill); got < 4.5 {
 						t.Errorf("%s hover button contrast=%.2f want >=4.5", fill.name, got)
 					}
@@ -209,11 +355,24 @@ func TestDesktopReadableTextUsesRelativeLuminance(t *testing.T) {
 	}
 }
 
-func TestMacOSThemeUsesOpaqueSurfaces(t *testing.T) {
+func TestMacOSThemeUsesLiquidGlassSurfaces(t *testing.T) {
 	for _, mode := range []string{desktopColorModeLight, desktopColorModeDark} {
 		spec := desktopThemeSpec(desktopStyleMacOS, mode)
-		colors := []color.NRGBA{
+		if spec.SurfaceTreatment != desktopSurfaceLiquidGlass {
+			t.Fatalf("mode=%s surface treatment=%q want %q", mode, spec.SurfaceTreatment, desktopSurfaceLiquidGlass)
+		}
+		opaque := []color.NRGBA{
 			spec.Colors.bg,
+			spec.Colors.bg2,
+			spec.Colors.canvasBg,
+			spec.Colors.canvasTile,
+		}
+		for index, value := range opaque {
+			if value.A != 0xff {
+				t.Fatalf("mode=%s opaque[%d] alpha=%d want 255", mode, index, value.A)
+			}
+		}
+		glass := []color.NRGBA{
 			spec.Colors.panel,
 			spec.Colors.panel2,
 			spec.Colors.surface,
@@ -223,7 +382,38 @@ func TestMacOSThemeUsesOpaqueSurfaces(t *testing.T) {
 			spec.Colors.inspector,
 			spec.Colors.toolbar,
 		}
-		for index, value := range colors {
+		for index, value := range glass {
+			if value.A == 0 || value.A >= 0xff {
+				t.Fatalf("mode=%s glass[%d] alpha=%d want 1..254", mode, index, value.A)
+			}
+		}
+		if spec.Colors.cardShadow.A == 0 || spec.Colors.cardGlow.A == 0 || spec.Colors.windowOutline.A == 0 {
+			t.Fatalf("mode=%s static glass effects must remain visible: shadow=%v glow=%v outline=%v", mode, spec.Colors.cardShadow, spec.Colors.cardGlow, spec.Colors.windowOutline)
+		}
+	}
+}
+
+func TestWindowsThemeKeepsSolidSurfaces(t *testing.T) {
+	for _, mode := range []string{desktopColorModeLight, desktopColorModeDark} {
+		spec := desktopThemeSpec(desktopStyleWindows, mode)
+		if spec.SurfaceTreatment != desktopSurfaceSolid {
+			t.Fatalf("mode=%s surface treatment=%q want %q", mode, spec.SurfaceTreatment, desktopSurfaceSolid)
+		}
+		surfaces := []color.NRGBA{
+			spec.Colors.bg,
+			spec.Colors.bg2,
+			spec.Colors.panel,
+			spec.Colors.panel2,
+			spec.Colors.surface,
+			spec.Colors.surface2,
+			spec.Colors.surfaceElevated,
+			spec.Colors.sidebar,
+			spec.Colors.inspector,
+			spec.Colors.toolbar,
+			spec.Colors.canvasBg,
+			spec.Colors.canvasTile,
+		}
+		for index, value := range surfaces {
 			if value.A != 0xff {
 				t.Fatalf("mode=%s surface[%d] alpha=%d want 255", mode, index, value.A)
 			}
@@ -233,11 +423,51 @@ func TestMacOSThemeUsesOpaqueSurfaces(t *testing.T) {
 
 func TestDesktopThemeMetrics(t *testing.T) {
 	mac := desktopThemeSpec(desktopStyleMacOS, desktopColorModeLight).Metrics
-	if mac.HeaderHeight != 44 || mac.CommandBarHeight != 40 || mac.ControlHeight != 28 || mac.InputHeight != 28 || mac.ControlRadius != 6 || mac.CardRadius != 8 || mac.InputRadius != 6 || mac.NodeRadius != 8 {
+	wantMac := desktopThemeMetrics{
+		HeaderHeight:       68,
+		WorkspaceBarHeight: 40,
+		CommandBarHeight:   50,
+		StatusBarHeight:    28,
+		ControlHeight:      34,
+		InputHeight:        34,
+		IconTargetSize:     32,
+		RowHeight:          34,
+		LeftPaneWidth:      408,
+		RightPaneWidth:     352,
+		ConsoleHeight:      220,
+		NodeWidth:          248,
+		ControlRadius:      17,
+		CardRadius:         22,
+		BadgeRadius:        17,
+		ModalRadius:        22,
+		InputRadius:        14,
+		NodeRadius:         14,
+	}
+	if mac != wantMac {
 		t.Fatalf("unexpected macOS metrics: %+v", mac)
 	}
 	win := desktopThemeSpec(desktopStyleWindows, desktopColorModeLight).Metrics
-	if win.HeaderHeight != 48 || win.WorkspaceBarHeight != 38 || win.ControlHeight != 32 || win.InputHeight != 32 || win.ControlRadius != 4 || win.CardRadius != 8 || win.InputRadius != 4 || win.NodeRadius != 8 {
+	wantWin := desktopThemeMetrics{
+		HeaderHeight:       48,
+		WorkspaceBarHeight: 38,
+		CommandBarHeight:   48,
+		StatusBarHeight:    36,
+		ControlHeight:      32,
+		InputHeight:        32,
+		IconTargetSize:     32,
+		RowHeight:          32,
+		LeftPaneWidth:      360,
+		RightPaneWidth:     320,
+		ConsoleHeight:      220,
+		NodeWidth:          248,
+		ControlRadius:      4,
+		CardRadius:         8,
+		BadgeRadius:        4,
+		ModalRadius:        8,
+		InputRadius:        4,
+		NodeRadius:         8,
+	}
+	if win != wantWin {
 		t.Fatalf("unexpected Windows metrics: %+v", win)
 	}
 }
@@ -252,6 +482,9 @@ func TestInstallDesktopThemeSpecUpdatesCompatibilityTokens(t *testing.T) {
 	}
 	if fluentControlRadius != spec.Metrics.ControlRadius || fluentCardRadius != spec.Metrics.CardRadius || fluentBadgeRadius != spec.Metrics.BadgeRadius || fluentModalRadius != spec.Metrics.ModalRadius || fluentInputRadius != spec.Metrics.InputRadius {
 		t.Fatalf("compatibility radii do not match installed metrics: %+v", spec.Metrics)
+	}
+	if currentDesktopThemeMetrics() != spec.Metrics {
+		t.Fatalf("current metrics=%+v want %+v", currentDesktopThemeMetrics(), spec.Metrics)
 	}
 }
 

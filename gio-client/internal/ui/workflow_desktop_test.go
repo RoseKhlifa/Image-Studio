@@ -9,6 +9,7 @@ import (
 	"image-studio/gio-client/internal/desktopstate"
 	"image-studio/gio-client/internal/windowing"
 
+	"gioui.org/io/input"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/unit"
@@ -58,6 +59,99 @@ func TestWorkflowCanvasHeadlessLayoutUsesStableViewport(t *testing.T) {
 	if view.zoom != 1 {
 		t.Fatalf("initial zoom=%v", view.zoom)
 	}
+}
+
+func TestMacWorkflowPaneWidthsMatchAppleContract(t *testing.T) {
+	spec := desktopThemeSpec(desktopStyleMacOS, desktopColorModeLight)
+	wide := resolveWorkflowPaneWidths(unit.Dp(1440), spec)
+	if wide.Left != unit.Dp(408) || wide.Right != unit.Dp(352) || wide.Center != unit.Dp(680) {
+		t.Fatalf("wide panes=%+v want 408/680/352", wide)
+	}
+
+	minimum := resolveWorkflowPaneWidths(unit.Dp(1040), spec)
+	if minimum.Center < unit.Dp(400) {
+		t.Fatalf("minimum-window center=%v want >=400", minimum.Center)
+	}
+	if minimum.Left < unit.Dp(304) || minimum.Right < unit.Dp(320) {
+		t.Fatalf("minimum-window side panes=%+v below readable bounds", minimum)
+	}
+	if minimum.Left+minimum.Center+minimum.Right != unit.Dp(1040) {
+		t.Fatalf("minimum-window panes=%+v do not consume available width", minimum)
+	}
+}
+
+func TestWindowsWorkflowPaneWidthsRemainStable(t *testing.T) {
+	spec := desktopThemeSpec(desktopStyleWindows, desktopColorModeLight)
+	wide := resolveWorkflowPaneWidths(unit.Dp(1440), spec)
+	if wide.Left != spec.Metrics.LeftPaneWidth || wide.Right != spec.Metrics.RightPaneWidth {
+		t.Fatalf("wide Windows panes=%+v want theme metrics %+v", wide, spec.Metrics)
+	}
+	compact := resolveWorkflowPaneWidths(unit.Dp(1040), spec)
+	if compact.Left != unit.Dp(224) || compact.Right != unit.Dp(284) || compact.Center != unit.Dp(532) {
+		t.Fatalf("compact Windows panes=%+v want 224/532/284", compact)
+	}
+}
+
+func TestMacWorkflowPresentationMetrics(t *testing.T) {
+	mac := desktopThemeSpec(desktopStyleMacOS, desktopColorModeLight)
+	prompt := resolveWorkflowPromptEditorMetrics(mac)
+	if prompt.Height != unit.Dp(176) || prompt.Radius != unit.Dp(18) {
+		t.Fatalf("mac prompt metrics=%+v want 176dp/r18", prompt)
+	}
+	if got := workflowSectionRadius(mac); got != unit.Dp(22) {
+		t.Fatalf("mac section radius=%v want 22", got)
+	}
+
+	windows := desktopThemeSpec(desktopStyleWindows, desktopColorModeLight)
+	windowsPrompt := resolveWorkflowPromptEditorMetrics(windows)
+	if windowsPrompt.Height != unit.Dp(166) || windowsPrompt.Radius != windows.Metrics.InputRadius {
+		t.Fatalf("Windows prompt metrics=%+v want legacy metrics", windowsPrompt)
+	}
+	if got := workflowSectionRadius(windows); got != windows.Metrics.CardRadius {
+		t.Fatalf("Windows section radius=%v want %v", got, windows.Metrics.CardRadius)
+	}
+}
+
+func TestWorkflowLibraryRowsExposeSelectedSemantics(t *testing.T) {
+	previousTheme := installedDesktopTheme
+	defer installDesktopThemeSpec(previousTheme.Style, previousTheme.ColorMode)
+	spec := installDesktopThemeSpec(desktopStyleMacOS, desktopColorModeLight)
+	var (
+		ops    op.Ops
+		router input.Router
+	)
+	gtx := layout.Context{
+		Ops:         &ops,
+		Source:      router.Source(),
+		Metric:      unit.Metric{PxPerDp: 1, PxPerSp: 1},
+		Constraints: layout.Exact(image.Pt(420, 240)),
+	}
+	app := &App{
+		th:                material.NewTheme(),
+		desktopStyle:      desktopStyleMacOS,
+		resolvedThemeMode: desktopColorModeLight,
+		fontScale:         1,
+	}
+	layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return app.workflowWorkspaceRow(gtx, workspaceState{ID: "current", Name: "当前工作区"}, true, spec)
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return app.workflowWorkspaceRow(gtx, workspaceState{ID: "other", Name: "其他工作区"}, false, spec)
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return app.workflowNodeLibraryRow(gtx, workflowNodeModel{ID: "prompt", Title: "提示词节点", Subtitle: "输入提示词", Enabled: true}, workflowNodeRuntime{}, true, spec)
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return app.workflowNodeLibraryRow(gtx, workflowNodeModel{ID: "export", Title: "输出节点", Subtitle: "保存图像", Enabled: true}, workflowNodeRuntime{}, false, spec)
+		}),
+	)
+	router.Frame(&ops)
+	nodes := router.AppendSemantics(nil)
+	assertSemanticSelected(t, nodes, "当前工作区", true)
+	assertSemanticSelected(t, nodes, "其他工作区", false)
+	assertSemanticSelected(t, nodes, "提示词节点", true)
+	assertSemanticSelected(t, nodes, "输出节点", false)
 }
 
 func TestDesktopSnapshotReturnsDeepCopies(t *testing.T) {

@@ -239,6 +239,27 @@ func (a *App) canvasToolbar(gtx layout.Context, snap snapshot) layout.Dimensions
 	if snap.Result.HasItem {
 		resultDisplay = a.historyItemDisplay(snap.Result.Item)
 	}
+	showLatestJump := hasLatest && latestItem.ID != "" && latestItem.ID != snap.SelectedHistoryID
+	if normalizeDesktopStyle(a.desktopStyle) == desktopStyleMacOS {
+		return a.layoutMacCanvasToolbar(gtx, snap, macCanvasToolbarState{
+			hasCanvasResult:      hasCanvasResult,
+			showResultGridToggle: showResultGridToggle,
+			canNavigateResults:   canNavigateBatchResults,
+			canUndo:              canUndoCanvas,
+			canRedo:              canRedoCanvas,
+			canTransform:         canTransformCurrent,
+			hasSelectedCrop:      hasSelectedCropRect,
+			hasImportedMask:      hasImportedMask,
+			compareActive:        compareActive,
+			showLatestJump:       showLatestJump,
+			currentTool:          currentTool,
+			currentBrushMode:     currentBrushMode,
+			currentBrushSize:     currentBrushSize,
+			annotationKind:       currentAnnotationKind,
+			annotationColor:      currentAnnotationColor,
+			resultDisplay:        resultDisplay,
+		})
+	}
 
 	return a.borderedSurface(gtx, fluent.panel2, unit.Dp(0), fluent.border, func(gtx layout.Context) layout.Dimensions {
 		return layout.Inset{Top: 8, Bottom: 8, Left: 12, Right: 12}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
@@ -391,7 +412,6 @@ func (a *App) canvasToolbar(gtx layout.Context, snap snapshot) layout.Dimensions
 				layout.Flexed(1, layout.Spacer{}.Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					rightChildren := make([]layout.FlexChild, 0, 8)
-					showLatestJump := hasLatest && latestItem.ID != "" && latestItem.ID != snap.SelectedHistoryID
 					if showLatestJump {
 						rightChildren = append(rightChildren, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 							return a.toolbarTextButton(gtx, &a.latestResultButton, uiIconHistory, "最近结果", false)
@@ -1795,6 +1815,9 @@ func (a *App) paintCheckerboard(gtx layout.Context, area clip.Op, tile int, firs
 
 func (a *App) canvasStatusBar(gtx layout.Context, snap snapshot) layout.Dimensions {
 	defer a.recordLayoutTiming(layoutTimingCanvasStatusBar, time.Now())
+	if normalizeDesktopStyle(a.desktopStyle) == desktopStyleMacOS {
+		return a.layoutMacCanvasStatusBar(gtx, snap)
+	}
 	lastLog := ""
 	if len(snap.Logs) > 0 {
 		lastLog = snap.Logs[len(snap.Logs)-1]

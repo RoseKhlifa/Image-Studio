@@ -544,7 +544,7 @@ func (view *desktopWindowView) imagePreview(gtx layout.Context, spec desktopThem
 		view.previewValid = false
 		view.previewOp = paint.ImageOp{}
 		return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			return view.label(gtx, "等待预览", unit.Sp(11), spec.Colors.textDim, font.Medium, 1)
+			return view.label(gtx, "等待预览", unit.Sp(11), spec.Colors.textMuted, font.Medium, 1)
 		})
 	}
 	if !view.previewValid || view.previewRev != revision {

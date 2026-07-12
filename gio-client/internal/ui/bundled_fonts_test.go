@@ -1,10 +1,49 @@
 package ui
 
 import (
+	"runtime"
 	"testing"
 
 	"gioui.org/widget/material"
 )
+
+func TestDarwinSystemFontCollectionProvidesAppleFaces(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("system SF fonts are a macOS runtime contract")
+	}
+	faces := platformFontCollection()
+	if len(faces) == 0 {
+		t.Fatal("macOS system SF font collection is empty")
+	}
+	want := map[string]bool{
+		string(uiMacSansTypeface):  false,
+		string(uiMacTitleTypeface): false,
+		string(uiMacMonoTypeface):  false,
+	}
+	for _, face := range faces {
+		if _, ok := want[string(face.Font.Typeface)]; ok {
+			want[string(face.Font.Typeface)] = true
+		}
+	}
+	for typeface, found := range want {
+		if !found {
+			t.Fatalf("macOS system collection is missing %q", typeface)
+		}
+	}
+}
+
+func TestBundledFontCollectionReturnsIndependentSlices(t *testing.T) {
+	first := bundledFontCollection()
+	if len(first) == 0 {
+		t.Fatal("bundled font collection is empty")
+	}
+	original := first[0]
+	first[0] = first[len(first)-1]
+	second := bundledFontCollection()
+	if second[0].Font != original.Font {
+		t.Fatal("caller mutation leaked into cached font collection")
+	}
+}
 
 func TestDesktopTypefacesTrackDesignLanguage(t *testing.T) {
 	tests := []struct {

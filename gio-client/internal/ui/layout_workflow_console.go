@@ -126,50 +126,71 @@ func (a *App) layoutWorkflowBottomContent(gtx layout.Context, snap snapshot, spe
 }
 
 func (a *App) layoutWorkflowQueue(gtx layout.Context, snap snapshot, spec desktopThemeTokens) layout.Dimensions {
-	if !snap.Running {
+	queuedCount := len(a.desktopQueuedWorkspaceRuns)
+	if !snap.Running && queuedCount == 0 {
 		return a.workflowDockEmpty(gtx, "当前没有运行中的任务", "从命令栏运行工作流后，阶段与并发进度会显示在这里。", spec)
 	}
+	itemCount := queuedCount
+	if snap.Running {
+		itemCount++
+	}
+	a.workflowConsoleList.List.Axis = layout.Vertical
+	return a.workflowConsoleList.Layout(gtx, itemCount, func(gtx layout.Context, index int) layout.Dimensions {
+		if snap.Running && index == 0 {
+			return a.layoutWorkflowRunningQueueItem(gtx, snap, spec)
+		}
+		queueIndex := index
+		position := index + 1
+		if snap.Running {
+			queueIndex--
+			position++
+		}
+		return a.layoutWorkflowWaitingQueueItem(gtx, a.desktopQueuedWorkspaceRuns[queueIndex], position, spec)
+	})
+}
+
+func (a *App) layoutWorkflowRunningQueueItem(gtx layout.Context, snap snapshot, spec desktopThemeTokens) layout.Dimensions {
 	total := max(snap.BatchTotal, 1)
 	completed := len(snap.BatchResults)
 	progress := float32(completed) / float32(total)
-	children := []layout.FlexChild{
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-					return a.singleLineLabel(gtx, a.currentWorkspaceDisplayName(), unit.Sp(10), spec.Colors.text, font.SemiBold)
-				}),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return a.monoLabel(gtx, fmt.Sprintf("%d / %d", completed, total), unit.Sp(10), spec.Colors.accentText, font.Medium)
-				}),
-			)
-		}),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return a.singleLineLabel(gtx, snap.Status, unit.Sp(9), spec.Colors.textMuted, font.Normal)
-		}),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return workflowProgressBar(gtx, progress, spec.Colors.surface2, spec.Colors.accent)
-		}),
-	}
-	for index, workspaceID := range a.desktopQueuedWorkspaceRuns {
-		index := index
-		workspaceID := workspaceID
-		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return fixedWidth(gtx, unit.Dp(28), func(gtx layout.Context) layout.Dimensions {
-						return a.monoLabel(gtx, fmt.Sprintf("%02d", index+2), unit.Sp(8), spec.Colors.textDim, font.Medium)
-					})
-				}),
-				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-					return a.singleLineLabel(gtx, a.workspaceDisplayNameByID(workspaceID), unit.Sp(9), spec.Colors.textMuted, font.Normal)
-				}),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return a.label(gtx, "等待", unit.Sp(8), spec.Colors.warningText, font.Medium)
-				}),
-			)
-		}))
-	}
-	return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(unit.Dp(8))}.Layout(gtx, children...)
+	return layout.Inset{Bottom: unit.Dp(4)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(unit.Dp(8))}.Layout(gtx,
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+						return a.singleLineLabel(gtx, a.currentWorkspaceDisplayName(), unit.Sp(10), spec.Colors.text, font.SemiBold)
+					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return a.monoLabel(gtx, fmt.Sprintf("%d / %d", completed, total), unit.Sp(10), spec.Colors.accentText, font.Medium)
+					}),
+				)
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return a.singleLineLabel(gtx, snap.Status, unit.Sp(9), spec.Colors.textMuted, font.Normal)
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return workflowProgressBar(gtx, progress, spec.Colors.surface2, spec.Colors.accent)
+			}),
+		)
+	})
+}
+
+func (a *App) layoutWorkflowWaitingQueueItem(gtx layout.Context, workspaceID string, position int, spec desktopThemeTokens) layout.Dimensions {
+	return layout.Inset{Top: unit.Dp(2), Bottom: unit.Dp(2)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return fixedWidth(gtx, unit.Dp(28), func(gtx layout.Context) layout.Dimensions {
+					return a.monoLabel(gtx, fmt.Sprintf("%02d", position), unit.Sp(8), spec.Colors.textDim, font.Medium)
+				})
+			}),
+			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+				return a.singleLineLabel(gtx, a.workspaceDisplayNameByID(workspaceID), unit.Sp(9), spec.Colors.textMuted, font.Normal)
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return a.label(gtx, "等待", unit.Sp(8), spec.Colors.warningText, font.Medium)
+			}),
+		)
+	})
 }
 
 func (a *App) layoutWorkflowErrors(gtx layout.Context, snap snapshot, spec desktopThemeTokens) layout.Dimensions {

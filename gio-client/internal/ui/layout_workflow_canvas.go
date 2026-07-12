@@ -18,10 +18,16 @@ import (
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
 	"gioui.org/unit"
+	"gioui.org/widget"
 	"gioui.org/widget/material"
 )
 
-const workflowNodeHeight = unit.Dp(156)
+const (
+	workflowNodeHeight         = unit.Dp(156)
+	workflowCanvasMinZoom      = float32(0.65)
+	workflowCanvasMaxZoom      = float32(1.55)
+	workflowNodeMinVisualScale = float32(0.78)
+)
 
 type workflowNodePhase string
 
@@ -151,7 +157,7 @@ func (view *workflowCanvasViewState) resetViewport() {
 
 func (view *workflowCanvasViewState) zoomBy(delta float32) {
 	view.ensure()
-	view.zoom = float32(math.Max(0.65, math.Min(1.55, float64(view.zoom+delta))))
+	view.zoom = float32(math.Max(float64(workflowCanvasMinZoom), math.Min(float64(workflowCanvasMaxZoom), float64(view.zoom+delta))))
 }
 
 func (view *workflowCanvasViewState) interaction(nodeID string) *workflowNodeInteraction {
@@ -164,14 +170,41 @@ func (view *workflowCanvasViewState) interaction(nodeID string) *workflowNodeInt
 	return interaction
 }
 
-func workflowNodeSize(gtx layout.Context, spec desktopThemeTokens) image.Point {
-	width := gtx.Dp(spec.Metrics.NodeWidth)
-	height := gtx.Dp(workflowNodeHeight)
-	return image.Pt(max(width, 210), max(height, 132))
+func workflowCanvasZoom(zoom float32) float32 {
+	if zoom < workflowCanvasMinZoom {
+		return workflowCanvasMinZoom
+	}
+	if zoom > workflowCanvasMaxZoom {
+		return workflowCanvasMaxZoom
+	}
+	return zoom
+}
+
+func workflowNodeVisualScale(zoom float32) float32 {
+	return max(workflowCanvasZoom(zoom), workflowNodeMinVisualScale)
+}
+
+func workflowNodeScaledMetric(metric unit.Metric, scale float32) unit.Metric {
+	if metric.PxPerDp == 0 {
+		metric.PxPerDp = 1
+	}
+	if metric.PxPerSp == 0 {
+		metric.PxPerSp = 1
+	}
+	metric.PxPerDp *= scale
+	metric.PxPerSp *= scale
+	return metric
+}
+
+func workflowNodeSizeAtScale(gtx layout.Context, spec desktopThemeTokens, scale float32) image.Point {
+	metric := workflowNodeScaledMetric(gtx.Metric, scale)
+	width := metric.Dp(spec.Metrics.NodeWidth)
+	height := metric.Dp(workflowNodeHeight)
+	return image.Pt(max(width, metric.Dp(unit.Dp(210))), max(height, metric.Dp(unit.Dp(132))))
 }
 
 func workflowNodePixelPosition(gtx layout.Context, position image.Point, view *workflowCanvasViewState) image.Point {
-	zoom := view.zoom
+	zoom := workflowCanvasZoom(view.zoom)
 	return image.Pt(
 		int(float32(gtx.Dp(unit.Dp(position.X)))*zoom)+view.offset.X,
 		int(float32(gtx.Dp(unit.Dp(position.Y)))*zoom)+view.offset.Y,
@@ -184,9 +217,7 @@ func workflowNodeRect(gtx layout.Context, node workflowNodeModel, spec desktopTh
 		position = override
 	}
 	minPoint := workflowNodePixelPosition(gtx, position, view)
-	size := workflowNodeSize(gtx, spec)
-	size.X = int(float32(size.X) * view.zoom)
-	size.Y = int(float32(size.Y) * view.zoom)
+	size := workflowNodeSizeAtScale(gtx, spec, workflowNodeVisualScale(view.zoom))
 	return image.Rectangle{Min: minPoint, Max: minPoint.Add(size)}
 }
 
@@ -319,9 +350,11 @@ func (view *workflowCanvasViewState) paintEdges(gtx layout.Context, data workflo
 		toRect := workflowNodeRect(gtx, to, spec, view)
 		fromIndex := workflowPortIndex(from.Outputs, edge.FromPort)
 		toIndex := workflowPortIndex(to.Inputs, edge.ToPort)
-		fromPoint := image.Pt(fromRect.Max.X, workflowPortPixelY(fromRect, fromIndex))
-		toPoint := image.Pt(toRect.Min.X, workflowPortPixelY(toRect, toIndex))
-		curve := max(48, absInt(toPoint.X-fromPoint.X)/2)
+		visualScale := workflowNodeVisualScale(view.zoom)
+		fromPoint := image.Pt(fromRect.Max.X, workflowPortPixelY(gtx, fromRect, fromIndex, visualScale))
+		toPoint := image.Pt(toRect.Min.X, workflowPortPixelY(gtx, toRect, toIndex, visualScale))
+		metric := workflowNodeScaledMetric(gtx.Metric, visualScale)
+		curve := max(metric.Dp(unit.Dp(48)), absInt(toPoint.X-fromPoint.X)/2)
 		var path clip.Path
 		path.Begin(gtx.Ops)
 		path.MoveTo(f32.Pt(float32(fromPoint.X), float32(fromPoint.Y)))
@@ -334,7 +367,7 @@ func (view *workflowCanvasViewState) paintEdges(gtx layout.Context, data workflo
 		if runtime, ok := data.Runtime[edge.FromNode]; ok && runtime.Phase == workflowNodePhaseRunning {
 			lineColor = spec.Colors.accent
 		}
-		paint.FillShape(gtx.Ops, lineColor, clip.Stroke{Path: path.End(), Width: float32(max(1, gtx.Dp(unit.Dp(2))))}.Op())
+		paint.FillShape(gtx.Ops, lineColor, clip.Stroke{Path: path.End(), Width: float32(max(1, metric.Dp(unit.Dp(2))))}.Op())
 	}
 }
 
@@ -377,8 +410,9 @@ func (view *workflowCanvasViewState) layoutNode(
 			if override, ok := view.overrides[node.ID]; ok {
 				position = override
 			}
-			position.X += int(float32(gtx.Metric.PxToDp(deltaPx.X)) / view.zoom)
-			position.Y += int(float32(gtx.Metric.PxToDp(deltaPx.Y)) / view.zoom)
+			canvasZoom := workflowCanvasZoom(view.zoom)
+			position.X += int(float32(gtx.Metric.PxToDp(deltaPx.X)) / canvasZoom)
+			position.Y += int(float32(gtx.Metric.PxToDp(deltaPx.Y)) / canvasZoom)
 			position.X = clampInt(position.X, -4096, 4096)
 			position.Y = clampInt(position.Y, -4096, 4096)
 			view.setOverride(node.ID, position, data.Graph.Revision)
@@ -411,7 +445,10 @@ func (view *workflowCanvasViewState) layoutNode(
 	offset := op.Offset(rect.Min).Push(gtx.Ops)
 	defer offset.Pop()
 	localRect := image.Rectangle{Max: rect.Size()}
-	area := clip.RRect{Rect: localRect, NE: gtx.Dp(spec.Metrics.NodeRadius), NW: gtx.Dp(spec.Metrics.NodeRadius), SE: gtx.Dp(spec.Metrics.NodeRadius), SW: gtx.Dp(spec.Metrics.NodeRadius)}.Push(gtx.Ops)
+	visualScale := workflowNodeVisualScale(view.zoom)
+	nodeMetric := workflowNodeScaledMetric(gtx.Metric, visualScale)
+	nodeRadius := nodeMetric.Dp(spec.Metrics.NodeRadius)
+	area := clip.RRect{Rect: localRect, NE: nodeRadius, NW: nodeRadius, SE: nodeRadius, SW: nodeRadius}.Push(gtx.Ops)
 	interaction.drag.Add(gtx.Ops)
 	interaction.hover.Add(gtx.Ops)
 	event.Op(gtx.Ops, interaction)
@@ -433,25 +470,26 @@ func (view *workflowCanvasViewState) layoutNode(
 	if !node.Enabled {
 		fill = withAlpha(spec.Colors.surface2, 0xd8)
 	}
-	paint.FillShape(gtx.Ops, fill, clip.RRect{Rect: localRect, NE: gtx.Dp(spec.Metrics.NodeRadius), NW: gtx.Dp(spec.Metrics.NodeRadius), SE: gtx.Dp(spec.Metrics.NodeRadius), SW: gtx.Dp(spec.Metrics.NodeRadius)}.Op(gtx.Ops))
+	paint.FillShape(gtx.Ops, fill, clip.RRect{Rect: localRect, NE: nodeRadius, NW: nodeRadius, SE: nodeRadius, SW: nodeRadius}.Op(gtx.Ops))
 	borderColor := spec.Colors.border2
-	borderWidth := 1
+	borderWidth := max(1, nodeMetric.Dp(unit.Dp(1)))
 	if selected || focused {
 		borderColor = spec.Colors.focusRing
-		borderWidth = max(2, gtx.Dp(unit.Dp(2)))
+		borderWidth = max(2, nodeMetric.Dp(unit.Dp(2)))
 	}
-	paintWorkflowRectOutline(gtx, localRect, gtx.Dp(spec.Metrics.NodeRadius), borderWidth, borderColor)
+	paintWorkflowRectOutline(gtx, localRect, nodeRadius, borderWidth, borderColor)
 
-	headerHeight := max(34, gtx.Dp(unit.Dp(36)))
+	headerHeight := nodeMetric.Dp(unit.Dp(36))
 	headerColor := workflowNodePhaseColor(spec, runtimeState.Phase)
-	paint.FillShape(gtx.Ops, withAlpha(headerColor, 0x24), clip.RRect{Rect: image.Rect(0, 0, localRect.Max.X, headerHeight), NE: gtx.Dp(spec.Metrics.NodeRadius), NW: gtx.Dp(spec.Metrics.NodeRadius)}.Op(gtx.Ops))
-	paint.FillShape(gtx.Ops, withAlpha(headerColor, 0xaa), clip.Rect(image.Rect(0, headerHeight-2, localRect.Max.X, headerHeight)).Op())
+	paint.FillShape(gtx.Ops, withAlpha(headerColor, 0x24), clip.RRect{Rect: image.Rect(0, 0, localRect.Max.X, headerHeight), NE: nodeRadius, NW: nodeRadius}.Op(gtx.Ops))
+	headerRuleHeight := max(1, nodeMetric.Dp(unit.Dp(2)))
+	paint.FillShape(gtx.Ops, withAlpha(headerColor, 0xaa), clip.Rect(image.Rect(0, headerHeight-headerRuleHeight, localRect.Max.X, headerHeight)).Op())
 
 	content := layout.Context{
 		Ops:    gtx.Ops,
 		Now:    gtx.Now,
 		Source: gtx.Source,
-		Metric: gtx.Metric,
+		Metric: nodeMetric,
 		Constraints: layout.Constraints{
 			Min: localRect.Size(),
 			Max: localRect.Size(),
@@ -460,7 +498,7 @@ func (view *workflowCanvasViewState) layoutNode(
 	layout.Inset{Top: unit.Dp(10), Bottom: unit.Dp(10), Left: unit.Dp(14), Right: unit.Dp(14)}.Layout(content, func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return workflowMaterialLabel(gtx, th, node.Title, unit.Sp(13), spec.Colors.text, font.SemiBold, 1)
+				return workflowNodeTitle(gtx, th, spec, node, runtimeState)
 			}),
 			layout.Rigid(layout.Spacer{Height: unit.Dp(22)}.Layout),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -476,18 +514,51 @@ func (view *workflowCanvasViewState) layoutNode(
 			}),
 		)
 	})
-	view.paintPorts(gtx, spec, localRect, node)
+	view.paintPorts(gtx, spec, localRect, node, visualScale)
 }
 
-func (view *workflowCanvasViewState) paintPorts(gtx layout.Context, spec desktopThemeTokens, rect image.Rectangle, node workflowNodeModel) {
-	radius := max(4, gtx.Dp(unit.Dp(5)))
+func workflowNodeTitle(gtx layout.Context, th *material.Theme, spec desktopThemeTokens, node workflowNodeModel, runtimeState workflowNodeRuntime) layout.Dimensions {
+	icon := workflowNodeKindIcon(node.Kind)
+	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			size := gtx.Dp(unit.Dp(16))
+			gtx.Constraints = layout.Exact(image.Pt(size, size))
+			return icon.Layout(gtx, workflowNodePhaseColor(spec, runtimeState.Phase))
+		}),
+		layout.Rigid(layout.Spacer{Width: unit.Dp(7)}.Layout),
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			return workflowMaterialLabel(gtx, th, node.Title, unit.Sp(13), spec.Colors.text, font.SemiBold, 1)
+		}),
+	)
+}
+
+func workflowNodeKindIcon(kind workflowNodeKind) *widget.Icon {
+	switch kind {
+	case workflowNodePrompt:
+		return uiIconEdit
+	case workflowNodeSource:
+		return uiIconSource
+	case workflowNodeGenerate:
+		return uiIconSpark
+	case workflowNodePreview:
+		return uiIconVisibility
+	case workflowNodeExport:
+		return uiIconSave
+	default:
+		return uiIconWorkflow
+	}
+}
+
+func (view *workflowCanvasViewState) paintPorts(gtx layout.Context, spec desktopThemeTokens, rect image.Rectangle, node workflowNodeModel, visualScale float32) {
+	metric := workflowNodeScaledMetric(gtx.Metric, visualScale)
+	radius := max(3, metric.Dp(unit.Dp(5)))
 	for idx, port := range node.Inputs {
-		y := workflowPortPixelY(rect, idx)
+		y := workflowPortPixelY(gtx, rect, idx, visualScale)
 		center := image.Pt(0, y)
 		paint.FillShape(gtx.Ops, workflowPortColor(spec, port.Kind), clip.Ellipse(image.Rect(center.X-radius, center.Y-radius, center.X+radius, center.Y+radius)).Op(gtx.Ops))
 	}
 	for idx, port := range node.Outputs {
-		y := workflowPortPixelY(rect, idx)
+		y := workflowPortPixelY(gtx, rect, idx, visualScale)
 		center := image.Pt(rect.Max.X, y)
 		paint.FillShape(gtx.Ops, workflowPortColor(spec, port.Kind), clip.Ellipse(image.Rect(center.X-radius, center.Y-radius, center.X+radius, center.Y+radius)).Op(gtx.Ops))
 	}
@@ -592,8 +663,9 @@ func workflowPortIndex(ports []workflowPortModel, id string) int {
 	return 0
 }
 
-func workflowPortPixelY(rect image.Rectangle, index int) int {
-	return rect.Min.Y + 58 + index*25
+func workflowPortPixelY(gtx layout.Context, rect image.Rectangle, index int, visualScale float32) int {
+	metric := workflowNodeScaledMetric(gtx.Metric, visualScale)
+	return rect.Min.Y + metric.Dp(unit.Dp(58+index*25))
 }
 
 func paintWorkflowRectOutline(gtx layout.Context, rect image.Rectangle, radius int, width int, colorValue color.NRGBA) {
