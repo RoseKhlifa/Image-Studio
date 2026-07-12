@@ -213,6 +213,9 @@ func (a *App) submitActionButton(
 	border color.NRGBA,
 	fg color.NRGBA,
 ) layout.Dimensions {
+	if bg.A == 0xff {
+		fg = desktopReadableText(bg)
+	}
 	return fixedHeight(gtx, unit.Dp(44), func(gtx layout.Context) layout.Dimensions {
 		return a.surfaceButton(
 			gtx,
@@ -1099,6 +1102,7 @@ func (a *App) layoutSettingsHelpModal(gtx layout.Context) layout.Dimensions {
 }
 
 func (a *App) layoutGeneralSettingsModal(gtx layout.Context, snap snapshot) layout.Dimensions {
+	a.handleDesktopPreferenceEvents(gtx)
 	for a.closeGeneralSettingsButton.Clicked(gtx) {
 		a.closeGeneralSettingsModal()
 	}
@@ -1692,6 +1696,9 @@ func (a *App) layoutGeneralSettingsModal(gtx layout.Context, snap snapshot) layo
 	}
 	presetItems := a.presetLabelsCached(a.presets)
 	sections := []layout.Widget{
+		func(gtx layout.Context) layout.Dimensions {
+			return a.layoutDesktopExperienceSettingsCard(gtx)
+		},
 		func(gtx layout.Context) layout.Dimensions {
 			return a.generalSettingsCard(gtx, "内核执行", func(gtx layout.Context) layout.Dimensions {
 				rows := []layout.FlexChild{
@@ -2333,13 +2340,7 @@ func (a *App) settingsPaneCard(gtx layout.Context, title string, body layout.Wid
 }
 
 func (a *App) generalSettingsCard(gtx layout.Context, title string, body layout.Widget) layout.Dimensions {
-	bg := withAlpha(fluent.white, 0xb8)
-	radius := unit.Dp(12)
-	if a.isDarkTheme() {
-		bg = fluent.surfaceElevated
-		radius = unit.Dp(8)
-	}
-	return a.elevatedBorderedSurface(gtx, bg, radius, fluent.border, image.Pt(0, 1), func(gtx layout.Context) layout.Dimensions {
+	return a.elevatedBorderedSurface(gtx, fluent.surfaceElevated, fluentCardRadius, fluent.border, image.Pt(0, 1), func(gtx layout.Context) layout.Dimensions {
 		return layout.UniformInset(unit.Dp(13)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(unit.Dp(8))}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -2657,7 +2658,7 @@ func (a *App) layoutSettingsAPIKeyField(gtx layout.Context) layout.Dimensions {
 								style.SelectionColor = accentAlpha(0x3d)
 								style.TextSize = a.scaledSp(unit.Sp(13))
 								style.Font.Weight = font.Medium
-								style.Font.Typeface = uiMonoTypeface
+								style.Font.Typeface = desktopMonoTypeface(a.desktopStyle)
 								return style.Layout(gtx)
 							}),
 							layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),

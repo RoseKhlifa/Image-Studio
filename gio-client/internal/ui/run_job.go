@@ -17,6 +17,7 @@ import (
 
 	gioCompat "image-studio/gio-client/internal/compat"
 	"image-studio/gio-client/internal/kernel"
+	"image-studio/gio-client/internal/windowing"
 	sharedCompat "image-studio/shared/compat"
 
 	_ "github.com/gen2brain/avif"
@@ -241,6 +242,9 @@ func (a *App) startRunWithConfig(cfg kernel.Config, total int) {
 	a.appendLogLocked(fmt.Sprintf("开始任务 1/%d: %s", total, shortPrompt(cfg.Prompt)))
 	a.mu.Unlock()
 	a.invalidateNow()
+	if a.experienceMode == experienceModeWorkflow && a.desktopState.Preferences.AutoShowProgress {
+		a.openDesktopWindow(windowing.RoleProgress, a.activeWorkspaceID)
+	}
 
 	go func() {
 		batchStarted := time.Now()

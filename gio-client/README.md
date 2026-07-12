@@ -1,6 +1,6 @@
 # Image Studio Gio Client
 
-`gio-client/` is an independent high-performance desktop client for Windows and Linux. It uses Gio for the native GUI, reuses the existing Go request kernel from `go-cli/pkg/client`, and can act as the default `image-studio://import?...` handler on Windows / Linux.
+`gio-client/` is an independent high-performance desktop client for Windows, macOS, and Linux. It uses Gio for the complete native GUI and reuses the existing Go request kernel from `go-cli/pkg/client`.
 
 It does not embed the React frontend, Wails, WebView2, or WebKitGTK. The current Wails desktop app remains in `image-studio/` and continues to build through the existing WebView2/WebKit path.
 
@@ -10,13 +10,44 @@ It does not embed the React frontend, Wails, WebView2, or WebKitGTK. The current
 gio-client/
 ├── cmd/image-studio-gio/      # Gio app entrypoint
 ├── internal/compat/           # WebView2-compatible state bridge
+├── internal/desktopstate/     # Gio-only workspace/window preferences
+├── internal/windowing/        # Native multi-window lifecycle manager
 ├── internal/ui/               # Gio immediate-mode frontend
 └── internal/kernel/           # adapter around go-cli/pkg/client
 ```
 
-The UI keeps the current desktop control-panel / canvas / log-rail structure, but its frontend architecture is native Gio instead of React/CSS. Request payload construction, retry behavior, SSE parsing, Images API support, proxy handling, and default model constants remain owned by `go-cli/pkg/client`.
+The top bar switches between two experiences:
 
-The GUI entrypoint is built only for Windows and Linux. Other platforms compile a small unsupported stub so accidental local launches do not imply macOS support for this test client.
+- **Simple** keeps the existing control-panel / image-canvas / history-rail workflow for new users.
+- **Workflow** provides a node canvas, workspace library, inspector, queue, console, error view, and artifact view for advanced desktop use.
+
+Workflow mode can open four independent native top-level windows: canvas, console, progress, and workspace. Each window owns its Gio widgets, text shaper, operations, focus, and viewport. Shared state crosses windows only through immutable publications and commands processed by the main UI thread.
+
+The design language is selectable in Settings independently of light/dark appearance:
+
+- **macOS** follows compact HIG desktop metrics, system-blue semantics, solid surfaces, and macOS typography fallbacks.
+- **Windows** follows the existing Fluent visual contract, including its tighter radii and Windows desktop dimensions.
+
+Request payload construction, retry behavior, SSE parsing, Images API support, proxy handling, and default model constants remain owned by `go-cli/pkg/client`.
+
+The GUI entrypoint is built for Windows, macOS desktop, and Linux. Android, iOS, and WebAssembly are intentionally out of scope for this multi-window frontend.
+
+The release workflow currently publishes Windows amd64/arm64 binaries, Linux
+amd64/arm64 tarballs, and an unsigned macOS arm64 binary tarball. The macOS
+artifact is not a signed or notarized `.app` bundle, so it does not claim Finder
+integration or ownership of the `image-studio://` scheme.
+
+## Desktop Session State
+
+Gio-only preferences and workspace documents live at:
+
+```text
+<stable data root>/gio/desktop-state.json
+```
+
+This file stores the selected desktop style, simple/workflow mode, window preferences, workspace drafts, stable result references, and workflow graph positions. It does not store API keys, image bytes, base64 payloads, thumbnails, or process-local `memory://` references. See `internal/desktopstate/README.md` and `internal/ui/README.md` for ownership and extension rules.
+
+Gio does not expose cross-platform window coordinates, parent/owner relationships, or reliable always-on-top behavior on Windows/Linux. Detached windows can be moved between monitors manually; their role and size can be restored, but exact display coordinates are not persisted.
 
 ## Prompt Import Protocol
 
@@ -26,12 +57,12 @@ The prompt website can open the desktop client through:
 image-studio://import?token=XXXXXXXX
 ```
 
-Platform ownership is split intentionally:
+Protocol ownership is split intentionally:
 
-- macOS: handled by the Wails desktop app in `image-studio/`
+- macOS: Wails remains the packaged default handler; a packaged Gio `.app` can receive `app.URLEvent` when its bundle declares the scheme
 - Windows / Linux: handled by `gio-client/`
 
-The Gio client exposes protocol helpers through its CLI:
+The Gio client exposes protocol helpers on Windows/Linux through its CLI:
 
 ```bash
 go run ./cmd/image-studio-gio protocol register
@@ -65,6 +96,7 @@ On Windows the stable data root is the same registry-backed root used by WebView
 cd gio-client
 go test ./...
 go build -o /tmp/image-studio-gio ./cmd/image-studio-gio
+/tmp/image-studio-gio
 ```
 
 Linux requires Gio's native build libraries:

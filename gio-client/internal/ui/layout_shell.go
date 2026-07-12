@@ -36,7 +36,7 @@ func (a *App) layout(gtx layout.Context) layout.Dimensions {
 	a.handleCanvasKeyboardShortcuts(gtx, snap)
 
 	paint.FillShape(gtx.Ops, fluent.bg, clip.Rect{Max: gtx.Constraints.Max}.Op())
-	if !a.reducedEffects && gtx.Constraints.Max.X > 0 && gtx.Constraints.Max.Y > 0 {
+	if a.shellEffectsEnabled() && gtx.Constraints.Max.X > 0 && gtx.Constraints.Max.Y > 0 {
 		bodyStart := withAlpha(fluent.white, 0x08)
 		bodyEnd := withAlpha(fluent.bg2, 0x18)
 		topGlow := withAlpha(fluent.white, 0x70)
@@ -53,15 +53,18 @@ func (a *App) layout(gtx layout.Context) layout.Dimensions {
 		}
 	}
 	children := []layout.FlexChild{}
+	metrics := desktopThemeSpec(a.desktopStyle, a.resolvedThemeMode).Metrics
 	if !snap.Fullscreen {
 		children = append(children,
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return fixedHeight(gtx, unit.Dp(48), a.layoutHeader)
+				height := minimumTextControlHeight(gtx, metrics.HeaderHeight, a.scaledSp(unit.Sp(14)), unit.Dp(16))
+				return fixedHeight(gtx, height, a.layoutHeader)
 			}),
 		)
 		if len(a.workspaces) > 1 {
 			children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return fixedHeight(gtx, unit.Dp(38), a.layoutWorkspaceBar)
+				height := minimumTextControlHeight(gtx, metrics.WorkspaceBarHeight, a.scaledSp(unit.Sp(12)), unit.Dp(15))
+				return fixedHeight(gtx, height, a.layoutWorkspaceBar)
 			}))
 		}
 	}
@@ -70,7 +73,8 @@ func (a *App) layout(gtx layout.Context) layout.Dimensions {
 	}))
 	if !snap.Fullscreen {
 		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return fixedHeight(gtx, unit.Dp(42), func(gtx layout.Context) layout.Dimensions {
+			height := minimumTextControlHeight(gtx, metrics.StatusBarHeight, a.scaledSp(unit.Sp(10)), unit.Dp(18))
+			return fixedHeight(gtx, height, func(gtx layout.Context) layout.Dimensions {
 				return a.layoutFooter(gtx, snap)
 			})
 		}))
@@ -148,6 +152,10 @@ func (a *App) layout(gtx layout.Context) layout.Dimensions {
 	return dims
 }
 
+func (a *App) shellEffectsEnabled() bool {
+	return a != nil && !a.reducedEffects && normalizeExperienceMode(a.experienceMode) == experienceModeSimple
+}
+
 func (a *App) layoutHeader(gtx layout.Context) layout.Dimensions {
 	for idx, mode := range []string{"system", "light", "dark"} {
 		for a.themeButtons[idx].Clicked(gtx) {
@@ -181,11 +189,14 @@ func (a *App) layoutHeader(gtx layout.Context) layout.Dimensions {
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 					return a.layoutHeaderBrand(gtx)
 				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return a.layoutExperienceSwitch(gtx)
+				}),
 				layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					return layout.Stack{}.Layout(gtx,
 						layout.Stacked(func(gtx layout.Context) layout.Dimensions {
-							return a.headerIconButtonIcon(gtx, &a.headerAddWorkspaceButton, uiIconAdd, false)
+							return a.headerIconButtonIcon(gtx, &a.headerAddWorkspaceButton, uiIconAdd, false, "新建工作区")
 						}),
 						layout.Stacked(func(gtx layout.Context) layout.Dimensions {
 							if len(a.workspaces) <= 1 {
@@ -193,7 +204,7 @@ func (a *App) layoutHeader(gtx layout.Context) layout.Dimensions {
 							}
 							return layout.NE.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 								return layout.Inset{Top: unit.Dp(-2), Right: unit.Dp(-2)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-									return a.badge(gtx, fmt.Sprintf("%d", len(a.workspaces)), fluent.accent, fluent.white)
+									return a.badge(gtx, fmt.Sprintf("%d", len(a.workspaces)), fluent.accent, desktopReadableText(fluent.accent))
 								})
 							})
 						}),
@@ -205,13 +216,13 @@ func (a *App) layoutHeader(gtx layout.Context) layout.Dimensions {
 						return layout.Inset{Top: 2, Bottom: 2, Left: 2, Right: 2}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 							return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(unit.Dp(2))}.Layout(gtx,
 								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-									return a.headerIconButtonIcon(gtx, &a.themeButtons[0], uiIconSystem, a.themeMode == "system")
+									return a.headerIconButtonIcon(gtx, &a.themeButtons[0], uiIconSystem, a.themeMode == "system", "使用系统主题")
 								}),
 								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-									return a.headerIconButtonIcon(gtx, &a.themeButtons[1], uiIconLight, a.themeMode == "light")
+									return a.headerIconButtonIcon(gtx, &a.themeButtons[1], uiIconLight, a.themeMode == "light", "切换为浅色主题")
 								}),
 								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-									return a.headerIconButtonIcon(gtx, &a.themeButtons[2], uiIconDark, a.themeMode == "dark")
+									return a.headerIconButtonIcon(gtx, &a.themeButtons[2], uiIconDark, a.themeMode == "dark", "切换为深色主题")
 								}),
 							)
 						})
@@ -219,15 +230,15 @@ func (a *App) layoutHeader(gtx layout.Context) layout.Dimensions {
 				}),
 				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return a.headerIconButtonIcon(gtx, &a.githubButton, uiIconLaunch, false)
+					return a.headerIconButtonIcon(gtx, &a.githubButton, uiIconLaunch, false, "打开 GitHub 仓库")
 				}),
 				layout.Rigid(layout.Spacer{Width: unit.Dp(4)}.Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return a.headerIconButtonIcon(gtx, &a.headerStarButton, uiIconStar, false)
+					return a.headerIconButtonIcon(gtx, &a.headerStarButton, uiIconStar, false, "在 GitHub 收藏项目")
 				}),
 				layout.Rigid(layout.Spacer{Width: unit.Dp(4)}.Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return a.headerIconButtonIcon(gtx, &a.settingsButton, uiIconSettings, a.generalSettingsOpen)
+					return a.headerIconButtonIcon(gtx, &a.settingsButton, uiIconSettings, a.generalSettingsOpen, "打开设置")
 				}),
 			)
 		})
@@ -368,6 +379,9 @@ func (a *App) layoutFooter(gtx layout.Context, snap snapshot) layout.Dimensions 
 func (a *App) layoutBody(gtx layout.Context, snap snapshot) layout.Dimensions {
 	if snap.Fullscreen {
 		return a.layoutCanvas(gtx, snap)
+	}
+	if a.experienceMode == experienceModeWorkflow {
+		return a.layoutWorkflowShell(gtx, snap)
 	}
 	width := gtx.Constraints.Max.X
 	centerMin := gtx.Dp(unit.Dp(360))

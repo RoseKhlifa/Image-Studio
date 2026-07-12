@@ -180,9 +180,9 @@ func TestHistoryItemFromRunPreviewOnlyRemoteKeepsRawAndDefersSavedPaths(t *testi
 
 func TestSaveConfigAndHistoryWithPreviewModeStoresHistoryFullAndHydratesImageB64(t *testing.T) {
 	root := t.TempDir()
-	origStable := stableDataRootFunc
-	stableDataRootFunc = func() (string, error) { return root, nil }
-	defer func() { stableDataRootFunc = origStable }()
+	origStable := StableDataRootForTest()
+	SetStableDataRootForTest(func() (string, error) { return root, nil })
+	defer SetStableDataRootForTest(origStable)
 
 	cfg := kernel.Config{
 		Prompt:       "cat",
@@ -218,9 +218,9 @@ func TestSaveConfigAndHistoryWithPreviewModeStoresHistoryFullAndHydratesImageB64
 
 func TestSaveConfigAndHistorySerializesConcurrentHistoryUpdates(t *testing.T) {
 	root := t.TempDir()
-	origStable := stableDataRootFunc
-	stableDataRootFunc = func() (string, error) { return root, nil }
-	defer func() { stableDataRootFunc = origStable }()
+	origStable := StableDataRootForTest()
+	SetStableDataRootForTest(func() (string, error) { return root, nil })
+	defer SetStableDataRootForTest(origStable)
 
 	const total = 24
 	errCh := make(chan error, total)
@@ -270,9 +270,9 @@ func TestSaveConfigAndHistorySerializesConcurrentHistoryUpdates(t *testing.T) {
 
 func TestSaveStatePrunesHistoryFullForNonPreviewOnlyHistory(t *testing.T) {
 	root := t.TempDir()
-	origStable := stableDataRootFunc
-	stableDataRootFunc = func() (string, error) { return root, nil }
-	defer func() { stableDataRootFunc = origStable }()
+	origStable := StableDataRootForTest()
+	SetStableDataRootForTest(func() (string, error) { return root, nil })
+	defer SetStableDataRootForTest(origStable)
 
 	state := shared.State{
 		History: []shared.HistoryItem{

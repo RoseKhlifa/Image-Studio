@@ -14,12 +14,16 @@ import (
 )
 
 func (a *App) initWorkspaces() {
+	if a.restoreDesktopWorkspaces() {
+		return
+	}
 	ws := workspaceState{
 		ID:   fmt.Sprintf("ws-%d", time.Now().UnixNano()),
 		Name: "图片 1",
 	}
 	a.workspaces = []workspaceState{ws}
 	a.activeWorkspaceID = ws.ID
+	a.ensureWorkflowGraph(ws.ID)
 	a.saveActiveWorkspaceSnapshot()
 }
 
@@ -135,7 +139,9 @@ func (a *App) saveActiveWorkspaceSnapshot() {
 	if strings.TrimSpace(a.activeWorkspaceID) == "" {
 		return
 	}
+	a.mu.Lock()
 	snapshot := a.buildWorkspaceSnapshot()
+	a.mu.Unlock()
 	next := make([]workspaceState, 0, len(a.workspaces))
 	found := false
 	for _, ws := range a.workspaces {
@@ -321,6 +327,7 @@ func (a *App) createWorkspace() {
 		SelectedPresetID:         "",
 	}
 	a.workspaces = append(a.workspaces, ws)
+	a.ensureWorkflowGraph(ws.ID)
 	a.workspaceButtons = map[string]*widget.Clickable{}
 	a.closeWorkspaceButtons = map[string]*widget.Clickable{}
 	a.activeWorkspaceID = ws.ID
@@ -369,6 +376,7 @@ func (a *App) closeWorkspace(id string) {
 		next = append(next, ws)
 	}
 	a.workspaces = next
+	a.deleteWorkflowWorkspaceState(id)
 	a.workspaceButtons = map[string]*widget.Clickable{}
 	a.closeWorkspaceButtons = map[string]*widget.Clickable{}
 	if a.activeWorkspaceID == id && len(next) > 0 {

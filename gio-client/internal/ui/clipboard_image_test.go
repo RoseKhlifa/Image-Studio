@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	sharedCompat "image-studio/shared/compat"
 )
@@ -65,14 +66,27 @@ func TestImportClipboardImageDataAddsVirtualSourceAndCanvasResult(t *testing.T) 
 	if len(paths) != 1 || !strings.HasPrefix(paths[0], virtualImagePrefix) {
 		t.Fatalf("sourcePaths=%v want one virtual image path", paths)
 	}
-	if app.result.SavedPath != paths[0] {
-		t.Fatalf("result savedPath=%q want %q", app.result.SavedPath, paths[0])
-	}
-	if app.mode != "edit" || app.batchMode {
-		t.Fatalf("mode=%q batchMode=%v want edit/false", app.mode, app.batchMode)
-	}
-	if app.result.Image == nil {
-		t.Fatal("expected imported clipboard image preview")
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		app.mu.Lock()
+		savedPath := app.result.SavedPath
+		mode := app.mode
+		batchMode := app.batchMode
+		imageReady := app.result.Image != nil
+		app.mu.Unlock()
+		if savedPath != paths[0] {
+			t.Fatalf("result savedPath=%q want %q", savedPath, paths[0])
+		}
+		if mode != "edit" || batchMode {
+			t.Fatalf("mode=%q batchMode=%v want edit/false", mode, batchMode)
+		}
+		if imageReady {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("expected imported clipboard image preview")
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 

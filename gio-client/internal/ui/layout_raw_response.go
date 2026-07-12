@@ -63,7 +63,7 @@ func (a *App) layoutRawResponseModal(gtx layout.Context, snap snapshot) layout.D
 							style.Color = fluent.textMuted
 							style.HintColor = fluent.textDim
 							style.TextSize = a.scaledSp(unit.Sp(11))
-							style.Font.Typeface = uiMonoTypeface
+							style.Font.Typeface = desktopMonoTypeface(a.desktopStyle)
 							style.Font.Weight = font.Normal
 							return style.Layout(gtx)
 						})

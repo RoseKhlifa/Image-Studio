@@ -10,12 +10,14 @@ import (
 	"time"
 
 	gioCompat "image-studio/gio-client/internal/compat"
+	"image-studio/gio-client/internal/desktopstate"
 	"image-studio/gio-client/internal/kernel"
 	sharedCompat "image-studio/shared/compat"
 
 	"gioui.org/app"
 	"gioui.org/gesture"
 	"gioui.org/io/pointer"
+	"gioui.org/io/system"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/paint"
@@ -180,16 +182,18 @@ type App struct {
 	th     *material.Theme
 	runner kernel.Runner
 
-	controlsList        widget.List
-	logList             widget.List
-	historyList         widget.List
-	historyTimelineList widget.List
-	advancedList        widget.List
-	promptGroupList     widget.List
-	promptHelperList    widget.List
-	settingsProfileList widget.List
-	settingsList        widget.List
-	workspaceList       widget.List
+	controlsList          widget.List
+	logList               widget.List
+	historyList           widget.List
+	historyTimelineList   widget.List
+	advancedList          widget.List
+	promptGroupList       widget.List
+	promptHelperList      widget.List
+	settingsProfileList   widget.List
+	settingsList          widget.List
+	workspaceList         widget.List
+	workflowLibraryList   widget.List
+	workflowInspectorList widget.List
 
 	apiKeyInput                    widget.Editor
 	baseURLInput                   widget.Editor
@@ -266,6 +270,8 @@ type App struct {
 	editAutoAspectResolution string
 	themeMode                string
 	resolvedThemeMode        string
+	desktopStyle             string
+	experienceMode           string
 	fontScale                float64
 	reducedEffects           bool
 	imagesNewAPICompat       bool
@@ -474,6 +480,38 @@ type App struct {
 	composeLoopPreviewButtons                []widget.Clickable
 	generalProxyButtons                      []widget.Clickable
 	generalKeepLogsButtons                   []widget.Clickable
+	experienceModeButtons                    []widget.Clickable
+	desktopStyleButtons                      []widget.Clickable
+	generalStartupModeButtons                []widget.Clickable
+	generalWindowLayoutButtons               []widget.Clickable
+	generalAutoProgressToggle                widget.Clickable
+	generalReopenWindowsToggle               widget.Clickable
+	generalRestoreSessionToggle              widget.Clickable
+	workflowModeButtons                      []widget.Clickable
+	workflowQualityButtons                   []widget.Clickable
+	workflowFormatButtons                    []widget.Clickable
+	workflowSizeButtons                      []widget.Clickable
+	workflowBottomTabButtons                 []widget.Clickable
+	workflowPreviewButtons                   []widget.Clickable
+	workflowZoomOutButton                    widget.Clickable
+	workflowZoomInButton                     widget.Clickable
+	workflowFitButton                        widget.Clickable
+	workflowRunButton                        widget.Clickable
+	workflowCancelButton                     widget.Clickable
+	workflowDetachCanvasButton               widget.Clickable
+	workflowDetachConsoleButton              widget.Clickable
+	workflowDockDetachConsoleButton          widget.Clickable
+	workflowOpenProgressButton               widget.Clickable
+	workflowToggleConsoleButton              widget.Clickable
+	workflowResetGraphButton                 widget.Clickable
+	workflowCopyLogsButton                   widget.Clickable
+	workflowAddWorkspaceButton               widget.Clickable
+	workflowAddSourcesButton                 widget.Clickable
+	workflowClearSourcesButton               widget.Clickable
+	workflowOpenOutputButton                 widget.Clickable
+	workflowNodeButtons                      map[string]*widget.Clickable
+	workflowSidebarWorkspaceButtons          map[string]*widget.Clickable
+	workflowWorkspaceWindowButtons           map[string]*widget.Clickable
 	headerAddWorkspaceButton                 widget.Clickable
 	headerQuoteButton                        widget.Clickable
 	githubButton                             widget.Clickable
@@ -775,6 +813,29 @@ type App struct {
 	workspaceLastClickID             string
 	workspaceLastClickAt             time.Time
 	headerQuoteIndex                 int
+	workflowGraphs                   map[string]workflowGraphModel
+	workflowSelectedNodes            map[string]string
+	workflowCanvas                   workflowCanvasViewState
+	workflowConsoleList              widget.List
+	workflowConsoleOpen              bool
+	workflowBottomTab                string
+	desktopStore                     *desktopstate.Store
+	desktopState                     desktopstate.State
+	desktopWindows                   DesktopWindowController
+	desktopPublishMu                 sync.RWMutex
+	desktopPublished                 desktopPublication
+	desktopPublishRevision           uint64
+	desktopDraftModels               map[string]desktopDraftModel
+	desktopCommands                  chan desktopCommand
+	desktopQueuedWorkspaceRuns       []string
+	desktopPendingMoveMu             sync.Mutex
+	desktopPendingMoves              map[string]desktopCommand
+	desktopWindowSizeMu              sync.RWMutex
+	desktopWindowSizes               map[string]image.Point
+	desktopSessionMu                 sync.Mutex
+	desktopSession                   *desktopSessionActor
+	desktopSessionClosed             bool
+	raiseMainWindow                  func()
 	darwinAppKitView                 uintptr
 	lastGlobalPointer                image.Point
 	lastGlobalPressPos               image.Point
@@ -791,8 +852,15 @@ func New() *App {
 	}
 	themeMode := normalizeThemeMode(compatState.Settings.Theme)
 	resolvedThemeMode := resolveThemeMode(themeMode)
+	desktopStore, desktopState, desktopStateErr := loadGioDesktopState()
+	desktopStyle := normalizeDesktopStyle(string(desktopState.Preferences.InterfaceStyle))
+	if desktopState.Revision == 0 && desktopState.UpdatedAt == 0 {
+		desktopStyle = normalizeDesktopStyle("")
+		desktopState.Preferences.InterfaceStyle = desktopstate.InterfaceStyle(desktopStyle)
+	}
+	experienceMode := normalizeExperienceMode(string(desktopState.Preferences.ExperienceMode))
 	fontScale := normalizeFontScale(compatState.Settings.FontScale)
-	fluent = themePalette(resolvedThemeMode)
+	installDesktopThemeSpec(desktopStyle, resolvedThemeMode)
 	th := material.NewTheme()
 	collection := bundledFontCollection()
 	if len(collection) > 0 {
@@ -800,12 +868,12 @@ func New() *App {
 	} else {
 		th.Shaper = text.NewShaper()
 	}
-	th.Face = uiSansTypeface
+	th.Face = desktopSansTypeface(desktopStyle)
 	th.Palette = material.Palette{
 		Bg:         fluent.bg,
 		Fg:         fluent.text,
 		ContrastBg: fluent.accent,
-		ContrastFg: fluent.white,
+		ContrastFg: desktopReadableText(fluent.accent),
 	}
 	th.TextSize = unit.Sp(float32(14) * float32(fontScale))
 	a := &App{
@@ -844,6 +912,8 @@ func New() *App {
 		editAutoAspectResolution:                "",
 		themeMode:                               themeMode,
 		resolvedThemeMode:                       resolvedThemeMode,
+		desktopStyle:                            desktopStyle,
+		experienceMode:                          experienceMode,
 		fontScale:                               fontScale,
 		reducedEffects:                          compatState.Settings.ReducedEffects,
 		imagesNewAPICompat:                      cfg.ImagesNewAPICompat,
@@ -895,6 +965,16 @@ func New() *App {
 		composeLoopPreviewButtons:               make([]widget.Clickable, 2),
 		generalProxyButtons:                     make([]widget.Clickable, len(proxyChoices)),
 		generalKeepLogsButtons:                  make([]widget.Clickable, 2),
+		experienceModeButtons:                   make([]widget.Clickable, 2),
+		desktopStyleButtons:                     make([]widget.Clickable, 2),
+		generalStartupModeButtons:               make([]widget.Clickable, 2),
+		generalWindowLayoutButtons:              make([]widget.Clickable, 3),
+		workflowModeButtons:                     make([]widget.Clickable, len(modeChoices)),
+		workflowQualityButtons:                  make([]widget.Clickable, len(qualityChoices)),
+		workflowFormatButtons:                   make([]widget.Clickable, len(formatChoices)),
+		workflowSizeButtons:                     make([]widget.Clickable, len(sizeChoices)),
+		workflowBottomTabButtons:                make([]widget.Clickable, 4),
+		workflowPreviewButtons:                  make([]widget.Clickable, len(partialPreviewChoices)),
 		pruneGeneralHistoryButtons:              make([]widget.Clickable, 2),
 		modeButtons:                             make([]widget.Clickable, len(modeChoices)),
 		apiButtons:                              make([]widget.Clickable, len(apiChoices)),
@@ -960,6 +1040,17 @@ func New() *App {
 		historyActionButtons:                    map[string]*widget.Clickable{},
 		workspaceButtons:                        map[string]*widget.Clickable{},
 		closeWorkspaceButtons:                   map[string]*widget.Clickable{},
+		workflowNodeButtons:                     map[string]*widget.Clickable{},
+		workflowWorkspaceWindowButtons:          map[string]*widget.Clickable{},
+		workflowGraphs:                          map[string]workflowGraphModel{},
+		workflowSelectedNodes:                   map[string]string{},
+		workflowConsoleOpen:                     true,
+		workflowBottomTab:                       "console",
+		desktopStore:                            desktopStore,
+		desktopState:                            desktopState,
+		desktopCommands:                         make(chan desktopCommand, 256),
+		desktopPendingMoves:                     map[string]desktopCommand{},
+		workflowSidebarWorkspaceButtons:         map[string]*widget.Clickable{},
 		expandedPromptGroups:                    map[string]bool{},
 		promptHelperOpen:                        false,
 		promptHelperTab:                         "templates",
@@ -981,6 +1072,9 @@ func New() *App {
 	if compatErr != nil {
 		a.appendLogLocked("兼容状态读取失败: " + compatErr.Error())
 	}
+	if desktopStateErr != nil {
+		a.appendLogLocked("Gio 桌面会话读取失败，已使用安全默认值: " + desktopStateErr.Error())
+	}
 	if prefs := compatState.Settings.AdvancedFloatingPanel; prefs != nil {
 		if prefs.X != nil {
 			a.advancedPanelPos.X = *prefs.X
@@ -1000,6 +1094,9 @@ func New() *App {
 	a.settingsProfileList.List.Axis = layout.Vertical
 	a.settingsList.List.Axis = layout.Vertical
 	a.workspaceList.List.Axis = layout.Horizontal
+	a.workflowConsoleList.List.Axis = layout.Vertical
+	a.workflowLibraryList.List.Axis = layout.Vertical
+	a.workflowInspectorList.List.Axis = layout.Vertical
 	a.compareSplitSlider.Value = 0.5
 	a.configureEditors(cfg)
 	a.historyQueryInput.SingleLine = true
@@ -1129,9 +1226,19 @@ func (a *App) applyRuntimeConfig(cfg kernel.Config) {
 func (a *App) Run(w *app.Window) error {
 	a.window = w
 	a.invalidate = w.Invalidate
+	a.raiseMainWindow = func() {
+		w.Perform(system.ActionRaise)
+		w.Invalidate()
+	}
+	session := a.startDesktopSessionActor(w.Invalidate)
+	defer a.stopDesktopSessionActor(session)
 	var ops op.Ops
 	for {
-		switch e := w.Event().(type) {
+		event := w.Event()
+		if _, destroying := event.(app.DestroyEvent); !destroying {
+			a.handleDesktopSessionEvent(session)
+		}
+		switch e := event.(type) {
 		case app.ViewEvent:
 			a.handlePlatformViewEvent(e)
 		case app.ConfigEvent:
@@ -1143,7 +1250,11 @@ func (a *App) Run(w *app.Window) error {
 				a.refreshSystemTheme()
 			}
 		case app.DestroyEvent:
+			a.stopDesktopSessionActor(session)
 			a.saveCurrentConfig()
+			if err := a.saveGioDesktopState(); err != nil {
+				a.appendLog("保存 Gio 桌面会话失败: " + err.Error())
+			}
 			a.cancelRun()
 			a.cleanupRuntimeArtifactsOnExit()
 			return e.Err

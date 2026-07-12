@@ -62,7 +62,7 @@ Thumbs.db
 .tmp-*/
 .tmp-home/
 .tmp-npm-cache/
-image-studio-gio
+/image-studio-gio
 gio-client/image-studio-gio
 
 # Frontend (wails-generated hash files)

@@ -907,19 +907,13 @@ func (a *App) invalidateNow() {
 	a.noteRenderActivityLocked(time.Now())
 	a.snapshotReady = false
 	a.mu.Unlock()
-	if a.invalidate != nil {
-		a.invalidate()
-	}
+	a.requestWakeup()
 }
 
 func (a *App) invalidateSoon(delay time.Duration) {
 	a.mu.Lock()
 	a.noteRenderActivityLocked(time.Now())
 	a.snapshotReady = false
-	if a.invalidate == nil {
-		a.mu.Unlock()
-		return
-	}
 	if a.invalidateQueued {
 		a.mu.Unlock()
 		return
@@ -930,11 +924,7 @@ func (a *App) invalidateSoon(delay time.Duration) {
 	time.AfterFunc(delay, func() {
 		a.mu.Lock()
 		a.invalidateQueued = false
-		current := a.invalidate
 		a.mu.Unlock()
-		if current == nil {
-			return
-		}
-		current()
+		a.requestWakeup()
 	})
 }
