@@ -40,22 +40,46 @@ func (a *App) layoutWorkflowLibrary(gtx layout.Context, snap snapshot, spec desk
 		gtx.Constraints.Min = gtx.Constraints.Max
 		return a.workflowLibraryList.Layout(gtx, 1, func(gtx layout.Context, _ int) layout.Dimensions {
 			return layout.Inset{Top: 14, Bottom: 16, Left: 12, Right: 12}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(unit.Dp(14))}.Layout(gtx,
+				children := []layout.FlexChild{
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						return a.workflowLibraryHeader(gtx, spec)
 					}),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return a.workflowWorkspaceSection(gtx, spec)
-					}),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return workflowDivider(gtx, spec.Colors.border)
-					}),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return a.workflowNodeLibrarySection(gtx, data, spec)
-					}),
-				)
+				}
+				if spec.Style == desktopStyleMacOS {
+					children = append(children,
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return a.workflowLibrarySectionCard(gtx, spec, func(gtx layout.Context) layout.Dimensions {
+								return a.workflowWorkspaceSection(gtx, spec)
+							})
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return a.workflowLibrarySectionCard(gtx, spec, func(gtx layout.Context) layout.Dimensions {
+								return a.workflowNodeLibrarySection(gtx, data, spec)
+							})
+						}),
+					)
+				} else {
+					children = append(children,
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return a.workflowWorkspaceSection(gtx, spec)
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return workflowDivider(gtx, spec.Colors.border)
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return a.workflowNodeLibrarySection(gtx, data, spec)
+						}),
+					)
+				}
+				return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(unit.Dp(14))}.Layout(gtx, children...)
 			})
 		})
+	})
+}
+
+func (a *App) workflowLibrarySectionCard(gtx layout.Context, spec desktopThemeTokens, body layout.Widget) layout.Dimensions {
+	return a.borderedSurface(gtx, spec.Colors.surfaceElevated, workflowSectionRadius(spec), spec.Colors.border, func(gtx layout.Context) layout.Dimensions {
+		return layout.UniformInset(unit.Dp(14)).Layout(gtx, body)
 	})
 }
 
@@ -64,10 +88,10 @@ func (a *App) workflowLibraryHeader(gtx layout.Context, spec desktopThemeTokens)
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return a.label(gtx, "工作流资源", unit.Sp(12), spec.Colors.text, font.SemiBold)
+					return a.label(gtx, "工作流资源", workflowTextSize(spec, 13, 12), spec.Colors.text, font.SemiBold)
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return a.label(gtx, "工作区与真实执行节点", unit.Sp(9), spec.Colors.textDim, font.Normal)
+					return a.label(gtx, "工作区与真实执行节点", workflowTextSize(spec, 11, 9), spec.Colors.textDim, font.Normal)
 				}),
 			)
 		}),
@@ -95,13 +119,17 @@ func (a *App) workflowWorkspaceSection(gtx layout.Context, spec desktopThemeToke
 func (a *App) workflowWorkspaceRow(gtx layout.Context, workspace workspaceState, active bool, spec desktopThemeTokens) layout.Dimensions {
 	button := a.workflowSidebarWorkspaceButton(workspace.ID)
 	openButton := a.workflowWorkspaceWindowButton(workspace.ID)
+	verticalInset := unit.Dp(7)
+	if spec.Style == desktopStyleMacOS {
+		verticalInset = unit.Dp(8)
+	}
 	bg := rgba(0xffffff, 0x00)
 	if active {
 		bg = withAlpha(spec.Colors.accent, 0x18)
 	}
 	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle, Gap: gtx.Dp(unit.Dp(4))}.Layout(gtx,
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			return a.surfaceButton(gtx, button, bg, withAlpha(spec.Colors.accent, 0x12), withAlpha(spec.Colors.accent, 0x22), spec.Metrics.ControlRadius, layout.Inset{Top: 7, Bottom: 7, Left: 9, Right: 9}, func(gtx layout.Context) layout.Dimensions {
+			return a.surfaceButton(gtx, button, bg, withAlpha(spec.Colors.accent, 0x12), withAlpha(spec.Colors.accent, 0x22), spec.Metrics.ControlRadius, layout.Inset{Top: verticalInset, Bottom: verticalInset, Left: 9, Right: 9}, func(gtx layout.Context) layout.Dimensions {
 				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle, Gap: gtx.Dp(unit.Dp(7))}.Layout(gtx,
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						colorValue := spec.Colors.textDim
@@ -115,10 +143,10 @@ func (a *App) workflowWorkspaceRow(gtx layout.Context, workspace workspaceState,
 						})
 					}),
 					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-						return a.singleLineLabel(gtx, a.displayedWorkspaceName(workspace), unit.Sp(10), spec.Colors.text, chooseFontWeight(active))
+						return a.singleLineLabel(gtx, a.displayedWorkspaceName(workspace), workflowTextSize(spec, 12, 10), spec.Colors.text, chooseFontWeight(active))
 					}),
 				)
-			})
+			}, active)
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return fixedWidth(gtx, unit.Dp(30), func(gtx layout.Context) layout.Dimensions {
@@ -169,28 +197,35 @@ func (a *App) workflowNodeLibraryRow(gtx layout.Context, node workflowNodeModel,
 			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return a.singleLineLabel(gtx, node.Title, unit.Sp(10), spec.Colors.text, chooseFontWeight(selected))
+						return a.singleLineLabel(gtx, node.Title, workflowTextSize(spec, 12, 10), spec.Colors.text, chooseFontWeight(selected))
 					}),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return a.singleLineLabel(gtx, node.Subtitle, unit.Sp(9), spec.Colors.textDim, font.Normal)
+						return a.singleLineLabel(gtx, node.Subtitle, workflowTextSize(spec, 11, 9), spec.Colors.textDim, font.Normal)
 					}),
 				)
 			}),
 		)
-	})
+	}, selected)
 }
 
 func (a *App) workflowSectionTitle(gtx layout.Context, title string, count string, spec desktopThemeTokens) layout.Dimensions {
 	return layout.Inset{Bottom: unit.Dp(3)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-				return a.label(gtx, title, unit.Sp(9), spec.Colors.textMuted, font.SemiBold)
+				return a.label(gtx, title, workflowTextSize(spec, 11, 9), spec.Colors.textMuted, font.SemiBold)
 			}),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return a.monoLabel(gtx, count, unit.Sp(9), spec.Colors.textDim, font.Medium)
+				return a.monoLabel(gtx, count, workflowTextSize(spec, 11, 9), spec.Colors.textDim, font.Medium)
 			}),
 		)
 	})
+}
+
+func workflowSectionRadius(spec desktopThemeTokens) unit.Dp {
+	if spec.Style == desktopStyleMacOS {
+		return unit.Dp(22)
+	}
+	return spec.Metrics.CardRadius
 }
 
 func workflowDivider(gtx layout.Context, colorValue color.NRGBA) layout.Dimensions {

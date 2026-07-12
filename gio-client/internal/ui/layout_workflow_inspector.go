@@ -22,19 +22,38 @@ func (a *App) layoutWorkflowInspector(gtx layout.Context, snap snapshot, spec de
 		gtx.Constraints.Min = gtx.Constraints.Max
 		return a.workflowInspectorList.Layout(gtx, 1, func(gtx layout.Context, _ int) layout.Dimensions {
 			return layout.Inset{Top: 14, Bottom: 18, Left: 14, Right: 14}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(unit.Dp(14))}.Layout(gtx,
+				children := []layout.FlexChild{
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						return a.workflowInspectorHeader(gtx, node, data.Runtime[node.ID], spec)
 					}),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return workflowDivider(gtx, spec.Colors.border)
-					}),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return a.layoutWorkflowNodeInspector(gtx, snap, node, spec)
-					}),
-				)
+				}
+				if spec.Style == desktopStyleMacOS {
+					children = append(children,
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return a.workflowInspectorSectionCard(gtx, spec, func(gtx layout.Context) layout.Dimensions {
+								return a.layoutWorkflowNodeInspector(gtx, snap, node, spec)
+							})
+						}),
+					)
+				} else {
+					children = append(children,
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return workflowDivider(gtx, spec.Colors.border)
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return a.layoutWorkflowNodeInspector(gtx, snap, node, spec)
+						}),
+					)
+				}
+				return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(unit.Dp(14))}.Layout(gtx, children...)
 			})
 		})
+	})
+}
+
+func (a *App) workflowInspectorSectionCard(gtx layout.Context, spec desktopThemeTokens, body layout.Widget) layout.Dimensions {
+	return a.borderedSurface(gtx, spec.Colors.surfaceElevated, workflowSectionRadius(spec), spec.Colors.border, func(gtx layout.Context) layout.Dimensions {
+		return layout.UniformInset(unit.Dp(14)).Layout(gtx, body)
 	})
 }
 
@@ -108,7 +127,7 @@ func (a *App) workflowInspectorHeader(gtx layout.Context, node workflowNodeModel
 			)
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return a.label(gtx, chooseNonEmpty(runtimeState.Detail, node.Subtitle), unit.Sp(9), spec.Colors.textMuted, font.Normal)
+			return a.label(gtx, chooseNonEmpty(runtimeState.Detail, node.Subtitle), workflowTextSize(spec, 11, 9), spec.Colors.textMuted, font.Normal)
 		}),
 	)
 }
@@ -126,11 +145,12 @@ func (a *App) layoutWorkflowNodeInspector(gtx layout.Context, snap snapshot, nod
 	case workflowNodeExport:
 		return a.layoutWorkflowExportInspector(gtx, snap, spec)
 	default:
-		return a.label(gtx, "该节点没有可编辑属性。", unit.Sp(10), spec.Colors.textDim, font.Normal)
+		return a.label(gtx, "该节点没有可编辑属性。", workflowTextSize(spec, 11, 10), spec.Colors.textDim, font.Normal)
 	}
 }
 
 func (a *App) layoutWorkflowPromptInspector(gtx layout.Context, snap snapshot, spec desktopThemeTokens) layout.Dimensions {
+	promptMetrics := resolveWorkflowPromptEditorMetrics(spec)
 	border := spec.Colors.border2
 	if gtx.Focused(&a.promptInput) {
 		border = spec.Colors.focusRing
@@ -140,10 +160,10 @@ func (a *App) layoutWorkflowPromptInspector(gtx layout.Context, snap snapshot, s
 			return a.workflowInspectorSectionLabel(gtx, "提示词", fmt.Sprintf("%d 字符", len([]rune(a.promptInput.Text()))), spec)
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return fixedHeight(gtx, unit.Dp(166), func(gtx layout.Context) layout.Dimensions {
-				return a.borderedSurface(gtx, spec.Colors.surface, spec.Metrics.InputRadius, border, func(gtx layout.Context) layout.Dimensions {
+			return fixedHeight(gtx, promptMetrics.Height, func(gtx layout.Context) layout.Dimensions {
+				return a.borderedSurface(gtx, spec.Colors.surface, promptMetrics.Radius, border, func(gtx layout.Context) layout.Dimensions {
 					return layout.Inset{Top: 10, Bottom: 10, Left: 10, Right: 10}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						return a.editorText(gtx, &a.promptInput, "描述主体、场景、镜头、光线与风格", unit.Sp(12))
+						return a.editorText(gtx, &a.promptInput, "描述主体、场景、镜头、光线与风格", workflowTextSize(spec, 13, 12))
 					})
 				})
 			})
@@ -180,7 +200,7 @@ func (a *App) layoutWorkflowSourceInspector(gtx layout.Context, spec desktopThem
 	}
 	if len(sources) == 0 {
 		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return a.label(gtx, "当前没有参考图；文生图工作流会直接跳过该输入。", unit.Sp(10), spec.Colors.textDim, font.Normal)
+			return a.label(gtx, "当前没有参考图；文生图工作流会直接跳过该输入。", workflowTextSize(spec, 11, 10), spec.Colors.textDim, font.Normal)
 		}))
 	} else {
 		limit := min(5, len(sources))
@@ -189,7 +209,7 @@ func (a *App) layoutWorkflowSourceInspector(gtx layout.Context, spec desktopThem
 			children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				return a.borderedSurface(gtx, spec.Colors.surface, spec.Metrics.ControlRadius, spec.Colors.border, func(gtx layout.Context) layout.Dimensions {
 					return layout.Inset{Top: 8, Bottom: 8, Left: 9, Right: 9}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						return a.singleLineLabel(gtx, path, unit.Sp(9), spec.Colors.textMuted, font.Normal)
+						return a.singleLineLabel(gtx, path, workflowTextSize(spec, 11, 9), spec.Colors.textMuted, font.Normal)
 					})
 				})
 			}))
@@ -260,7 +280,7 @@ func (a *App) layoutWorkflowExportInspector(gtx layout.Context, snap snapshot, s
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return a.borderedSurface(gtx, spec.Colors.surface, spec.Metrics.ControlRadius, spec.Colors.border, func(gtx layout.Context) layout.Dimensions {
 				return layout.Inset{Top: 9, Bottom: 9, Left: 10, Right: 10}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-					return a.label(gtx, chooseNonEmpty(path, "未设置"), unit.Sp(9), spec.Colors.textMuted, font.Normal)
+					return a.label(gtx, chooseNonEmpty(path, "未设置"), workflowTextSize(spec, 11, 9), spec.Colors.textMuted, font.Normal)
 				})
 			})
 		}),
@@ -291,7 +311,7 @@ func (a *App) workflowChoiceSection(gtx layout.Context, title string, choices []
 				index := index
 				children = append(children, layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 					isSelected := selected == choices[index].Value
-					return a.compactButton(gtx, &buttons[index], choices[index].Label, isSelected, isSelected)
+					return a.workflowChoiceButton(gtx, spec, &buttons[index], choices[index].Label, isSelected)
 				}))
 			}
 			return layout.Flex{Axis: layout.Horizontal, Gap: gtx.Dp(unit.Dp(6))}.Layout(gtx, children...)
@@ -303,10 +323,10 @@ func (a *App) workflowChoiceSection(gtx layout.Context, title string, choices []
 func (a *App) workflowInspectorSectionLabel(gtx layout.Context, label string, value string, spec desktopThemeTokens) layout.Dimensions {
 	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			return a.label(gtx, label, unit.Sp(9), spec.Colors.textMuted, font.SemiBold)
+			return a.label(gtx, label, workflowTextSize(spec, 11, 9), spec.Colors.textMuted, font.SemiBold)
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return a.monoLabel(gtx, value, unit.Sp(9), spec.Colors.textDim, font.Normal)
+			return a.monoLabel(gtx, value, workflowTextSize(spec, 11, 9), spec.Colors.textDim, font.Normal)
 		}),
 	)
 }
@@ -315,13 +335,50 @@ func (a *App) workflowInspectorKeyValue(gtx layout.Context, label string, value 
 	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Baseline}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return fixedWidth(gtx, unit.Dp(72), func(gtx layout.Context) layout.Dimensions {
-				return a.label(gtx, label, unit.Sp(9), spec.Colors.textDim, font.Normal)
+				return a.label(gtx, label, workflowTextSize(spec, 11, 9), spec.Colors.textDim, font.Normal)
 			})
 		}),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			return a.label(gtx, chooseNonEmpty(value, "-"), unit.Sp(9), spec.Colors.textMuted, font.Medium)
+			return a.label(gtx, chooseNonEmpty(value, "-"), workflowTextSize(spec, 11, 9), spec.Colors.textMuted, font.Medium)
 		}),
 	)
+}
+
+func (a *App) workflowChoiceButton(gtx layout.Context, spec desktopThemeTokens, button *widget.Clickable, label string, selected bool) layout.Dimensions {
+	if spec.Style != desktopStyleMacOS {
+		return a.compactButton(gtx, button, label, selected, selected)
+	}
+	background := spec.Colors.surface
+	hoverBackground := spec.Colors.surface2
+	foreground := spec.Colors.textMuted
+	border := spec.Colors.border
+	if selected {
+		background = spec.Colors.accentSoft
+		hoverBackground = withAlpha(spec.Colors.accent, 0x28)
+		foreground = spec.Colors.accentText
+		border = withAlpha(spec.Colors.accent, 0x30)
+	}
+	textSize := unit.Sp(12)
+	height := minimumTextControlHeight(gtx, spec.Metrics.ControlHeight, a.scaledSp(textSize), unit.Dp(8))
+	return fixedHeight(gtx, height, func(gtx layout.Context) layout.Dimensions {
+		return a.surfaceButton(gtx, button, background, hoverBackground, border, unit.Dp(14), layout.Inset{Left: 8, Right: 8}, func(gtx layout.Context) layout.Dimensions {
+			return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return a.singleLineLabel(gtx, label, textSize, foreground, chooseFontWeight(selected))
+			})
+		}, selected)
+	})
+}
+
+type workflowPromptEditorMetrics struct {
+	Height unit.Dp
+	Radius unit.Dp
+}
+
+func resolveWorkflowPromptEditorMetrics(spec desktopThemeTokens) workflowPromptEditorMetrics {
+	if spec.Style == desktopStyleMacOS {
+		return workflowPromptEditorMetrics{Height: unit.Dp(176), Radius: unit.Dp(18)}
+	}
+	return workflowPromptEditorMetrics{Height: unit.Dp(166), Radius: spec.Metrics.InputRadius}
 }
 
 func partialPreviewCount(value string) int {

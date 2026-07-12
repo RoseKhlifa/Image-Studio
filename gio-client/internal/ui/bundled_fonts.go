@@ -2,6 +2,7 @@ package ui
 
 import (
 	_ "embed"
+	"sync"
 
 	"gioui.org/font"
 	"gioui.org/font/opentype"
@@ -24,11 +25,20 @@ var harmonySansSC []byte
 //go:embed assets/JetBrainsMono-Regular.ttf
 var jetBrainsMono []byte
 
+var (
+	bundledFontsOnce sync.Once
+	bundledFonts     []font.FontFace
+)
+
 func bundledFontCollection() []font.FontFace {
-	out := make([]font.FontFace, 0, 4)
-	out = append(out, parseBundledFont(harmonySansSC, uiFallbackSansTypeface)...)
-	out = append(out, parseBundledFont(jetBrainsMono, uiFallbackMonoTypeface)...)
-	return out
+	bundledFontsOnce.Do(func() {
+		out := make([]font.FontFace, 0, 12)
+		out = append(out, platformFontCollection()...)
+		out = append(out, parseBundledFont(harmonySansSC, uiFallbackSansTypeface)...)
+		out = append(out, parseBundledFont(jetBrainsMono, uiFallbackMonoTypeface)...)
+		bundledFonts = out
+	})
+	return append([]font.FontFace(nil), bundledFonts...)
 }
 
 func parseBundledFont(src []byte, typeface font.Typeface) []font.FontFace {

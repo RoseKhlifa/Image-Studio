@@ -195,6 +195,7 @@ func pressedSurfaceColor(background color.NRGBA, tint color.NRGBA) color.NRGBA {
 }
 
 func (a *App) pillButton(gtx layout.Context, btn *widget.Clickable, text string, active bool) layout.Dimensions {
+	metrics := currentDesktopThemeMetrics()
 	bg := fluent.surface
 	hoverBg := fluent.surface2
 	border := fluent.border
@@ -204,21 +205,26 @@ func (a *App) pillButton(gtx layout.Context, btn *widget.Clickable, text string,
 		hoverBg = accentAlpha(0x28)
 		fg = fluent.accentText
 	}
-	return a.surfaceButton(
-		gtx,
-		btn,
-		bg,
-		hoverBg,
-		border,
-		fluentControlRadius,
-		layout.Inset{Top: 7, Bottom: 7, Left: 10, Right: 10},
-		func(gtx layout.Context) layout.Dimensions {
-			return a.label(gtx, text, unit.Sp(11), fg, font.Medium)
-		},
-	)
+	return fixedHeight(gtx, metrics.ControlHeight, func(gtx layout.Context) layout.Dimensions {
+		return a.surfaceButton(
+			gtx,
+			btn,
+			bg,
+			hoverBg,
+			border,
+			fluentControlRadius,
+			layout.Inset{Left: 10, Right: 10},
+			func(gtx layout.Context) layout.Dimensions {
+				return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return a.label(gtx, text, unit.Sp(11), fg, font.Medium)
+				})
+			},
+		)
+	})
 }
 
 func (a *App) compactButton(gtx layout.Context, btn *widget.Clickable, text string, accent bool, selected ...bool) layout.Dimensions {
+	metrics := currentDesktopThemeMetrics()
 	bg := fluent.surface
 	hoverBg := fluent.surface2
 	fg := fluent.textMuted
@@ -228,7 +234,7 @@ func (a *App) compactButton(gtx layout.Context, btn *widget.Clickable, text stri
 		hoverBg = accentAlpha(0x28)
 		fg = fluent.accentText
 	}
-	return fixedHeight(gtx, unit.Dp(30), func(gtx layout.Context) layout.Dimensions {
+	return fixedHeight(gtx, metrics.ControlHeight, func(gtx layout.Context) layout.Dimensions {
 		return a.surfaceButton(
 			gtx,
 			btn,
@@ -275,9 +281,10 @@ func (a *App) textActionButton(gtx layout.Context, btn *widget.Clickable, text s
 }
 
 func (a *App) headerIconButton(gtx layout.Context, btn *widget.Clickable, text string, active bool) layout.Dimensions {
+	metrics := currentDesktopThemeMetrics()
 	bg := rgba(0xffffff, 0x00)
 	hoverBg := fluent.toolHoverBg
-	fg := fluent.textDim
+	fg := fluent.textMuted
 	border := rgba(0xffffff, 0x00)
 	if btn.Hovered() {
 		fg = fluent.toolHoverText
@@ -288,28 +295,33 @@ func (a *App) headerIconButton(gtx layout.Context, btn *widget.Clickable, text s
 		fg = fluent.accentText
 		border = fluent.border
 	}
-	return a.surfaceButton(
-		gtx,
-		btn,
-		bg,
-		hoverBg,
-		border,
-		fluentControlRadius,
-		layout.Inset{Top: 6, Bottom: 6, Left: 8, Right: 8},
-		func(gtx layout.Context) layout.Dimensions {
-			return fixedWidth(gtx, unit.Dp(14), func(gtx layout.Context) layout.Dimensions {
-				return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-					return a.label(gtx, text, unit.Sp(12), fg, font.Medium)
-				})
-			})
-		},
-	)
+	return fixedWidth(gtx, metrics.IconTargetSize, func(gtx layout.Context) layout.Dimensions {
+		return fixedHeight(gtx, metrics.IconTargetSize, func(gtx layout.Context) layout.Dimensions {
+			return a.surfaceButton(
+				gtx,
+				btn,
+				bg,
+				hoverBg,
+				border,
+				fluentControlRadius,
+				layout.Inset{},
+				func(gtx layout.Context) layout.Dimensions {
+					return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return fixedWidth(gtx, unit.Dp(14), func(gtx layout.Context) layout.Dimensions {
+							return a.label(gtx, text, unit.Sp(12), fg, font.Medium)
+						})
+					})
+				},
+			)
+		})
+	})
 }
 
 func (a *App) headerIconButtonIcon(gtx layout.Context, btn *widget.Clickable, icon *widget.Icon, active bool, semanticName ...string) layout.Dimensions {
+	metrics := currentDesktopThemeMetrics()
 	bg := rgba(0xffffff, 0x00)
 	hoverBg := fluent.toolHoverBg
-	fg := fluent.textDim
+	fg := fluent.textMuted
 	border := rgba(0xffffff, 0x00)
 	if btn.Hovered() {
 		fg = fluent.toolHoverText
@@ -320,29 +332,33 @@ func (a *App) headerIconButtonIcon(gtx layout.Context, btn *widget.Clickable, ic
 		fg = fluent.accentText
 		border = fluent.border
 	}
-	return a.surfaceButton(
-		gtx,
-		btn,
-		bg,
-		hoverBg,
-		border,
-		fluentControlRadius,
-		layout.Inset{Top: 6, Bottom: 6, Left: 8, Right: 8},
-		func(gtx layout.Context) layout.Dimensions {
-			if len(semanticName) > 0 {
-				if name := strings.TrimSpace(semanticName[0]); name != "" {
-					semantic.LabelOp(name).Add(gtx.Ops)
-				}
-			}
-			return fixedWidth(gtx, unit.Dp(16), func(gtx layout.Context) layout.Dimensions {
-				return fixedHeight(gtx, unit.Dp(16), func(gtx layout.Context) layout.Dimensions {
+	return fixedWidth(gtx, metrics.IconTargetSize, func(gtx layout.Context) layout.Dimensions {
+		return fixedHeight(gtx, metrics.IconTargetSize, func(gtx layout.Context) layout.Dimensions {
+			return a.surfaceButton(
+				gtx,
+				btn,
+				bg,
+				hoverBg,
+				border,
+				fluentControlRadius,
+				layout.Inset{},
+				func(gtx layout.Context) layout.Dimensions {
+					if len(semanticName) > 0 {
+						if name := strings.TrimSpace(semanticName[0]); name != "" {
+							semantic.LabelOp(name).Add(gtx.Ops)
+						}
+					}
 					return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						return icon.Layout(gtx, fg)
+						return fixedWidth(gtx, unit.Dp(16), func(gtx layout.Context) layout.Dimensions {
+							return fixedHeight(gtx, unit.Dp(16), func(gtx layout.Context) layout.Dimensions {
+								return icon.Layout(gtx, fg)
+							})
+						})
 					})
-				})
-			})
-		},
-	)
+				},
+			)
+		})
+	})
 }
 
 func (a *App) compactIconTextButton(
@@ -353,6 +369,7 @@ func (a *App) compactIconTextButton(
 	accent bool,
 	selected ...bool,
 ) layout.Dimensions {
+	metrics := currentDesktopThemeMetrics()
 	bg := fluent.surface
 	hoverBg := fluent.surface2
 	fg := fluent.textMuted
@@ -362,7 +379,7 @@ func (a *App) compactIconTextButton(
 		hoverBg = accentAlpha(0x28)
 		fg = fluent.accentText
 	}
-	return fixedHeight(gtx, unit.Dp(30), func(gtx layout.Context) layout.Dimensions {
+	return fixedHeight(gtx, metrics.ControlHeight, func(gtx layout.Context) layout.Dimensions {
 		return a.surfaceButton(
 			gtx,
 			btn,
@@ -457,7 +474,7 @@ func (a *App) ghostIconButton(
 ) layout.Dimensions {
 	bg := rgba(0xffffff, 0x00)
 	hoverBg := fluent.toolHoverBg
-	fg := fluent.textDim
+	fg := fluent.textMuted
 	border := rgba(0xffffff, 0x00)
 	if btn.Hovered() {
 		fg = fluent.toolHoverText
@@ -491,6 +508,7 @@ func (a *App) toolbarIconButton(
 	icon *widget.Icon,
 	active bool,
 ) layout.Dimensions {
+	metrics := currentDesktopThemeMetrics()
 	bg := rgba(0xffffff, 0x00)
 	hoverBg := fluent.toolHoverBg
 	fg := fluent.textMuted
@@ -504,15 +522,15 @@ func (a *App) toolbarIconButton(
 		fg = fluent.accentText
 		border = accentAlpha(0x24)
 	}
-	return fixedWidth(gtx, unit.Dp(32), func(gtx layout.Context) layout.Dimensions {
-		return fixedHeight(gtx, unit.Dp(30), func(gtx layout.Context) layout.Dimensions {
+	return fixedWidth(gtx, metrics.IconTargetSize, func(gtx layout.Context) layout.Dimensions {
+		return fixedHeight(gtx, metrics.ControlHeight, func(gtx layout.Context) layout.Dimensions {
 			return a.surfaceButton(
 				gtx,
 				btn,
 				bg,
 				hoverBg,
 				border,
-				unit.Dp(4),
+				fluentControlRadius,
 				layout.Inset{},
 				func(gtx layout.Context) layout.Dimensions {
 					return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
@@ -534,6 +552,7 @@ func (a *App) toolbarStaticIcon(
 	active bool,
 	disabled bool,
 ) layout.Dimensions {
+	metrics := currentDesktopThemeMetrics()
 	bg := rgba(0xffffff, 0x00)
 	border := rgba(0xffffff, 0x00)
 	fg := fluent.textMuted
@@ -545,8 +564,8 @@ func (a *App) toolbarStaticIcon(
 		border = accentAlpha(0x24)
 		fg = fluent.accentText
 	}
-	return fixedWidth(gtx, unit.Dp(32), func(gtx layout.Context) layout.Dimensions {
-		return fixedHeight(gtx, unit.Dp(30), func(gtx layout.Context) layout.Dimensions {
+	return fixedWidth(gtx, metrics.IconTargetSize, func(gtx layout.Context) layout.Dimensions {
+		return fixedHeight(gtx, metrics.ControlHeight, func(gtx layout.Context) layout.Dimensions {
 			return a.borderedSurface(gtx, bg, fluentControlRadius, border, func(gtx layout.Context) layout.Dimensions {
 				return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 					return fixedWidth(gtx, unit.Dp(14), func(gtx layout.Context) layout.Dimensions {
@@ -701,6 +720,7 @@ func (a *App) pillIconTextButton(
 	text string,
 	active bool,
 ) layout.Dimensions {
+	metrics := currentDesktopThemeMetrics()
 	bg := fluent.surface
 	hoverBg := fluent.surface2
 	border := fluent.border
@@ -710,29 +730,33 @@ func (a *App) pillIconTextButton(
 		hoverBg = accentAlpha(0x28)
 		fg = fluent.accentText
 	}
-	return a.surfaceButton(
-		gtx,
-		btn,
-		bg,
-		hoverBg,
-		border,
-		fluentControlRadius,
-		layout.Inset{Top: 7, Bottom: 7, Left: 10, Right: 10},
-		func(gtx layout.Context) layout.Dimensions {
-			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle, Gap: gtx.Dp(unit.Dp(6))}.Layout(gtx,
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return fixedWidth(gtx, unit.Dp(14), func(gtx layout.Context) layout.Dimensions {
-						return fixedHeight(gtx, unit.Dp(14), func(gtx layout.Context) layout.Dimensions {
-							return icon.Layout(gtx, fg)
-						})
-					})
-				}),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return a.label(gtx, text, unit.Sp(11), fg, font.Medium)
-				}),
-			)
-		},
-	)
+	return fixedHeight(gtx, metrics.ControlHeight, func(gtx layout.Context) layout.Dimensions {
+		return a.surfaceButton(
+			gtx,
+			btn,
+			bg,
+			hoverBg,
+			border,
+			fluentControlRadius,
+			layout.Inset{Left: 10, Right: 10},
+			func(gtx layout.Context) layout.Dimensions {
+				return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle, Gap: gtx.Dp(unit.Dp(6))}.Layout(gtx,
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return fixedWidth(gtx, unit.Dp(14), func(gtx layout.Context) layout.Dimensions {
+								return fixedHeight(gtx, unit.Dp(14), func(gtx layout.Context) layout.Dimensions {
+									return icon.Layout(gtx, fg)
+								})
+							})
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return a.label(gtx, text, unit.Sp(11), fg, font.Medium)
+						}),
+					)
+				})
+			},
+		)
+	})
 }
 
 func (a *App) toolbarTextButton(
@@ -742,6 +766,7 @@ func (a *App) toolbarTextButton(
 	text string,
 	selected bool,
 ) layout.Dimensions {
+	metrics := currentDesktopThemeMetrics()
 	bg := rgba(0xffffff, 0x00)
 	hoverBg := fluent.toolHoverBg
 	border := rgba(0xffffff, 0x00)
@@ -755,7 +780,7 @@ func (a *App) toolbarTextButton(
 		border = accentAlpha(0x24)
 		fg = fluent.accentText
 	}
-	return fixedHeight(gtx, unit.Dp(30), func(gtx layout.Context) layout.Dimensions {
+	return fixedHeight(gtx, metrics.ControlHeight, func(gtx layout.Context) layout.Dimensions {
 		return a.surfaceButton(
 			gtx,
 			btn,
@@ -789,6 +814,7 @@ func (a *App) toolbarStaticTextButton(
 	text string,
 	accent bool,
 ) layout.Dimensions {
+	metrics := currentDesktopThemeMetrics()
 	bg := rgba(0xffffff, 0x00)
 	border := rgba(0xffffff, 0x00)
 	fg := fluent.textMuted
@@ -797,7 +823,7 @@ func (a *App) toolbarStaticTextButton(
 		border = accentAlpha(0x24)
 		fg = fluent.accentText
 	}
-	return fixedHeight(gtx, unit.Dp(30), func(gtx layout.Context) layout.Dimensions {
+	return fixedHeight(gtx, metrics.ControlHeight, func(gtx layout.Context) layout.Dimensions {
 		return a.borderedSurface(gtx, bg, fluentControlRadius, border, func(gtx layout.Context) layout.Dimensions {
 			return layout.Inset{Left: 8, Right: 8}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
@@ -852,6 +878,7 @@ func (a *App) compactIconButton(
 	icon *widget.Icon,
 	active bool,
 ) layout.Dimensions {
+	metrics := currentDesktopThemeMetrics()
 	bg := fluent.surface
 	hoverBg := fluent.surface2
 	fg := fluent.textMuted
@@ -861,22 +888,28 @@ func (a *App) compactIconButton(
 		hoverBg = accentAlpha(0x28)
 		fg = fluent.accentText
 	}
-	return a.surfaceButton(
-		gtx,
-		btn,
-		bg,
-		hoverBg,
-		border,
-		fluentControlRadius,
-		layout.Inset{Top: 6, Bottom: 6, Left: 6, Right: 6},
-		func(gtx layout.Context) layout.Dimensions {
-			return fixedWidth(gtx, unit.Dp(16), func(gtx layout.Context) layout.Dimensions {
-				return fixedHeight(gtx, unit.Dp(16), func(gtx layout.Context) layout.Dimensions {
-					return icon.Layout(gtx, fg)
-				})
-			})
-		},
-	)
+	return fixedWidth(gtx, metrics.IconTargetSize, func(gtx layout.Context) layout.Dimensions {
+		return fixedHeight(gtx, metrics.ControlHeight, func(gtx layout.Context) layout.Dimensions {
+			return a.surfaceButton(
+				gtx,
+				btn,
+				bg,
+				hoverBg,
+				border,
+				fluentControlRadius,
+				layout.Inset{},
+				func(gtx layout.Context) layout.Dimensions {
+					return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return fixedWidth(gtx, unit.Dp(16), func(gtx layout.Context) layout.Dimensions {
+							return fixedHeight(gtx, unit.Dp(16), func(gtx layout.Context) layout.Dimensions {
+								return icon.Layout(gtx, fg)
+							})
+						})
+					})
+				},
+			)
+		})
+	})
 }
 
 func (a *App) primaryIconTextButton(
@@ -918,8 +951,9 @@ func (a *App) toolbarPrimaryTextButton(
 	icon *widget.Icon,
 	text string,
 ) layout.Dimensions {
+	metrics := currentDesktopThemeMetrics()
 	foreground := desktopReadableText(fluent.accent)
-	return fixedHeight(gtx, unit.Dp(30), func(gtx layout.Context) layout.Dimensions {
+	return fixedHeight(gtx, metrics.ControlHeight, func(gtx layout.Context) layout.Dimensions {
 		return a.surfaceButton(
 			gtx,
 			btn,
@@ -1263,7 +1297,7 @@ func (a *App) elevatedBorderedSurface(
 	shadowOffset image.Point,
 	w layout.Widget,
 ) layout.Dimensions {
-	if a.reducedEffects {
+	if !a.surfaceEffectsEnabled() {
 		return a.borderedSurface(gtx, bg, radius, border, w)
 	}
 	macro := op.Record(gtx.Ops)
@@ -1304,7 +1338,7 @@ func (a *App) borderedSurface(gtx layout.Context, bg color.NRGBA, radius unit.Dp
 			dims := a.surface(gtx, bg, radius, w)
 			call := macro.Stop()
 			call.Add(gtx.Ops)
-			if !a.reducedEffects && dims.Size.X > 2 && dims.Size.Y > 2 && fluent.windowOutline.A > 0 {
+			if a.surfaceEffectsEnabled() && dims.Size.X > 2 && dims.Size.Y > 2 && fluent.windowOutline.A > 0 {
 				highlightHeight := min(dims.Size.Y/3, gtx.Dp(unit.Dp(22)))
 				if highlightHeight < 4 {
 					highlightHeight = min(dims.Size.Y, gtx.Dp(unit.Dp(4)))
@@ -1316,6 +1350,10 @@ func (a *App) borderedSurface(gtx layout.Context, bg color.NRGBA, radius unit.Dp
 			return dims
 		})
 	})
+}
+
+func (a *App) surfaceEffectsEnabled() bool {
+	return a != nil && !a.reducedEffects
 }
 
 func (a *App) borderedTopTabSurface(
