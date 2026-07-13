@@ -152,6 +152,8 @@ type desktopWorkspacePublication struct {
 	LastError       string
 	Completed       int
 	Total           int
+	CanUndo         bool
+	CanRedo         bool
 }
 
 type desktopPublication struct {
@@ -256,6 +258,8 @@ func (a *App) publishDesktopState(snap snapshot) {
 			Queued:          desktopRunQueued(a.desktopQueuedWorkspaceRuns, workspace.ID),
 			Status:          "就绪",
 			Total:           1,
+			CanUndo:         a.canUndoWorkflowGraph(workspace.ID),
+			CanRedo:         a.canRedoWorkflowGraph(workspace.ID),
 		}
 		if workspace.ID == a.activeWorkspaceID {
 			data := a.workflowCanvasData(snap, workspace.ID)
@@ -279,7 +283,7 @@ func (a *App) publishDesktopState(snap snapshot) {
 			workspacePublication.Completed = publication.Completed
 			workspacePublication.Total = publication.Total
 		} else {
-			workspacePublication.Runtime = workflowRuntimeForInactiveWorkspace(workspace)
+			workspacePublication.Runtime = workflowRuntimeForInactiveWorkspace(workspace, workspacePublication.Graph)
 			if workspace.ResultHasItem || strings.TrimSpace(workspace.ResultSavedPath) != "" {
 				workspacePublication.Status = "已完成"
 				workspacePublication.Completed = 1
@@ -308,19 +312,31 @@ func desktopRunQueued(queue []string, workspaceID string) bool {
 	return false
 }
 
-func workflowRuntimeForInactiveWorkspace(workspace workspaceState) map[string]workflowNodeRuntime {
+func workflowRuntimeForInactiveWorkspace(workspace workspaceState, graph workflowGraphModel) map[string]workflowNodeRuntime {
+	promptConnected := workflowEdgeConnected(graph, workflowEdgeModel{FromNode: "prompt", FromPort: "text", ToNode: "generate", ToPort: "prompt"})
+	sourceConnected := workflowEdgeConnected(graph, workflowEdgeModel{FromNode: "source", FromPort: "image", ToNode: "generate", ToPort: "source"})
+	previewConnected := workflowEdgeConnected(graph, workflowEdgeModel{FromNode: "generate", FromPort: "job", ToNode: "preview", ToPort: "job"})
+	exportConnected := workflowEdgeConnected(graph, workflowEdgeModel{FromNode: "preview", FromPort: "image", ToNode: "export", ToPort: "image"})
 	promptPhase := workflowNodePhaseSuccess
 	promptDetail := strings.TrimSpace(workspace.Prompt)
 	if promptDetail == "" {
 		promptPhase = workflowNodePhaseWarning
 		promptDetail = "等待输入提示词"
+	} else if !promptConnected {
+		promptPhase = workflowNodePhaseWarning
+		promptDetail = "提示词端口未连接"
 	}
 	sourceCount := len(kernel.ParseSourcePaths(workspace.SourcePathsText))
 	sourcePhase := workflowNodePhaseIdle
 	sourceDetail := "无参考图"
 	if sourceCount > 0 {
 		sourcePhase = workflowNodePhaseSuccess
-		sourceDetail = fmt.Sprintf("已连接 %d 个图像输入", sourceCount)
+		sourceDetail = fmt.Sprintf("已载入 %d 个图像输入", sourceCount)
+	}
+	requireSource := workspace.Mode == "edit" || workspace.BatchMode
+	if !sourceConnected && (sourceCount > 0 || requireSource) {
+		sourcePhase = workflowNodePhaseWarning
+		sourceDetail = "图像输入端口未连接"
 	}
 	resultPhase := workflowNodePhaseIdle
 	resultDetail := "等待任务输出"
@@ -328,13 +344,33 @@ func workflowRuntimeForInactiveWorkspace(workspace workspaceState) map[string]wo
 		resultPhase = workflowNodePhaseSuccess
 		resultDetail = "已有工作区结果"
 	}
-	return map[string]workflowNodeRuntime{
+	generatePhase := resultPhase
+	generateDetail := resultDetail
+	if !promptConnected || (requireSource && !sourceConnected) {
+		generatePhase = workflowNodePhaseWarning
+		generateDetail = "等待必需输入连接"
+	}
+	previewPhase := resultPhase
+	previewDetail := resultDetail
+	if !previewConnected {
+		previewPhase = workflowNodePhaseWarning
+		previewDetail = "任务输入端口未连接"
+	}
+	exportPhase := resultPhase
+	exportDetail := chooseNonEmpty(workspace.ResultSavedPath, "等待导出")
+	if !exportConnected {
+		exportPhase = workflowNodePhaseWarning
+		exportDetail = "图像输入端口未连接"
+	}
+	runtime := map[string]workflowNodeRuntime{
 		"prompt":   {Phase: promptPhase, Detail: promptDetail, Progress: chooseProgress(promptPhase, 0)},
 		"source":   {Phase: sourcePhase, Detail: sourceDetail, Progress: chooseProgress(sourcePhase, 0)},
-		"generate": {Phase: resultPhase, Detail: resultDetail, Progress: chooseProgress(resultPhase, 0)},
-		"preview":  {Phase: resultPhase, Detail: resultDetail, Progress: chooseProgress(resultPhase, 0)},
-		"export":   {Phase: resultPhase, Detail: chooseNonEmpty(workspace.ResultSavedPath, "等待导出"), Progress: chooseProgress(resultPhase, 0)},
+		"generate": {Phase: generatePhase, Detail: generateDetail, Progress: chooseProgress(generatePhase, 0)},
+		"preview":  {Phase: previewPhase, Detail: previewDetail, Progress: chooseProgress(previewPhase, 0)},
+		"export":   {Phase: exportPhase, Detail: exportDetail, Progress: chooseProgress(exportPhase, 0)},
 	}
+	applyDisabledWorkflowRuntime(graph, runtime)
+	return runtime
 }
 
 func (a *App) desktopSnapshot() desktopPublication {
@@ -355,7 +391,14 @@ const (
 	desktopCommandCancel
 	desktopCommandClearLogs
 	desktopCommandSelectNode
+	desktopCommandBeginNodeMove
 	desktopCommandMoveNode
+	desktopCommandEndNodeMove
+	desktopCommandRewireConnection
+	desktopCommandUndoWorkflow
+	desktopCommandRedoWorkflow
+	desktopCommandDeleteWorkflowNode
+	desktopCommandToggleWorkflowNode
 	desktopCommandUpdateDraft
 	desktopCommandUpdateDraftAndRun
 	desktopCommandOpenWindow
@@ -363,13 +406,17 @@ const (
 )
 
 type desktopCommand struct {
-	Kind          desktopCommandKind
-	WorkspaceID   string
-	NodeID        string
-	Position      image.Point
-	WindowRole    windowing.Role
-	Draft         desktopDraftUpdate
-	DraftRevision uint64
+	Kind            desktopCommandKind
+	WorkspaceID     string
+	NodeID          string
+	Position        image.Point
+	PreviousEdge    workflowEdgeModel
+	Edge            workflowEdgeModel
+	HasPreviousEdge bool
+	HasEdge         bool
+	WindowRole      windowing.Role
+	Draft           desktopDraftUpdate
+	DraftRevision   uint64
 }
 
 type desktopDraftUpdate struct {
@@ -519,8 +566,38 @@ func (a *App) applyDesktopCommand(command desktopCommand) {
 		a.clearLogs()
 	case desktopCommandSelectNode:
 		a.selectWorkflowNode(command.WorkspaceID, command.NodeID)
+	case desktopCommandBeginNodeMove:
+		a.beginWorkflowNodeMove(command.WorkspaceID, command.NodeID)
 	case desktopCommandMoveNode:
 		a.setWorkflowNodePosition(command.WorkspaceID, command.NodeID, command.Position)
+	case desktopCommandEndNodeMove:
+		a.applyPendingDesktopMoves()
+		a.endWorkflowNodeMove(command.WorkspaceID, command.NodeID)
+	case desktopCommandRewireConnection:
+		a.applyPendingDesktopMoves()
+		var previous *workflowEdgeModel
+		var replacement *workflowEdgeModel
+		if command.HasPreviousEdge {
+			previous = &command.PreviousEdge
+		}
+		if command.HasEdge {
+			replacement = &command.Edge
+		}
+		if err := a.rewireWorkflowConnection(command.WorkspaceID, previous, replacement); err != nil {
+			a.appendLog("连接节点失败: " + err.Error())
+		}
+	case desktopCommandUndoWorkflow:
+		a.applyPendingDesktopMoves()
+		a.undoWorkflowGraph(command.WorkspaceID)
+	case desktopCommandRedoWorkflow:
+		a.applyPendingDesktopMoves()
+		a.redoWorkflowGraph(command.WorkspaceID)
+	case desktopCommandDeleteWorkflowNode:
+		a.applyPendingDesktopMoves()
+		a.deleteWorkflowNode(command.WorkspaceID, command.NodeID)
+	case desktopCommandToggleWorkflowNode:
+		a.applyPendingDesktopMoves()
+		a.toggleWorkflowNodeEnabled(command.WorkspaceID, command.NodeID)
 	case desktopCommandUpdateDraft:
 		a.applyDesktopDraftUpdateAtRevision(command.WorkspaceID, command.Draft, command.DraftRevision)
 	case desktopCommandUpdateDraftAndRun:

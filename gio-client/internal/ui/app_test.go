@@ -36,6 +36,14 @@ func writeSolidTestPNG(t *testing.T, path string, fill color.NRGBA) {
 	writeImagePNG(t, path, img)
 }
 
+func isolateGioStableDataRoot(t *testing.T) {
+	t.Helper()
+	root := t.TempDir()
+	originalRoot := giodCompat.StableDataRootForTest()
+	giodCompat.SetStableDataRootForTest(func() (string, error) { return root, nil })
+	t.Cleanup(func() { giodCompat.SetStableDataRootForTest(originalRoot) })
+}
+
 func writeSizedSolidTestPNG(t *testing.T, path string, width int, height int, fill color.NRGBA) {
 	t.Helper()
 	img := image.NewNRGBA(image.Rect(0, 0, width, height))
@@ -865,6 +873,7 @@ func TestNextProfileIDAvoidsSameMillisecondCollision(t *testing.T) {
 }
 
 func TestWorkspaceSwitchPreservesPrompt(t *testing.T) {
+	isolateGioStableDataRoot(t)
 	app := New()
 	app.promptInput.SetText("workspace one")
 	app.createWorkspace()

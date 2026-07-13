@@ -31,6 +31,22 @@ func (a *App) layoutWorkflowShell(gtx layout.Context, snap snapshot) layout.Dime
 }
 
 func (a *App) handleWorkflowCommandEvents(gtx layout.Context, snap snapshot) {
+	for a.workflowUndoButton.Clicked(gtx) {
+		if a.canUndoWorkflowGraph(a.activeWorkspaceID) {
+			a.undoWorkflowGraph(a.activeWorkspaceID)
+		}
+	}
+	for a.workflowRedoButton.Clicked(gtx) {
+		if a.canRedoWorkflowGraph(a.activeWorkspaceID) {
+			a.redoWorkflowGraph(a.activeWorkspaceID)
+		}
+	}
+	for a.workflowSaveButton.Clicked(gtx) {
+		a.exportWorkflowJSON()
+	}
+	for a.workflowLoadButton.Clicked(gtx) {
+		a.importWorkflowJSON()
+	}
 	for a.workflowRunButton.Clicked(gtx) {
 		if !snap.Running {
 			a.startRun()
@@ -50,7 +66,7 @@ func (a *App) handleWorkflowCommandEvents(gtx layout.Context, snap snapshot) {
 		a.invalidateNow()
 	}
 	for a.workflowFitButton.Clicked(gtx) {
-		a.workflowCanvas.resetViewport()
+		a.workflowCanvas.fitGraph(a.workflowGraph(a.activeWorkspaceID), desktopThemeSpec(a.desktopStyle, a.resolvedThemeMode))
 		a.invalidateNow()
 	}
 	for a.workflowResetGraphButton.Clicked(gtx) {
@@ -88,6 +104,28 @@ func (a *App) layoutWorkflowCommandBar(gtx layout.Context, snap snapshot, spec d
 					return a.workflowCommandStatus(gtx, snap, spec, compact)
 				}),
 				layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return a.workflowCommandGroup(gtx, spec,
+						func(gtx layout.Context) layout.Dimensions {
+							return a.workflowToolbarButtonEnabled(gtx, spec, &a.workflowUndoButton, uiIconUndo, "撤销", false, compact, a.canUndoWorkflowGraph(a.activeWorkspaceID))
+						},
+						func(gtx layout.Context) layout.Dimensions {
+							return a.workflowToolbarButtonEnabled(gtx, spec, &a.workflowRedoButton, uiIconRedo, "重做", false, compact, a.canRedoWorkflowGraph(a.activeWorkspaceID))
+						},
+					)
+				}),
+				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return a.workflowCommandGroup(gtx, spec,
+						func(gtx layout.Context) layout.Dimensions {
+							return a.workflowToolbarButton(gtx, spec, &a.workflowSaveButton, uiIconSave, "保存", false, compact)
+						},
+						func(gtx layout.Context) layout.Dimensions {
+							return a.workflowToolbarButton(gtx, spec, &a.workflowLoadButton, uiIconFolder, "加载", false, compact)
+						},
+					)
+				}),
+				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					return a.workflowCommandGroup(gtx, spec,
 						func(gtx layout.Context) layout.Dimensions {
@@ -247,8 +285,19 @@ func (a *App) layoutWorkflowCenter(gtx layout.Context, snap snapshot, spec deskt
 				Select: func(nodeID string) {
 					a.selectWorkflowNode(a.activeWorkspaceID, nodeID)
 				},
+				MoveStart: func(nodeID string) {
+					a.beginWorkflowNodeMove(a.activeWorkspaceID, nodeID)
+				},
 				Move: func(nodeID string, position image.Point) {
 					a.setWorkflowNodePosition(a.activeWorkspaceID, nodeID, position)
+				},
+				MoveEnd: func(nodeID string) {
+					a.endWorkflowNodeMove(a.activeWorkspaceID, nodeID)
+				},
+				RewireConnection: func(previous *workflowEdgeModel, replacement *workflowEdgeModel) {
+					if err := a.rewireWorkflowConnection(a.activeWorkspaceID, previous, replacement); err != nil {
+						a.appendLog("连接节点失败: " + err.Error())
+					}
 				},
 			})
 		}),
@@ -332,6 +381,46 @@ func (a *App) workflowToolbarButton(gtx layout.Context, spec desktopThemeTokens,
 			return fixedWidth(gtx, spec.Metrics.IconTargetSize, buttonLayout)
 		}
 		return buttonLayout(gtx)
+	})
+}
+
+func (a *App) workflowToolbarButtonEnabled(gtx layout.Context, spec desktopThemeTokens, button *widget.Clickable, icon *widget.Icon, label string, selected bool, compact bool, enabled bool) layout.Dimensions {
+	if enabled {
+		return a.workflowToolbarButton(gtx, spec, button, icon, label, selected, compact)
+	}
+	textSize := workflowTextSize(spec, 12, 11)
+	height := minimumTextControlHeight(gtx, spec.Metrics.ControlHeight, a.scaledSp(textSize), unit.Dp(8))
+	content := func(gtx layout.Context) layout.Dimensions {
+		semantic.LabelOp(label).Add(gtx.Ops)
+		semantic.EnabledOp(false).Add(gtx.Ops)
+		return layout.Inset{Left: 8, Right: 8}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				children := []layout.FlexChild{
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return fixedWidth(gtx, unit.Dp(14), func(gtx layout.Context) layout.Dimensions {
+							return fixedHeight(gtx, unit.Dp(14), func(gtx layout.Context) layout.Dimensions {
+								return icon.Layout(gtx, spec.Colors.textDim)
+							})
+						})
+					}),
+				}
+				if !compact {
+					children = append(children,
+						layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return a.singleLineLabel(gtx, label, textSize, spec.Colors.textDim, font.Medium)
+						}),
+					)
+				}
+				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, children...)
+			})
+		})
+	}
+	return fixedHeight(gtx, height, func(gtx layout.Context) layout.Dimensions {
+		if compact {
+			return fixedWidth(gtx, spec.Metrics.IconTargetSize, content)
+		}
+		return content(gtx)
 	})
 }
 

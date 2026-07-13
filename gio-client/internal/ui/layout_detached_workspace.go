@@ -24,10 +24,21 @@ func (view *desktopWindowView) layoutDetachedWorkspace(
 		return view.missingWorkspace(gtx, spec, publication)
 	}
 	view.syncDetachedWorkspaceDraft(workspace)
+	view.handleWorkflowHistoryShortcuts(gtx, workspace.ID, workspace.SelectedNode)
 	view.handleDetachedWorkspaceDraftButtons(gtx)
 
 	for view.activateButton.Clicked(gtx) {
 		view.enqueue(desktopCommand{Kind: desktopCommandActivate, WorkspaceID: workspace.ID})
+	}
+	for view.undoButton.Clicked(gtx) {
+		if workspace.CanUndo {
+			view.enqueue(desktopCommand{Kind: desktopCommandUndoWorkflow, WorkspaceID: workspace.ID})
+		}
+	}
+	for view.redoButton.Clicked(gtx) {
+		if workspace.CanRedo {
+			view.enqueue(desktopCommand{Kind: desktopCommandRedoWorkflow, WorkspaceID: workspace.ID})
+		}
 	}
 	for view.runButton.Clicked(gtx) {
 		view.enqueueDetachedDraftAndRun(workspace.ID)
@@ -48,13 +59,27 @@ func (view *desktopWindowView) layoutDetachedWorkspace(
 		view.enqueueOpen(windowing.RoleProgress, workspace.ID)
 	}
 
-	actions := make([]layout.Widget, 0, 6)
+	actions := make([]layout.Widget, 0, 8)
 	if workspace.ID != publication.ActiveID {
 		actions = append(actions, func(gtx layout.Context) layout.Dimensions {
 			return view.button(gtx, spec, &view.activateButton, view.icons.activate, "激活", desktopButtonNeutral)
 		})
 	}
 	actions = append(actions,
+		func(gtx layout.Context) layout.Dimensions {
+			tone := desktopButtonNeutral
+			if !workspace.CanUndo {
+				tone = desktopButtonDisabled
+			}
+			return view.button(gtx, spec, &view.undoButton, view.icons.undo, "撤销", tone)
+		},
+		func(gtx layout.Context) layout.Dimensions {
+			tone := desktopButtonNeutral
+			if !workspace.CanRedo {
+				tone = desktopButtonDisabled
+			}
+			return view.button(gtx, spec, &view.redoButton, view.icons.redo, "重做", tone)
+		},
 		func(gtx layout.Context) layout.Dimensions {
 			if desktopWorkspaceRunning(publication, workspace.ID) {
 				return view.button(gtx, spec, &view.cancelButton, view.icons.cancel, "取消", desktopButtonDanger)

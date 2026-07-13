@@ -137,6 +137,7 @@ type WorkspaceResult struct {
 }
 
 type WorkflowGraph struct {
+	Explicit bool           `json:"explicit,omitempty"`
 	Nodes    []WorkflowNode `json:"nodes"`
 	Edges    []WorkflowEdge `json:"edges"`
 	Viewport Viewport       `json:"viewport"`

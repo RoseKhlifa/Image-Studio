@@ -7,6 +7,7 @@ import (
 )
 
 func TestPerformGlobalShortcutCreatesAndClosesWorkspace(t *testing.T) {
+	isolateGioStableDataRoot(t)
 	app := New()
 	if len(app.workspaces) != 1 {
 		t.Fatalf("initial workspaces=%d want 1", len(app.workspaces))
@@ -39,6 +40,7 @@ func TestPerformGlobalShortcutCreatesAndClosesWorkspace(t *testing.T) {
 }
 
 func TestPerformGlobalShortcutIgnoresWorkspaceActionsWhileTyping(t *testing.T) {
+	isolateGioStableDataRoot(t)
 	app := New()
 	if app.performGlobalShortcut("N", key.ModCtrl, true) {
 		t.Fatal("Ctrl+N should not be handled while typing")

@@ -28,6 +28,16 @@ import (
 func (a *App) startRun() {
 	a.syncLoopSettingsFromInputs()
 	a.syncBatchSettingsFromInputs()
+	workflowMode := normalizeExperienceMode(a.experienceMode) == experienceModeWorkflow
+	graph := workflowGraphModel{}
+	requireWorkflowSource := client.Mode(a.mode) == client.ModeEdit || a.batchMode
+	if workflowMode {
+		graph = a.workflowGraph(a.activeWorkspaceID)
+		if err := validateWorkflowForRun(graph, requireWorkflowSource); err != nil {
+			a.appendLog("工作流无效: " + err.Error())
+			return
+		}
+	}
 	if client.Mode(a.mode) == client.ModeEdit && len(a.sourcePaths()) == 0 {
 		snap := a.readSnapshot()
 		if strings.TrimSpace(snap.Result.SavedPath) == "" && strings.TrimSpace(snap.Result.Item.ImageB64) != "" {
@@ -43,6 +53,12 @@ func (a *App) startRun() {
 		}
 	}
 	cfg := a.currentConfig()
+	if workflowMode && !workflowEdgeConnected(graph, workflowEdgeModel{
+		FromNode: "source", FromPort: "image", ToNode: "generate", ToPort: "source",
+	}) {
+		cfg.SourcePaths = nil
+		cfg.SourceImageDataURLs = nil
+	}
 	if strings.TrimSpace(cfg.APIKey) == "" || strings.TrimSpace(cfg.BaseURL) == "" {
 		return
 	}
@@ -192,6 +208,19 @@ func (a *App) retryLastRun() {
 	a.mu.Unlock()
 	if !ok {
 		return
+	}
+	if normalizeExperienceMode(a.experienceMode) == experienceModeWorkflow {
+		graph := a.workflowGraph(a.activeWorkspaceID)
+		if err := validateWorkflowForRun(graph, cfg.Mode == client.ModeEdit || a.batchMode); err != nil {
+			a.appendLog("工作流无效: " + err.Error())
+			return
+		}
+		if !workflowEdgeConnected(graph, workflowEdgeModel{
+			FromNode: "source", FromPort: "image", ToNode: "generate", ToPort: "source",
+		}) {
+			cfg.SourcePaths = nil
+			cfg.SourceImageDataURLs = nil
+		}
 	}
 	a.startRunWithConfig(cfg, total)
 }

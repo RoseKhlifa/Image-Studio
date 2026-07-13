@@ -24,7 +24,7 @@ import (
 
 const (
 	workflowNodeHeight         = unit.Dp(156)
-	workflowCanvasMinZoom      = float32(0.65)
+	workflowCanvasMinZoom      = float32(0.35)
 	workflowCanvasMaxZoom      = float32(1.55)
 	workflowNodeMinVisualScale = float32(0.78)
 )
@@ -53,8 +53,11 @@ type workflowCanvasData struct {
 }
 
 type workflowCanvasCallbacks struct {
-	Select func(nodeID string)
-	Move   func(nodeID string, position image.Point)
+	Select           func(nodeID string)
+	MoveStart        func(nodeID string)
+	Move             func(nodeID string, position image.Point)
+	MoveEnd          func(nodeID string)
+	RewireConnection func(previous *workflowEdgeModel, replacement *workflowEdgeModel)
 }
 
 type workflowNodeInteraction struct {
@@ -64,8 +67,31 @@ type workflowNodeInteraction struct {
 	active   bool
 }
 
+type workflowPortRef struct {
+	NodeID string
+	PortID string
+	Kind   workflowPortKind
+	Output bool
+}
+
+type workflowPortInteraction struct {
+	drag  gesture.Drag
+	hover gesture.Hover
+}
+
+type workflowConnectionDrag struct {
+	active      bool
+	driver      workflowPortRef
+	source      workflowPortRef
+	position    image.Point
+	origin      image.Point
+	hasOriginal bool
+	original    workflowEdgeModel
+}
+
 type workflowCanvasViewState struct {
 	interactions      map[string]*workflowNodeInteraction
+	portInteractions  map[string]*workflowPortInteraction
 	overrides         map[string]image.Point
 	overrideRevisions map[string]int
 	workspaceID       string
@@ -76,11 +102,17 @@ type workflowCanvasViewState struct {
 	panLast           image.Point
 	offset            image.Point
 	zoom              float32
+	canvasSize        image.Point
+	metric            unit.Metric
+	connection        workflowConnectionDrag
 }
 
 func (view *workflowCanvasViewState) ensure() {
 	if view.interactions == nil {
 		view.interactions = map[string]*workflowNodeInteraction{}
+	}
+	if view.portInteractions == nil {
+		view.portInteractions = map[string]*workflowPortInteraction{}
 	}
 	if view.overrides == nil {
 		view.overrides = map[string]image.Point{}
@@ -100,7 +132,9 @@ func (view *workflowCanvasViewState) syncModel(data workflowCanvasData) {
 		view.workspaceID = workspaceID
 		view.graphRevision = data.Graph.Revision
 		view.interactions = map[string]*workflowNodeInteraction{}
+		view.portInteractions = map[string]*workflowPortInteraction{}
 		view.clearOverrides()
+		view.connection = workflowConnectionDrag{}
 		view.panActive = false
 		view.panPointerID = 0
 		view.panLast = image.Point{}
@@ -123,6 +157,14 @@ func (view *workflowCanvasViewState) syncModel(data workflowCanvasData) {
 		baseRevision, tracked := view.overrideRevisions[nodeID]
 		if tracked && data.Graph.Revision > baseRevision {
 			view.clearOverride(nodeID)
+		}
+	}
+	if view.connection.active {
+		source, ok := nodes[view.connection.source.NodeID]
+		if !ok || !source.Enabled {
+			view.connection = workflowConnectionDrag{}
+		} else if _, ok := workflowOutputPort(source, view.connection.source.PortID); !ok {
+			view.connection = workflowConnectionDrag{}
 		}
 	}
 	view.graphRevision = data.Graph.Revision
@@ -160,6 +202,66 @@ func (view *workflowCanvasViewState) zoomBy(delta float32) {
 	view.zoom = float32(math.Max(float64(workflowCanvasMinZoom), math.Min(float64(workflowCanvasMaxZoom), float64(view.zoom+delta))))
 }
 
+func (view *workflowCanvasViewState) fitGraph(graph workflowGraphModel, spec desktopThemeTokens) bool {
+	view.ensure()
+	if len(graph.Nodes) == 0 || view.canvasSize.X <= 0 || view.canvasSize.Y <= 0 {
+		view.resetViewport()
+		return false
+	}
+	metric := view.metric
+	if metric.PxPerDp == 0 {
+		metric.PxPerDp = 1
+	}
+	if metric.PxPerSp == 0 {
+		metric.PxPerSp = metric.PxPerDp
+	}
+	padding := max(16, metric.Dp(unit.Dp(32)))
+	available := image.Pt(max(1, view.canvasSize.X-padding*2), max(1, view.canvasSize.Y-padding*2))
+
+	boundsAt := func(zoom float32) (float64, float64, float64, float64) {
+		visualScale := workflowNodeVisualScale(zoom)
+		nodeMetric := workflowNodeScaledMetric(metric, visualScale)
+		nodeWidth := max(nodeMetric.Dp(spec.Metrics.NodeWidth), nodeMetric.Dp(unit.Dp(210)))
+		nodeHeight := max(nodeMetric.Dp(workflowNodeHeight), nodeMetric.Dp(unit.Dp(132)))
+		minX, minY := math.Inf(1), math.Inf(1)
+		maxX, maxY := math.Inf(-1), math.Inf(-1)
+		for _, node := range graph.Nodes {
+			position := node.Position
+			if override, ok := view.overrides[node.ID]; ok {
+				position = override
+			}
+			x := float64(metric.Dp(unit.Dp(position.X))) * float64(zoom)
+			y := float64(metric.Dp(unit.Dp(position.Y))) * float64(zoom)
+			minX = math.Min(minX, x)
+			minY = math.Min(minY, y)
+			maxX = math.Max(maxX, x+float64(nodeWidth))
+			maxY = math.Max(maxY, y+float64(nodeHeight))
+		}
+		return minX, minY, maxX, maxY
+	}
+
+	low, high := workflowCanvasMinZoom, min(float32(1), workflowCanvasMaxZoom)
+	for range 28 {
+		mid := (low + high) / 2
+		minX, minY, maxX, maxY := boundsAt(mid)
+		if maxX-minX <= float64(available.X) && maxY-minY <= float64(available.Y) {
+			low = mid
+		} else {
+			high = mid
+		}
+	}
+	view.zoom = workflowCanvasZoom(low)
+	minX, minY, maxX, maxY := boundsAt(view.zoom)
+	view.offset = image.Pt(
+		int(math.Round((float64(view.canvasSize.X)-(maxX-minX))/2-minX)),
+		int(math.Round((float64(view.canvasSize.Y)-(maxY-minY))/2-minY)),
+	)
+	view.panActive = false
+	view.panPointerID = 0
+	view.panLast = image.Point{}
+	return true
+}
+
 func (view *workflowCanvasViewState) interaction(nodeID string) *workflowNodeInteraction {
 	view.ensure()
 	if interaction, ok := view.interactions[nodeID]; ok {
@@ -167,6 +269,25 @@ func (view *workflowCanvasViewState) interaction(nodeID string) *workflowNodeInt
 	}
 	interaction := new(workflowNodeInteraction)
 	view.interactions[nodeID] = interaction
+	return interaction
+}
+
+func workflowPortInteractionKey(ref workflowPortRef) string {
+	direction := "input"
+	if ref.Output {
+		direction = "output"
+	}
+	return direction + "|" + ref.NodeID + "|" + ref.PortID
+}
+
+func (view *workflowCanvasViewState) portInteraction(ref workflowPortRef) *workflowPortInteraction {
+	view.ensure()
+	key := workflowPortInteractionKey(ref)
+	if interaction := view.portInteractions[key]; interaction != nil {
+		return interaction
+	}
+	interaction := new(workflowPortInteraction)
+	view.portInteractions[key] = interaction
 	return interaction
 }
 
@@ -284,6 +405,147 @@ func (view *workflowCanvasViewState) handleCanvasEvents(gtx layout.Context, grap
 	}
 }
 
+func workflowPortCenter(gtx layout.Context, node workflowNodeModel, portID string, output bool, spec desktopThemeTokens, view *workflowCanvasViewState) (image.Point, bool) {
+	rect := workflowNodeRect(gtx, node, spec, view)
+	visualScale := workflowNodeVisualScale(view.zoom)
+	ports := node.Inputs
+	x := rect.Min.X
+	if output {
+		ports = node.Outputs
+		x = rect.Max.X
+	}
+	index := workflowPortIndex(ports, portID)
+	if index < 0 {
+		return image.Point{}, false
+	}
+	return image.Pt(x, workflowPortPixelY(gtx, rect, index, visualScale)), true
+}
+
+func workflowPortHitRadius(gtx layout.Context, view *workflowCanvasViewState) int {
+	metric := workflowNodeScaledMetric(gtx.Metric, workflowNodeVisualScale(view.zoom))
+	return max(10, metric.Dp(unit.Dp(14)))
+}
+
+func (view *workflowCanvasViewState) connectionTargetAt(gtx layout.Context, graph workflowGraphModel, spec desktopThemeTokens, point image.Point) (workflowEdgeModel, workflowPortRef, image.Point, bool) {
+	if !view.connection.active {
+		return workflowEdgeModel{}, workflowPortRef{}, image.Point{}, false
+	}
+	hitRadius := workflowPortHitRadius(gtx, view)
+	for _, node := range graph.Nodes {
+		if !node.Enabled || node.ID == view.connection.source.NodeID {
+			continue
+		}
+		for _, port := range node.Inputs {
+			if port.Kind != view.connection.source.Kind {
+				continue
+			}
+			center, ok := workflowPortCenter(gtx, node, port.ID, false, spec, view)
+			if !ok || absInt(point.X-center.X) > hitRadius || absInt(point.Y-center.Y) > hitRadius {
+				continue
+			}
+			ref := workflowPortRef{NodeID: node.ID, PortID: port.ID, Kind: port.Kind}
+			return workflowEdgeModel{
+				FromNode: view.connection.source.NodeID,
+				FromPort: view.connection.source.PortID,
+				ToNode:   node.ID,
+				ToPort:   port.ID,
+			}, ref, center, true
+		}
+	}
+	return workflowEdgeModel{}, workflowPortRef{}, image.Point{}, false
+}
+
+func (view *workflowCanvasViewState) handlePortEvents(gtx layout.Context, data workflowCanvasData, spec desktopThemeTokens, callbacks workflowCanvasCallbacks) {
+	for _, node := range data.Graph.Nodes {
+		if !node.Enabled {
+			continue
+		}
+		handle := func(port workflowPortModel, output bool) {
+			ref := workflowPortRef{NodeID: node.ID, PortID: port.ID, Kind: port.Kind, Output: output}
+			interaction := view.portInteraction(ref)
+			for {
+				eventValue, ok := interaction.drag.Update(gtx.Metric, gtx.Source, gesture.Both)
+				if !ok {
+					break
+				}
+				switch eventValue.Kind {
+				case pointer.Press:
+					center, _ := workflowPortCenter(gtx, node, port.ID, output, spec, view)
+					hitRadius := workflowPortHitRadius(gtx, view)
+					connection := workflowConnectionDrag{
+						active:   true,
+						driver:   ref,
+						source:   ref,
+						position: center,
+						origin:   image.Pt(center.X-hitRadius, center.Y-hitRadius),
+					}
+					if !output {
+						incoming := workflowInputEdges(data.Graph, node.ID, port.ID)
+						if len(incoming) != 1 {
+							continue
+						}
+						sourceNode, ok := data.Graph.node(incoming[0].FromNode)
+						if !ok {
+							continue
+						}
+						sourcePort, ok := workflowOutputPort(sourceNode, incoming[0].FromPort)
+						if !ok {
+							continue
+						}
+						connection.source = workflowPortRef{NodeID: sourceNode.ID, PortID: sourcePort.ID, Kind: sourcePort.Kind, Output: true}
+						connection.hasOriginal = true
+						connection.original = incoming[0]
+					}
+					view.connection = connection
+					if callbacks.Select != nil {
+						callbacks.Select(node.ID)
+					}
+				case pointer.Drag:
+					if view.connection.active && view.connection.driver == ref {
+						view.connection.position = view.connection.origin.Add(eventValue.Position.Round())
+					}
+				case pointer.Release:
+					if !view.connection.active || view.connection.driver != ref {
+						continue
+					}
+					view.connection.position = view.connection.origin.Add(eventValue.Position.Round())
+					candidate, _, _, connected := view.connectionTargetAt(gtx, data.Graph, spec, view.connection.position)
+					connection := view.connection
+					view.connection = workflowConnectionDrag{}
+					if callbacks.RewireConnection == nil {
+						continue
+					}
+					if connection.hasOriginal {
+						previous := connection.original
+						if connected && workflowEdgeID(previous) == workflowEdgeID(candidate) {
+							continue
+						}
+						if connected {
+							replacement := candidate
+							callbacks.RewireConnection(&previous, &replacement)
+						} else {
+							callbacks.RewireConnection(&previous, nil)
+						}
+					} else if connected {
+						replacement := candidate
+						callbacks.RewireConnection(nil, &replacement)
+					}
+				case pointer.Cancel:
+					if view.connection.active && view.connection.driver == ref {
+						view.connection = workflowConnectionDrag{}
+					}
+				}
+			}
+		}
+		for _, port := range node.Inputs {
+			handle(port, false)
+		}
+		for _, port := range node.Outputs {
+			handle(port, true)
+		}
+	}
+}
+
 func (view *workflowCanvasViewState) Layout(
 	gtx layout.Context,
 	th *material.Theme,
@@ -293,13 +555,18 @@ func (view *workflowCanvasViewState) Layout(
 ) layout.Dimensions {
 	view.syncModel(data)
 	gtx.Constraints.Min = gtx.Constraints.Max
+	view.canvasSize = gtx.Constraints.Max
+	view.metric = gtx.Metric
 	paint.FillShape(gtx.Ops, spec.Colors.canvasBg, clip.Rect{Max: gtx.Constraints.Max}.Op())
 	view.paintGrid(gtx, spec)
 	view.handleCanvasEvents(gtx, data.Graph, spec)
+	view.handlePortEvents(gtx, data, spec, callbacks)
 	view.paintEdges(gtx, data, spec)
+	view.paintConnectionPreview(gtx, data.Graph, spec)
 	for _, node := range data.Graph.Nodes {
 		view.layoutNode(gtx, th, spec, data, node, callbacks)
 	}
+	view.layoutPorts(gtx, data.Graph, spec)
 	return layout.Dimensions{Size: gtx.Constraints.Max}
 }
 
@@ -350,25 +617,55 @@ func (view *workflowCanvasViewState) paintEdges(gtx layout.Context, data workflo
 		toRect := workflowNodeRect(gtx, to, spec, view)
 		fromIndex := workflowPortIndex(from.Outputs, edge.FromPort)
 		toIndex := workflowPortIndex(to.Inputs, edge.ToPort)
+		if fromIndex < 0 || toIndex < 0 {
+			continue
+		}
 		visualScale := workflowNodeVisualScale(view.zoom)
 		fromPoint := image.Pt(fromRect.Max.X, workflowPortPixelY(gtx, fromRect, fromIndex, visualScale))
 		toPoint := image.Pt(toRect.Min.X, workflowPortPixelY(gtx, toRect, toIndex, visualScale))
 		metric := workflowNodeScaledMetric(gtx.Metric, visualScale)
-		curve := max(metric.Dp(unit.Dp(48)), absInt(toPoint.X-fromPoint.X)/2)
-		var path clip.Path
-		path.Begin(gtx.Ops)
-		path.MoveTo(f32.Pt(float32(fromPoint.X), float32(fromPoint.Y)))
-		path.CubeTo(
-			f32.Pt(float32(fromPoint.X+curve), float32(fromPoint.Y)),
-			f32.Pt(float32(toPoint.X-curve), float32(toPoint.Y)),
-			f32.Pt(float32(toPoint.X), float32(toPoint.Y)),
-		)
 		lineColor := withAlpha(spec.Colors.textDim, 0x8c)
 		if runtime, ok := data.Runtime[edge.FromNode]; ok && runtime.Phase == workflowNodePhaseRunning {
 			lineColor = spec.Colors.accent
 		}
-		paint.FillShape(gtx.Ops, lineColor, clip.Stroke{Path: path.End(), Width: float32(max(1, metric.Dp(unit.Dp(2))))}.Op())
+		paintWorkflowEdgeCurve(gtx, fromPoint, toPoint, lineColor, float32(max(1, metric.Dp(unit.Dp(2)))), metric.Dp(unit.Dp(48)))
 	}
+}
+
+func (view *workflowCanvasViewState) paintConnectionPreview(gtx layout.Context, graph workflowGraphModel, spec desktopThemeTokens) {
+	if !view.connection.active {
+		return
+	}
+	source, ok := graph.node(view.connection.source.NodeID)
+	if !ok {
+		return
+	}
+	fromPoint, ok := workflowPortCenter(gtx, source, view.connection.source.PortID, true, spec, view)
+	if !ok {
+		return
+	}
+	toPoint := view.connection.position
+	_, _, targetCenter, validTarget := view.connectionTargetAt(gtx, graph, spec, toPoint)
+	lineColor := withAlpha(workflowPortColor(spec, view.connection.source.Kind), 0xb8)
+	if validTarget {
+		toPoint = targetCenter
+		lineColor = spec.Colors.accent
+	}
+	metric := workflowNodeScaledMetric(gtx.Metric, workflowNodeVisualScale(view.zoom))
+	paintWorkflowEdgeCurve(gtx, fromPoint, toPoint, lineColor, float32(max(2, metric.Dp(unit.Dp(2)))), metric.Dp(unit.Dp(48)))
+}
+
+func paintWorkflowEdgeCurve(gtx layout.Context, fromPoint image.Point, toPoint image.Point, colorValue color.NRGBA, width float32, minimumCurve int) {
+	curve := max(minimumCurve, absInt(toPoint.X-fromPoint.X)/2)
+	var path clip.Path
+	path.Begin(gtx.Ops)
+	path.MoveTo(f32.Pt(float32(fromPoint.X), float32(fromPoint.Y)))
+	path.CubeTo(
+		f32.Pt(float32(fromPoint.X+curve), float32(fromPoint.Y)),
+		f32.Pt(float32(toPoint.X-curve), float32(toPoint.Y)),
+		f32.Pt(float32(toPoint.X), float32(toPoint.Y)),
+	)
+	paint.FillShape(gtx.Ops, colorValue, clip.Stroke{Path: path.End(), Width: width}.Op())
 }
 
 func (view *workflowCanvasViewState) layoutNode(
@@ -393,6 +690,9 @@ func (view *workflowCanvasViewState) layoutNode(
 		case pointer.Press:
 			interaction.active = true
 			interaction.lastDrag = evt.Position.Round()
+			if callbacks.MoveStart != nil {
+				callbacks.MoveStart(node.ID)
+			}
 			if evt.Source == pointer.Mouse {
 				gtx.Execute(key.FocusCmd{Tag: interaction})
 			}
@@ -420,8 +720,12 @@ func (view *workflowCanvasViewState) layoutNode(
 				callbacks.Move(node.ID, position)
 			}
 		case pointer.Release, pointer.Cancel:
+			wasActive := interaction.active
 			interaction.active = false
 			interaction.lastDrag = image.Point{}
+			if wasActive && callbacks.MoveEnd != nil {
+				callbacks.MoveEnd(node.ID)
+			}
 		}
 	}
 	for {
@@ -514,7 +818,6 @@ func (view *workflowCanvasViewState) layoutNode(
 			}),
 		)
 	})
-	view.paintPorts(gtx, spec, localRect, node, visualScale)
 }
 
 func workflowNodeTitle(gtx layout.Context, th *material.Theme, spec desktopThemeTokens, node workflowNodeModel, runtimeState workflowNodeRuntime) layout.Dimensions {
@@ -549,18 +852,60 @@ func workflowNodeKindIcon(kind workflowNodeKind) *widget.Icon {
 	}
 }
 
-func (view *workflowCanvasViewState) paintPorts(gtx layout.Context, spec desktopThemeTokens, rect image.Rectangle, node workflowNodeModel, visualScale float32) {
+func (view *workflowCanvasViewState) layoutPorts(gtx layout.Context, graph workflowGraphModel, spec desktopThemeTokens) {
+	visualScale := workflowNodeVisualScale(view.zoom)
 	metric := workflowNodeScaledMetric(gtx.Metric, visualScale)
 	radius := max(3, metric.Dp(unit.Dp(5)))
-	for idx, port := range node.Inputs {
-		y := workflowPortPixelY(gtx, rect, idx, visualScale)
-		center := image.Pt(0, y)
-		paint.FillShape(gtx.Ops, workflowPortColor(spec, port.Kind), clip.Ellipse(image.Rect(center.X-radius, center.Y-radius, center.X+radius, center.Y+radius)).Op(gtx.Ops))
+	hitRadius := workflowPortHitRadius(gtx, view)
+	var targetRef workflowPortRef
+	if view.connection.active {
+		_, targetRef, _, _ = view.connectionTargetAt(gtx, graph, spec, view.connection.position)
 	}
-	for idx, port := range node.Outputs {
-		y := workflowPortPixelY(gtx, rect, idx, visualScale)
-		center := image.Pt(rect.Max.X, y)
+
+	layoutPort := func(node workflowNodeModel, port workflowPortModel, output bool) {
+		ref := workflowPortRef{NodeID: node.ID, PortID: port.ID, Kind: port.Kind, Output: output}
+		center, ok := workflowPortCenter(gtx, node, port.ID, output, spec, view)
+		if !ok || center.X+hitRadius < 0 || center.Y+hitRadius < 0 || center.X-hitRadius > gtx.Constraints.Max.X || center.Y-hitRadius > gtx.Constraints.Max.Y {
+			return
+		}
+		interaction := view.portInteraction(ref)
+		hovered := interaction.hover.Update(gtx.Source)
+		activeSource := view.connection.active && view.connection.source == ref
+		activeTarget := view.connection.active && targetRef == ref
+		outerRadius := radius
+		if hovered || activeSource || activeTarget {
+			outerRadius = radius + max(2, metric.Dp(unit.Dp(2)))
+			outerColor := withAlpha(workflowPortColor(spec, port.Kind), 0x56)
+			if activeTarget {
+				outerColor = withAlpha(spec.Colors.accent, 0x88)
+			}
+			paint.FillShape(gtx.Ops, outerColor, clip.Ellipse(image.Rect(center.X-outerRadius, center.Y-outerRadius, center.X+outerRadius, center.Y+outerRadius)).Op(gtx.Ops))
+		}
 		paint.FillShape(gtx.Ops, workflowPortColor(spec, port.Kind), clip.Ellipse(image.Rect(center.X-radius, center.Y-radius, center.X+radius, center.Y+radius)).Op(gtx.Ops))
+
+		offset := op.Offset(image.Pt(center.X-hitRadius, center.Y-hitRadius)).Push(gtx.Ops)
+		area := clip.Ellipse(image.Rect(0, 0, hitRadius*2, hitRadius*2)).Push(gtx.Ops)
+		interaction.drag.Add(gtx.Ops)
+		interaction.hover.Add(gtx.Ops)
+		pointer.CursorPointer.Add(gtx.Ops)
+		semantic.Button.Add(gtx.Ops)
+		direction := "输入端口"
+		if output {
+			direction = "输出端口"
+		}
+		semantic.LabelOp(node.Title + " " + direction + " " + port.Name).Add(gtx.Ops)
+		semantic.EnabledOp(node.Enabled).Add(gtx.Ops)
+		area.Pop()
+		offset.Pop()
+	}
+
+	for _, node := range graph.Nodes {
+		for _, port := range node.Inputs {
+			layoutPort(node, port, false)
+		}
+		for _, port := range node.Outputs {
+			layoutPort(node, port, true)
+		}
 	}
 }
 
@@ -660,7 +1005,7 @@ func workflowPortIndex(ports []workflowPortModel, id string) int {
 			return idx
 		}
 	}
-	return 0
+	return -1
 }
 
 func workflowPortPixelY(gtx layout.Context, rect image.Rectangle, index int, visualScale float32) int {

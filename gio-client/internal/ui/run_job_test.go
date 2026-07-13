@@ -147,6 +147,59 @@ func TestStartRunBlocksWhenLoopAutoSaveDirMissing(t *testing.T) {
 	}
 }
 
+func TestStartRunBlocksInvalidWorkflowBeforeSubmitting(t *testing.T) {
+	graph := defaultWorkflowGraph()
+	var err error
+	graph, err = toggleWorkflowConnection(graph, workflowEdgeModel{
+		FromNode: "preview", FromPort: "image", ToNode: "export", ToPort: "image",
+	})
+	if err != nil {
+		t.Fatalf("disconnect export: %v", err)
+	}
+	app := &App{
+		experienceMode:        experienceModeWorkflow,
+		activeWorkspaceID:     "ws-1",
+		workflowGraphs:        map[string]workflowGraphModel{"ws-1": graph},
+		workflowSelectedNodes: map[string]string{"ws-1": "export"},
+	}
+
+	app.startRun()
+
+	if app.isRunning() {
+		t.Fatal("invalid workflow entered running state")
+	}
+	if len(app.logs) == 0 || !strings.Contains(app.logs[len(app.logs)-1], "工作流无效") {
+		t.Fatalf("missing workflow validation log: %#v", app.logs)
+	}
+}
+
+func TestRetryLastRunDoesNotBypassWorkflowValidation(t *testing.T) {
+	graph, err := toggleWorkflowConnection(defaultWorkflowGraph(), workflowEdgeModel{
+		FromNode: "generate", FromPort: "job", ToNode: "preview", ToPort: "job",
+	})
+	if err != nil {
+		t.Fatalf("disconnect preview: %v", err)
+	}
+	app := &App{
+		experienceMode:        experienceModeWorkflow,
+		activeWorkspaceID:     "ws-1",
+		workflowGraphs:        map[string]workflowGraphModel{"ws-1": graph},
+		workflowSelectedNodes: map[string]string{"ws-1": "preview"},
+		lastRunValid:          true,
+		lastRunBatchCount:     1,
+		lastRunConfig:         kernel.Config{Mode: client.ModeGenerate},
+	}
+
+	app.retryLastRun()
+
+	if app.isRunning() {
+		t.Fatal("retry bypassed workflow validation")
+	}
+	if len(app.logs) == 0 || !strings.Contains(app.logs[len(app.logs)-1], "工作流无效") {
+		t.Fatalf("missing retry validation log: %#v", app.logs)
+	}
+}
+
 func TestHistoryItemByRawPathFindsMatchingItem(t *testing.T) {
 	items := []sharedCompat.HistoryItem{
 		{ID: "a", RawPath: "/tmp/a.txt"},
