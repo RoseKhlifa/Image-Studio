@@ -12,6 +12,8 @@ import (
 
 	"gioui.org/app"
 	"gioui.org/font"
+	"gioui.org/io/event"
+	"gioui.org/io/key"
 	"gioui.org/io/semantic"
 	"gioui.org/io/system"
 	"gioui.org/layout"
@@ -34,6 +36,7 @@ const (
 	desktopButtonPrimary
 	desktopButtonDanger
 	desktopButtonSelected
+	desktopButtonDisabled
 )
 
 type desktopButtonVisual struct {
@@ -53,6 +56,8 @@ type desktopWindowIcons struct {
 	main      *widget.Icon
 	activate  *widget.Icon
 	save      *widget.Icon
+	undo      *widget.Icon
+	redo      *widget.Icon
 }
 
 type desktopWindowView struct {
@@ -81,6 +86,8 @@ type desktopWindowView struct {
 	openWorkspaceButton widget.Clickable
 	raiseMainButton     widget.Clickable
 	applyDraftButton    widget.Clickable
+	undoButton          widget.Clickable
+	redoButton          widget.Clickable
 
 	promptEditor        widget.Editor
 	negativeEditor      widget.Editor
@@ -104,6 +111,7 @@ type desktopWindowView struct {
 	consoleFilterID  string
 	commandError     string
 	icons            desktopWindowIcons
+	keyboardTag      struct{}
 }
 
 func newDesktopWindowView(root *App, request windowing.Request) *desktopWindowView {
@@ -123,6 +131,8 @@ func newDesktopWindowView(root *App, request windowing.Request) *desktopWindowVi
 			main:      newDetachedWindowIcon(mdicons.ActionLaunch),
 			activate:  newDetachedWindowIcon(mdicons.NavigationCheck),
 			save:      newDetachedWindowIcon(mdicons.ContentSave),
+			undo:      newDetachedWindowIcon(mdicons.ContentUndo),
+			redo:      newDetachedWindowIcon(mdicons.ContentRedo),
 		},
 		draftModeButtons:    make([]widget.Clickable, len(modeChoices)),
 		draftSizeButtons:    make([]widget.Clickable, len(sizeChoices)),
@@ -307,6 +317,13 @@ func (view *desktopWindowView) canvasCallbacks(workspaceID string) workflowCanva
 				NodeID:      nodeID,
 			})
 		},
+		MoveStart: func(nodeID string) {
+			view.enqueue(desktopCommand{
+				Kind:        desktopCommandBeginNodeMove,
+				WorkspaceID: workspaceID,
+				NodeID:      nodeID,
+			})
+		},
 		Move: func(nodeID string, position image.Point) {
 			view.enqueue(desktopCommand{
 				Kind:        desktopCommandMoveNode,
@@ -315,6 +332,68 @@ func (view *desktopWindowView) canvasCallbacks(workspaceID string) workflowCanva
 				Position:    position,
 			})
 		},
+		MoveEnd: func(nodeID string) {
+			view.enqueue(desktopCommand{
+				Kind:        desktopCommandEndNodeMove,
+				WorkspaceID: workspaceID,
+				NodeID:      nodeID,
+			})
+		},
+		RewireConnection: func(previous *workflowEdgeModel, replacement *workflowEdgeModel) {
+			command := desktopCommand{
+				Kind:        desktopCommandRewireConnection,
+				WorkspaceID: workspaceID,
+			}
+			if previous != nil {
+				command.HasPreviousEdge = true
+				command.PreviousEdge = *previous
+			}
+			if replacement != nil {
+				command.HasEdge = true
+				command.Edge = *replacement
+			}
+			view.enqueue(command)
+		},
+	}
+}
+
+func (view *desktopWindowView) handleWorkflowHistoryShortcuts(gtx layout.Context, workspaceID string, selectedNode string) {
+	event.Op(gtx.Ops, &view.keyboardTag)
+	if gtx.Focused(&view.promptEditor) || gtx.Focused(&view.negativeEditor) {
+		return
+	}
+	for {
+		eventValue, ok := gtx.Event(
+			key.Filter{Name: "Z", Required: key.ModCtrl, Optional: key.ModShift},
+			key.Filter{Name: "Z", Required: key.ModCommand, Optional: key.ModShift},
+			key.Filter{Name: "Y", Required: key.ModCtrl},
+			key.Filter{Name: "Y", Required: key.ModCommand},
+			key.Filter{Name: "M", Required: key.ModCtrl},
+			key.Filter{Name: "M", Required: key.ModCommand},
+			key.Filter{Name: key.NameDeleteBackward},
+			key.Filter{Name: key.NameDeleteForward},
+		)
+		if !ok {
+			break
+		}
+		keyEvent, ok := eventValue.(key.Event)
+		if !ok || keyEvent.State != key.Press {
+			continue
+		}
+		kind := desktopCommandUndoWorkflow
+		switch keyEvent.Name {
+		case "Y":
+			kind = desktopCommandRedoWorkflow
+		case "Z":
+			if keyEvent.Modifiers.Contain(key.ModShift) {
+				kind = desktopCommandRedoWorkflow
+			}
+		case "M":
+			kind = desktopCommandToggleWorkflowNode
+		case key.NameDeleteBackward, key.NameDeleteForward:
+			kind = desktopCommandDeleteWorkflowNode
+		}
+		view.enqueue(desktopCommand{Kind: kind, WorkspaceID: workspaceID, NodeID: selectedNode})
 	}
 }
 
@@ -382,6 +461,7 @@ func (view *desktopWindowView) button(
 	visual := resolveDesktopButtonVisual(spec, tone, interaction)
 	return button.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		semantic.Button.Add(gtx.Ops)
+		semantic.EnabledOp(tone != desktopButtonDisabled).Add(gtx.Ops)
 		if name := strings.TrimSpace(label); name != "" {
 			semantic.LabelOp(name).Add(gtx.Ops)
 		}
@@ -446,9 +526,17 @@ func resolveDesktopButtonVisual(spec desktopThemeTokens, tone desktopWindowButto
 		hoverFill = fill
 		border = spec.Colors.focusRing
 		textColor = spec.Colors.accent
+	case desktopButtonDisabled:
+		fill = spec.Colors.surface
+		hoverFill = fill
+		border = spec.Colors.border
+		textColor = spec.Colors.textDim
 	}
 	if tone == desktopButtonNeutral {
 		hoverFill = spec.Colors.toolHoverBg
+	}
+	if tone == desktopButtonDisabled {
+		interaction = buttonInteractionState{}
 	}
 	interactionColors := resolveButtonInteractionColors(fill, hoverFill, border, spec.Colors.focusRing, desktopReadableText(fill), interaction)
 	if (interaction.Hovered || interaction.Focused) && tone == desktopButtonNeutral {

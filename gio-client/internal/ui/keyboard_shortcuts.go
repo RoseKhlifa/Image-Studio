@@ -171,7 +171,16 @@ func (a *App) handleCanvasKeyboardShortcuts(gtx layout.Context, snap snapshot) {
 	if textInputFocused {
 		return
 	}
+	workflowMode := normalizeExperienceMode(a.experienceMode) == experienceModeWorkflow
 	performCanvasUndo := func(redo bool) {
+		if workflowMode {
+			if redo {
+				a.redoWorkflowGraph(a.activeWorkspaceID)
+			} else {
+				a.undoWorkflowGraph(a.activeWorkspaceID)
+			}
+			return
+		}
 		if redo {
 			a.redoLatestCanvasAction()
 		} else {
@@ -196,6 +205,12 @@ func (a *App) handleCanvasKeyboardShortcuts(gtx layout.Context, snap snapshot) {
 			key.Filter{Name: "Z", Required: key.ModCommand, Optional: key.ModShift},
 			key.Filter{Name: "Y", Required: key.ModCtrl},
 			key.Filter{Name: "Y", Required: key.ModCommand},
+			key.Filter{Name: "M", Required: key.ModCtrl},
+			key.Filter{Name: "M", Required: key.ModCommand},
+			key.Filter{Name: "S", Required: key.ModCtrl},
+			key.Filter{Name: "S", Required: key.ModCommand},
+			key.Filter{Name: "O", Required: key.ModCtrl},
+			key.Filter{Name: "O", Required: key.ModCommand},
 			key.Filter{Name: "C", Required: key.ModCtrl},
 			key.Filter{Name: "C", Required: key.ModCommand},
 			key.Filter{Name: "V", Required: key.ModCtrl},
@@ -222,12 +237,17 @@ func (a *App) handleCanvasKeyboardShortcuts(gtx layout.Context, snap snapshot) {
 		case key.NameRightArrow:
 			delta = 1
 		case key.NameDeleteBackward, key.NameDeleteForward:
-			if a.currentCanvasTool() != canvasToolMask {
+			if workflowMode {
+				a.deleteSelectedWorkflowNode(a.activeWorkspaceID)
+			} else if a.currentCanvasTool() != canvasToolMask {
 				a.deleteSelectedCanvasAnnotation()
 			}
 			continue
 		case key.NameEscape:
 			switch {
+			case workflowMode && a.workflowCanvas.connection.active:
+				a.workflowCanvas.connection = workflowConnectionDrag{}
+				a.invalidateNow()
 			case snap.Running:
 				a.cancelRun()
 			case snap.Compare.HasItem:
@@ -248,7 +268,12 @@ func (a *App) handleCanvasKeyboardShortcuts(gtx layout.Context, snap snapshot) {
 			a.setCanvasTool(canvasToolAnnotate)
 			continue
 		case "F":
-			a.resetCanvasView()
+			if workflowMode {
+				a.workflowCanvas.fitGraph(a.workflowGraph(a.activeWorkspaceID), desktopThemeSpec(a.desktopStyle, a.resolvedThemeMode))
+				a.invalidateNow()
+			} else {
+				a.resetCanvasView()
+			}
 			continue
 		case "[":
 			if a.currentCanvasTool() == canvasToolMask {
@@ -265,6 +290,21 @@ func (a *App) handleCanvasKeyboardShortcuts(gtx layout.Context, snap snapshot) {
 			continue
 		case "Y":
 			performCanvasUndo(true)
+			continue
+		case "M":
+			if workflowMode {
+				a.toggleSelectedWorkflowNodeEnabled(a.activeWorkspaceID)
+			}
+			continue
+		case "S":
+			if workflowMode {
+				a.exportWorkflowJSON()
+			}
+			continue
+		case "O":
+			if workflowMode {
+				a.importWorkflowJSON()
+			}
 			continue
 		case "C":
 			if err := a.copyCurrentResultImageToClipboard(gtx, snap); err != nil {

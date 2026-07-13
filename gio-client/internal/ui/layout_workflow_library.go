@@ -13,6 +13,7 @@ import (
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
 	"gioui.org/unit"
+	"gioui.org/widget"
 )
 
 func (a *App) layoutWorkflowLibrary(gtx layout.Context, snap snapshot, spec desktopThemeTokens) layout.Dimensions {
@@ -26,6 +27,14 @@ func (a *App) layoutWorkflowLibrary(gtx layout.Context, snap snapshot, spec desk
 		}
 		for a.workflowWorkspaceWindowButton(workspace.ID).Clicked(gtx) {
 			a.openDesktopWindow(windowing.RoleWorkspace, workspace.ID)
+		}
+	}
+	graph := a.workflowGraph(a.activeWorkspaceID)
+	for _, node := range workflowAvailableNodes(graph) {
+		for a.workflowAddNodeButton(node.ID).Clicked(gtx) {
+			if err := a.addWorkflowNode(a.activeWorkspaceID, node.ID); err != nil {
+				a.appendLog("添加节点失败: " + err.Error())
+			}
 		}
 	}
 	data := a.workflowCanvasData(snap, a.activeWorkspaceID)
@@ -173,7 +182,65 @@ func (a *App) workflowNodeLibrarySection(gtx layout.Context, data workflowCanvas
 			return a.workflowNodeLibraryRow(gtx, node, data.Runtime[node.ID], data.Selected == node.ID, spec)
 		}))
 	}
+	available := workflowAvailableNodes(data.Graph)
+	if len(available) > 0 {
+		children = append(children,
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return layout.Inset{Top: unit.Dp(5), Bottom: unit.Dp(2)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return workflowDivider(gtx, spec.Colors.border)
+				})
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return a.workflowSectionTitle(gtx, "可添加节点", fmt.Sprintf("%d", len(available)), spec)
+			}),
+		)
+		for _, node := range available {
+			node := node
+			children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return a.workflowAvailableNodeRow(gtx, node, spec)
+			}))
+		}
+	}
 	return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(unit.Dp(5))}.Layout(gtx, children...)
+}
+
+func (a *App) workflowAvailableNodeRow(gtx layout.Context, node workflowNodeModel, spec desktopThemeTokens) layout.Dimensions {
+	button := a.workflowAddNodeButton(node.ID)
+	return a.surfaceButton(gtx, button, rgba(0xffffff, 0x00), spec.Colors.surface2, withAlpha(spec.Colors.accent, 0x14), spec.Metrics.ControlRadius, layout.Inset{Top: 8, Bottom: 8, Left: 9, Right: 9}, func(gtx layout.Context) layout.Dimensions {
+		semantic.LabelOp("添加" + node.Title).Add(gtx.Ops)
+		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle, Gap: gtx.Dp(unit.Dp(8))}.Layout(gtx,
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return fixedWidth(gtx, unit.Dp(14), func(gtx layout.Context) layout.Dimensions {
+					return fixedHeight(gtx, unit.Dp(14), func(gtx layout.Context) layout.Dimensions {
+						return workflowNodeKindIcon(node.Kind).Layout(gtx, spec.Colors.textMuted)
+					})
+				})
+			}),
+			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+				return a.singleLineLabel(gtx, node.Title, workflowTextSize(spec, 12, 10), spec.Colors.text, font.Medium)
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return fixedWidth(gtx, unit.Dp(14), func(gtx layout.Context) layout.Dimensions {
+					return fixedHeight(gtx, unit.Dp(14), func(gtx layout.Context) layout.Dimensions {
+						return uiIconAdd.Layout(gtx, spec.Colors.accent)
+					})
+				})
+			}),
+		)
+	})
+}
+
+func (a *App) workflowAddNodeButton(nodeID string) *widget.Clickable {
+	if a.workflowAddNodeButtons == nil {
+		a.workflowAddNodeButtons = map[string]*widget.Clickable{}
+	}
+	key := a.activeWorkspaceID + "|" + nodeID
+	if button := a.workflowAddNodeButtons[key]; button != nil {
+		return button
+	}
+	button := new(widget.Clickable)
+	a.workflowAddNodeButtons[key] = button
+	return button
 }
 
 func (a *App) workflowNodeLibraryRow(gtx layout.Context, node workflowNodeModel, runtimeState workflowNodeRuntime, selected bool, spec desktopThemeTokens) layout.Dimensions {

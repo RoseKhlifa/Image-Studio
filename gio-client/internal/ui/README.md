@@ -172,10 +172,30 @@ acyclic.
 5. Extend `workflow_model_test.go` with valid ports, invalid connections, cycle,
    normalization, and movement coverage.
 
-The current graph is a fixed product graph, not a plugin registry.
-`workflowGraphFromDesktop` starts from `defaultWorkflowGraph` and restores known
-node positions and edges. A persisted unknown node alone does not make a new
-runtime node available. Although `desktopstate.WorkflowGraph` has a Viewport
+The current graph uses a fixed executable product node catalog, not a plugin
+registry. Catalog nodes can be deleted, restored from the left library, and
+muted from the inspector or with `Ctrl+M`; `Delete` removes the selected node.
+Removing a node also removes its incident edges, while adding it again leaves
+connections explicit instead of silently rebuilding the default graph.
+Compatible input connections are editable from the selected-node inspector and
+are validated as an output chain before a workflow-mode run starts. Selecting
+an active source disconnects it; selecting a different source on a single-input
+port replaces the old edge. On the canvas, drag an output port to a compatible
+input to connect or replace it. Drag an already connected input to empty canvas
+to disconnect it, or to another compatible input to move the edge atomically.
+Graph edits keep a workspace-local 64-step undo/redo history. A complete node
+drag is one history entry, while connection changes and graph reset each create
+their own entry; new edits after undo discard the stale redo branch.
+The command bar saves and loads versioned `image-studio-workflow` JSON documents
+containing the graph and current workspace draft. The importer accepts only the
+five executable catalog nodes and valid edges; ComfyUI workflow JSON is not
+treated as directly executable or silently converted. `Ctrl+S` and `Ctrl+O`
+route to the same save/load actions in the main workflow window.
+`workflowGraphFromDesktop` rebuilds saved catalog membership, positions, enabled
+state, and edges. The persisted `Explicit`
+marker distinguishes an intentionally empty canvas from an older missing graph.
+A persisted unknown node alone does not make a new runtime node available.
+Although `desktopstate.WorkflowGraph` has a Viewport
 field, the current UI bridge does not round-trip it; pan/zoom remains
 window-local `workflowCanvasViewState` until an explicit per-window persistence
 mapping is added.

@@ -20,9 +20,20 @@ func (view *desktopWindowView) layoutDetachedCanvas(
 	if !ok {
 		return view.missingWorkspace(gtx, spec, publication)
 	}
+	view.handleWorkflowHistoryShortcuts(gtx, workspace.ID, workspace.SelectedNode)
 
 	for view.runButton.Clicked(gtx) {
 		view.enqueue(desktopCommand{Kind: desktopCommandRun, WorkspaceID: workspace.ID})
+	}
+	for view.undoButton.Clicked(gtx) {
+		if workspace.CanUndo {
+			view.enqueue(desktopCommand{Kind: desktopCommandUndoWorkflow, WorkspaceID: workspace.ID})
+		}
+	}
+	for view.redoButton.Clicked(gtx) {
+		if workspace.CanRedo {
+			view.enqueue(desktopCommand{Kind: desktopCommandRedoWorkflow, WorkspaceID: workspace.ID})
+		}
 	}
 	for view.cancelButton.Clicked(gtx) {
 		view.enqueue(desktopCommand{Kind: desktopCommandCancel})
@@ -56,6 +67,20 @@ func (view *desktopWindowView) layoutDetachedCanvas(
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return view.layoutToolbar(gtx, spec, workspace.Name, context,
+				func(gtx layout.Context) layout.Dimensions {
+					tone := desktopButtonNeutral
+					if !workspace.CanUndo {
+						tone = desktopButtonDisabled
+					}
+					return view.button(gtx, spec, &view.undoButton, view.icons.undo, "撤销", tone)
+				},
+				func(gtx layout.Context) layout.Dimensions {
+					tone := desktopButtonNeutral
+					if !workspace.CanRedo {
+						tone = desktopButtonDisabled
+					}
+					return view.button(gtx, spec, &view.redoButton, view.icons.redo, "重做", tone)
+				},
 				runAction,
 				func(gtx layout.Context) layout.Dimensions {
 					return view.button(gtx, spec, &view.openConsoleButton, view.icons.console, "控制台", desktopButtonNeutral)

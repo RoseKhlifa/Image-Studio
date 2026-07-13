@@ -496,6 +496,10 @@ type App struct {
 	workflowZoomOutButton                    widget.Clickable
 	workflowZoomInButton                     widget.Clickable
 	workflowFitButton                        widget.Clickable
+	workflowUndoButton                       widget.Clickable
+	workflowRedoButton                       widget.Clickable
+	workflowSaveButton                       widget.Clickable
+	workflowLoadButton                       widget.Clickable
 	workflowRunButton                        widget.Clickable
 	workflowCancelButton                     widget.Clickable
 	workflowDetachCanvasButton               widget.Clickable
@@ -509,7 +513,11 @@ type App struct {
 	workflowAddSourcesButton                 widget.Clickable
 	workflowClearSourcesButton               widget.Clickable
 	workflowOpenOutputButton                 widget.Clickable
+	workflowDeleteNodeButton                 widget.Clickable
+	workflowToggleNodeButton                 widget.Clickable
 	workflowNodeButtons                      map[string]*widget.Clickable
+	workflowAddNodeButtons                   map[string]*widget.Clickable
+	workflowConnectionButtons                map[string]*widget.Clickable
 	workflowSidebarWorkspaceButtons          map[string]*widget.Clickable
 	workflowWorkspaceWindowButtons           map[string]*widget.Clickable
 	headerAddWorkspaceButton                 widget.Clickable
@@ -814,6 +822,7 @@ type App struct {
 	workspaceLastClickAt             time.Time
 	headerQuoteIndex                 int
 	workflowGraphs                   map[string]workflowGraphModel
+	workflowGraphHistories           map[string]*workflowGraphHistory
 	workflowSelectedNodes            map[string]string
 	workflowCanvas                   workflowCanvasViewState
 	workflowConsoleList              widget.List
@@ -1042,8 +1051,11 @@ func New() *App {
 		workspaceButtons:                        map[string]*widget.Clickable{},
 		closeWorkspaceButtons:                   map[string]*widget.Clickable{},
 		workflowNodeButtons:                     map[string]*widget.Clickable{},
+		workflowAddNodeButtons:                  map[string]*widget.Clickable{},
+		workflowConnectionButtons:               map[string]*widget.Clickable{},
 		workflowWorkspaceWindowButtons:          map[string]*widget.Clickable{},
 		workflowGraphs:                          map[string]workflowGraphModel{},
+		workflowGraphHistories:                  map[string]*workflowGraphHistory{},
 		workflowSelectedNodes:                   map[string]string{},
 		workflowConsoleOpen:                     true,
 		workflowBottomTab:                       "console",

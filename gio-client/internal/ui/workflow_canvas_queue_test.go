@@ -83,6 +83,36 @@ func TestWorkflowNodeInternalsUseSameVisualScale(t *testing.T) {
 	}
 }
 
+func TestWorkflowFitGraphFramesAllDefaultNodes(t *testing.T) {
+	canvasSize := image.Pt(640, 360)
+	metric := unit.Metric{PxPerDp: 1, PxPerSp: 1}
+	view := workflowCanvasViewState{
+		zoom:       1,
+		offset:     image.Pt(-900, 700),
+		canvasSize: canvasSize,
+		metric:     metric,
+	}
+	graph := defaultWorkflowGraph()
+	spec := desktopThemeSpec(desktopStyleWindows, desktopColorModeDark)
+	if !view.fitGraph(graph, spec) {
+		t.Fatal("fitGraph reported no viewport")
+	}
+	if view.zoom >= 1 || view.zoom < workflowCanvasMinZoom {
+		t.Fatalf("fit zoom=%v want [%v, 1)", view.zoom, workflowCanvasMinZoom)
+	}
+	gtx := layout.Context{
+		Ops:         new(op.Ops),
+		Metric:      metric,
+		Constraints: layout.Exact(canvasSize),
+	}
+	for _, node := range graph.Nodes {
+		rect := workflowNodeRect(gtx, node, spec, &view)
+		if rect.Min.X < 0 || rect.Min.Y < 0 || rect.Max.X > canvasSize.X || rect.Max.Y > canvasSize.Y {
+			t.Fatalf("node %s outside fitted canvas: rect=%v canvas=%v zoom=%v offset=%v", node.ID, rect, canvasSize, view.zoom, view.offset)
+		}
+	}
+}
+
 func TestWorkflowQueueListScrollsWithinShortViewport(t *testing.T) {
 	app := &App{
 		th:                material.NewTheme(),

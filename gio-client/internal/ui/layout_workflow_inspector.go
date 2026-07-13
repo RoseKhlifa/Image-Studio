@@ -18,6 +18,10 @@ func (a *App) layoutWorkflowInspector(gtx layout.Context, snap snapshot, spec de
 	if !ok && len(data.Graph.Nodes) > 0 {
 		node = data.Graph.Nodes[0]
 	}
+	if a.handleWorkflowConnectionEvents(gtx, data.Graph, node) {
+		data = a.workflowCanvasData(snap, a.activeWorkspaceID)
+		node, _ = data.Graph.node(data.Selected)
+	}
 	return a.borderedSurface(gtx, spec.Colors.inspector, unit.Dp(0), spec.Colors.border, func(gtx layout.Context) layout.Dimensions {
 		gtx.Constraints.Min = gtx.Constraints.Max
 		return a.workflowInspectorList.Layout(gtx, 1, func(gtx layout.Context, _ int) layout.Dimensions {
@@ -31,7 +35,7 @@ func (a *App) layoutWorkflowInspector(gtx layout.Context, snap snapshot, spec de
 					children = append(children,
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 							return a.workflowInspectorSectionCard(gtx, spec, func(gtx layout.Context) layout.Dimensions {
-								return a.layoutWorkflowNodeInspector(gtx, snap, node, spec)
+								return a.layoutWorkflowInspectorContent(gtx, snap, data.Graph, node, spec)
 							})
 						}),
 					)
@@ -41,7 +45,7 @@ func (a *App) layoutWorkflowInspector(gtx layout.Context, snap snapshot, spec de
 							return workflowDivider(gtx, spec.Colors.border)
 						}),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return a.layoutWorkflowNodeInspector(gtx, snap, node, spec)
+							return a.layoutWorkflowInspectorContent(gtx, snap, data.Graph, node, spec)
 						}),
 					)
 				}
@@ -51,6 +55,87 @@ func (a *App) layoutWorkflowInspector(gtx layout.Context, snap snapshot, spec de
 	})
 }
 
+func (a *App) layoutWorkflowInspectorContent(gtx layout.Context, snap snapshot, graph workflowGraphModel, node workflowNodeModel, spec desktopThemeTokens) layout.Dimensions {
+	children := []layout.FlexChild{
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return a.layoutWorkflowNodeInspector(gtx, snap, node, spec)
+		}),
+	}
+	if len(node.Inputs) > 0 {
+		children = append(children,
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return workflowDivider(gtx, spec.Colors.border)
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return a.layoutWorkflowConnections(gtx, graph, node, spec)
+			}),
+		)
+	}
+	return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(unit.Dp(12))}.Layout(gtx, children...)
+}
+
+func (a *App) handleWorkflowConnectionEvents(gtx layout.Context, graph workflowGraphModel, node workflowNodeModel) bool {
+	for _, input := range node.Inputs {
+		for _, candidate := range workflowCompatibleOutputs(graph, node.ID, input.ID) {
+			button := a.workflowConnectionButton(a.activeWorkspaceID, candidate)
+			for button.Clicked(gtx) {
+				if err := a.toggleWorkflowConnection(a.activeWorkspaceID, candidate); err != nil {
+					a.appendLog("连接节点失败: " + err.Error())
+					return false
+				}
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (a *App) layoutWorkflowConnections(gtx layout.Context, graph workflowGraphModel, node workflowNodeModel, spec desktopThemeTokens) layout.Dimensions {
+	children := []layout.FlexChild{
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return a.workflowInspectorSectionLabel(gtx, "输入连接", fmt.Sprintf("%d 个端口", len(node.Inputs)), spec)
+		}),
+	}
+	for _, input := range node.Inputs {
+		input := input
+		connected := workflowInputEdges(graph, node.ID, input.ID)
+		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			status := "未连接"
+			if len(connected) > 0 {
+				status = fmt.Sprintf("已连接 %d", len(connected))
+			}
+			return a.workflowInspectorSectionLabel(gtx, input.Name, status, spec)
+		}))
+		for _, candidate := range workflowCompatibleOutputs(graph, node.ID, input.ID) {
+			candidate := candidate
+			source, _ := graph.node(candidate.FromNode)
+			output, _ := workflowOutputPort(source, candidate.FromPort)
+			label := source.Title
+			if len(source.Outputs) > 1 {
+				label += " · " + output.Name
+			}
+			children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				selected := workflowEdgeConnected(graph, candidate)
+				return a.workflowChoiceButton(gtx, spec, a.workflowConnectionButton(a.activeWorkspaceID, candidate), label, selected)
+			}))
+		}
+	}
+	return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(unit.Dp(6))}.Layout(gtx, children...)
+}
+
+func (a *App) workflowConnectionButton(workspaceID string, edge workflowEdgeModel) *widget.Clickable {
+	if a.workflowConnectionButtons == nil {
+		a.workflowConnectionButtons = map[string]*widget.Clickable{}
+	}
+	key := strings.TrimSpace(workspaceID) + "|" + workflowEdgeID(edge)
+	if button := a.workflowConnectionButtons[key]; button != nil {
+		return button
+	}
+	button := new(widget.Clickable)
+	a.workflowConnectionButtons[key] = button
+	return button
+}
+
 func (a *App) workflowInspectorSectionCard(gtx layout.Context, spec desktopThemeTokens, body layout.Widget) layout.Dimensions {
 	return a.borderedSurface(gtx, spec.Colors.surfaceElevated, workflowSectionRadius(spec), spec.Colors.border, func(gtx layout.Context) layout.Dimensions {
 		return layout.UniformInset(unit.Dp(14)).Layout(gtx, body)
@@ -58,6 +143,12 @@ func (a *App) workflowInspectorSectionCard(gtx layout.Context, spec desktopTheme
 }
 
 func (a *App) handleWorkflowInspectorEvents(gtx layout.Context) {
+	for a.workflowDeleteNodeButton.Clicked(gtx) {
+		a.deleteSelectedWorkflowNode(a.activeWorkspaceID)
+	}
+	for a.workflowToggleNodeButton.Clicked(gtx) {
+		a.toggleSelectedWorkflowNodeEnabled(a.activeWorkspaceID)
+	}
 	for index, choice := range modeChoices {
 		for a.workflowModeButtons[index].Clicked(gtx) {
 			a.mode = choice.Value
@@ -113,7 +204,7 @@ func (a *App) handleWorkflowInspectorEvents(gtx layout.Context) {
 func (a *App) workflowInspectorHeader(gtx layout.Context, node workflowNodeModel, runtimeState workflowNodeRuntime, spec desktopThemeTokens) layout.Dimensions {
 	return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(unit.Dp(5))}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle, Gap: gtx.Dp(unit.Dp(8))}.Layout(gtx,
+			children := []layout.FlexChild{
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					return fixedWidth(gtx, unit.Dp(9), func(gtx layout.Context) layout.Dimensions {
 						return fixedHeight(gtx, unit.Dp(9), func(gtx layout.Context) layout.Dimensions {
@@ -124,7 +215,24 @@ func (a *App) workflowInspectorHeader(gtx layout.Context, node workflowNodeModel
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 					return a.singleLineLabel(gtx, chooseNonEmpty(node.Title, "节点属性"), unit.Sp(13), spec.Colors.text, font.SemiBold)
 				}),
-			)
+			}
+			if node.ID != "" {
+				toggleIcon := uiIconVisibilityOff
+				toggleLabel := "停用" + node.Title
+				if !node.Enabled {
+					toggleIcon = uiIconVisibility
+					toggleLabel = "启用" + node.Title
+				}
+				children = append(children,
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return a.headerIconButtonIcon(gtx, &a.workflowToggleNodeButton, toggleIcon, !node.Enabled, toggleLabel)
+					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return a.headerIconButtonIcon(gtx, &a.workflowDeleteNodeButton, uiIconDelete, false, "删除"+node.Title)
+					}),
+				)
+			}
+			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle, Gap: gtx.Dp(unit.Dp(8))}.Layout(gtx, children...)
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return a.label(gtx, chooseNonEmpty(runtimeState.Detail, node.Subtitle), workflowTextSize(spec, 11, 9), spec.Colors.textMuted, font.Normal)

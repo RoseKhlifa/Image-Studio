@@ -82,6 +82,65 @@ func TestDeleteWorkflowWorkspaceStateDropsDraftRevision(t *testing.T) {
 	}
 }
 
+func TestWorkflowRuntimeReflectsDisconnectedPorts(t *testing.T) {
+	graph := defaultWorkflowGraph()
+	for _, edge := range []workflowEdgeModel{
+		{FromNode: "prompt", FromPort: "text", ToNode: "generate", ToPort: "prompt"},
+		{FromNode: "source", FromPort: "image", ToNode: "generate", ToPort: "source"},
+		{FromNode: "generate", FromPort: "job", ToNode: "preview", ToPort: "job"},
+		{FromNode: "preview", FromPort: "image", ToNode: "export", ToPort: "image"},
+	} {
+		var err error
+		graph, err = toggleWorkflowConnection(graph, edge)
+		if err != nil {
+			t.Fatalf("disconnect %s: %v", workflowEdgeID(edge), err)
+		}
+	}
+	app := &App{
+		activeWorkspaceID:     "ws-one",
+		workflowGraphs:        map[string]workflowGraphModel{"ws-one": graph},
+		workflowSelectedNodes: map[string]string{"ws-one": "generate"},
+		mode:                  "edit",
+	}
+	app.promptInput.SetText("a complete prompt")
+	app.sourcePathsInput.SetText("/tmp/source.png")
+
+	runtime := app.workflowCanvasData(snapshot{}, "ws-one").Runtime
+	for _, nodeID := range []string{"prompt", "source", "generate", "preview", "export"} {
+		if runtime[nodeID].Phase != workflowNodePhaseWarning {
+			t.Fatalf("node %s phase=%s detail=%q want warning", nodeID, runtime[nodeID].Phase, runtime[nodeID].Detail)
+		}
+	}
+}
+
+func TestInactiveWorkflowRuntimeReflectsItsPublishedGraph(t *testing.T) {
+	graph := defaultWorkflowGraph()
+	for _, edge := range []workflowEdgeModel{
+		{FromNode: "prompt", FromPort: "text", ToNode: "generate", ToPort: "prompt"},
+		{FromNode: "preview", FromPort: "image", ToNode: "export", ToPort: "image"},
+	} {
+		var err error
+		graph, err = toggleWorkflowConnection(graph, edge)
+		if err != nil {
+			t.Fatalf("disconnect %s: %v", workflowEdgeID(edge), err)
+		}
+	}
+	runtime := workflowRuntimeForInactiveWorkspace(workspaceState{
+		Prompt:          "saved prompt",
+		Mode:            "generate",
+		ResultHasItem:   true,
+		ResultSavedPath: "/tmp/result.png",
+	}, graph)
+	for _, nodeID := range []string{"prompt", "generate", "export"} {
+		if runtime[nodeID].Phase != workflowNodePhaseWarning {
+			t.Fatalf("inactive node %s phase=%s detail=%q want warning", nodeID, runtime[nodeID].Phase, runtime[nodeID].Detail)
+		}
+	}
+	if runtime["preview"].Phase != workflowNodePhaseSuccess {
+		t.Fatalf("connected preview phase=%s want success", runtime["preview"].Phase)
+	}
+}
+
 func TestDetachedWorkspaceInspectorListItemHeightIsBounded(t *testing.T) {
 	view := newDesktopWindowView(&App{desktopCommands: make(chan desktopCommand, 1)}, windowing.Request{
 		Role:        windowing.RoleWorkspace,
@@ -222,6 +281,30 @@ func TestDetachedWorkspaceRunEnqueuesSingleAtomicCommand(t *testing.T) {
 	case extra := <-root.desktopCommands:
 		t.Fatalf("run enqueued non-atomic extra command: %+v", extra)
 	default:
+	}
+}
+
+func TestDetachedCanvasHistoryButtonsRouteWorkspaceCommands(t *testing.T) {
+	root := &App{desktopCommands: make(chan desktopCommand, 4)}
+	view := newDesktopWindowView(root, windowing.Request{Role: windowing.RoleCanvas, WorkspaceID: "ws-one"})
+	publication := desktopPublication{
+		ActiveID: "ws-one",
+		Workspaces: []desktopWorkspacePublication{{
+			ID: "ws-one", Name: "Workspace", Graph: defaultWorkflowGraph(), CanUndo: true, CanRedo: true,
+		}},
+	}
+	view.undoButton.Click()
+	view.layout(detachedTestContext(view, image.Pt(1280, 860)), publication)
+	undo := detachedNextCommand(t, root)
+	if undo.Kind != desktopCommandUndoWorkflow || undo.WorkspaceID != "ws-one" {
+		t.Fatalf("undo command=%+v", undo)
+	}
+
+	view.redoButton.Click()
+	view.layout(detachedTestContext(view, image.Pt(1280, 860)), publication)
+	redo := detachedNextCommand(t, root)
+	if redo.Kind != desktopCommandRedoWorkflow || redo.WorkspaceID != "ws-one" {
+		t.Fatalf("redo command=%+v", redo)
 	}
 }
 

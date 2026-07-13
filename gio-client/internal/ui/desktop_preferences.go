@@ -269,16 +269,22 @@ func (a *App) desktopWorkspaceDocument(workspace workspaceState) desktopstate.Wo
 
 func desktopWorkflowGraph(graph workflowGraphModel) desktopstate.WorkflowGraph {
 	document := desktopstate.WorkflowGraph{
-		Nodes: make([]desktopstate.WorkflowNode, 0, len(graph.Nodes)),
-		Edges: make([]desktopstate.WorkflowEdge, 0, len(graph.Edges)),
+		Explicit: true,
+		Nodes:    make([]desktopstate.WorkflowNode, 0, len(graph.Nodes)),
+		Edges:    make([]desktopstate.WorkflowEdge, 0, len(graph.Edges)),
 	}
 	for _, node := range graph.Nodes {
+		var properties map[string]string
+		if !node.Enabled {
+			properties = map[string]string{"enabled": "false"}
+		}
 		document.Nodes = append(document.Nodes, desktopstate.WorkflowNode{
-			ID:    node.ID,
-			Kind:  string(node.Kind),
-			Title: node.Title,
-			X:     float64(node.Position.X),
-			Y:     float64(node.Position.Y),
+			ID:         node.ID,
+			Kind:       string(node.Kind),
+			Title:      node.Title,
+			X:          float64(node.Position.X),
+			Y:          float64(node.Position.Y),
+			Properties: properties,
 		})
 	}
 	for _, edge := range graph.Edges {
@@ -294,28 +300,27 @@ func desktopWorkflowGraph(graph workflowGraphModel) desktopstate.WorkflowGraph {
 }
 
 func workflowGraphFromDesktop(document desktopstate.WorkflowGraph) workflowGraphModel {
-	graph := defaultWorkflowGraph()
-	positions := make(map[string]desktopstate.WorkflowNode, len(document.Nodes))
-	for _, node := range document.Nodes {
-		positions[node.ID] = node
+	if !document.Explicit && len(document.Nodes) == 0 {
+		return defaultWorkflowGraph()
 	}
-	for idx := range graph.Nodes {
-		if saved, ok := positions[graph.Nodes[idx].ID]; ok {
-			graph.Nodes[idx].Position.X = int(saved.X)
-			graph.Nodes[idx].Position.Y = int(saved.Y)
+	graph := workflowGraphModel{Revision: 1}
+	for _, saved := range document.Nodes {
+		node, ok := workflowNodeTemplate(saved.ID)
+		if !ok {
+			continue
 		}
+		node.Position = image.Pt(int(saved.X), int(saved.Y))
+		node.Enabled = !strings.EqualFold(strings.TrimSpace(saved.Properties["enabled"]), "false")
+		graph.Nodes = append(graph.Nodes, node)
 	}
-	if len(document.Edges) > 0 {
-		graph.Edges = graph.Edges[:0]
-		for _, edge := range document.Edges {
-			graph.Edges = append(graph.Edges, workflowEdgeModel{
-				ID:       edge.ID,
-				FromNode: edge.FromNodeID,
-				FromPort: edge.FromPort,
-				ToNode:   edge.ToNodeID,
-				ToPort:   edge.ToPort,
-			})
-		}
+	for _, edge := range document.Edges {
+		graph.Edges = append(graph.Edges, workflowEdgeModel{
+			ID:       edge.ID,
+			FromNode: edge.FromNodeID,
+			FromPort: edge.FromPort,
+			ToNode:   edge.ToNodeID,
+			ToPort:   edge.ToPort,
+		})
 	}
 	return normalizeWorkflowGraph(graph)
 }

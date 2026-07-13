@@ -154,6 +154,44 @@ func TestWorkflowLibraryRowsExposeSelectedSemantics(t *testing.T) {
 	assertSemanticSelected(t, nodes, "输出节点", false)
 }
 
+func TestWorkflowLibraryAndInspectorRouteCatalogNodeActions(t *testing.T) {
+	isolateGioStableDataRoot(t)
+	previousTheme := installedDesktopTheme
+	defer installDesktopThemeSpec(previousTheme.Style, previousTheme.ColorMode)
+	app := New()
+	app.experienceMode = experienceModeWorkflow
+	workspaceID := app.activeWorkspaceID
+	if !app.deleteWorkflowNode(workspaceID, "source") {
+		t.Fatal("delete source setup returned false")
+	}
+	spec := installDesktopThemeSpec(desktopStyleWindows, desktopColorModeLight)
+	libraryContext := func() layout.Context {
+		return layout.Context{
+			Ops:         new(op.Ops),
+			Metric:      unit.Metric{PxPerDp: 1, PxPerSp: 1},
+			Constraints: layout.Exact(image.Pt(320, 720)),
+		}
+	}
+	app.workflowAddNodeButton("source").Click()
+	app.layoutWorkflowLibrary(libraryContext(), snapshot{}, spec)
+	if _, ok := app.workflowGraph(workspaceID).node("source"); !ok {
+		t.Fatal("library add button did not restore source")
+	}
+
+	app.selectWorkflowNode(workspaceID, "source")
+	app.workflowToggleNodeButton.Click()
+	app.layoutWorkflowInspector(libraryContext(), snapshot{}, spec)
+	source, _ := app.workflowGraph(workspaceID).node("source")
+	if source.Enabled {
+		t.Fatal("inspector toggle button did not disable source")
+	}
+	app.workflowDeleteNodeButton.Click()
+	app.layoutWorkflowInspector(libraryContext(), snapshot{}, spec)
+	if _, ok := app.workflowGraph(workspaceID).node("source"); ok {
+		t.Fatal("inspector delete button did not remove source")
+	}
+}
+
 func TestDesktopSnapshotReturnsDeepCopies(t *testing.T) {
 	app := &App{desktopPublished: desktopPublication{
 		Revision: 7,
@@ -196,6 +234,15 @@ func TestDesktopCommandRoutesWorkflowSelectionAndMovement(t *testing.T) {
 	if node.Position != image.Pt(333, 444) {
 		t.Fatalf("position=%v", node.Position)
 	}
+	edge := workflowEdgeModel{FromNode: "prompt", FromPort: "text", ToNode: "generate", ToPort: "prompt"}
+	app.applyDesktopCommand(desktopCommand{Kind: desktopCommandRewireConnection, WorkspaceID: "ws-1", PreviousEdge: edge, HasPreviousEdge: true})
+	if workflowEdgeConnected(app.workflowGraph("ws-1"), edge) {
+		t.Fatal("desktop connection command did not disconnect existing edge")
+	}
+	app.applyDesktopCommand(desktopCommand{Kind: desktopCommandRewireConnection, WorkspaceID: "ws-1", Edge: edge, HasEdge: true})
+	if !workflowEdgeConnected(app.workflowGraph("ws-1"), edge) {
+		t.Fatal("desktop connection command did not reconnect edge")
+	}
 }
 
 func TestDesktopMoveCommandsCoalesceToFinalPosition(t *testing.T) {
@@ -224,6 +271,71 @@ func TestDesktopMoveCommandsCoalesceToFinalPosition(t *testing.T) {
 	node, _ := app.workflowGraph("ws-1").node("prompt")
 	if node.Position != image.Pt(599, 600) {
 		t.Fatalf("final position=%v", node.Position)
+	}
+}
+
+func TestDesktopMoveTransactionAndHistoryCommandsStayAtomic(t *testing.T) {
+	app := newWorkflowHistoryTestApp("ws-1")
+	app.applyDesktopCommand(desktopCommand{Kind: desktopCommandBeginNodeMove, WorkspaceID: "ws-1", NodeID: "prompt"})
+	app.applyDesktopCommand(desktopCommand{Kind: desktopCommandMoveNode, WorkspaceID: "ws-1", NodeID: "prompt", Position: image.Pt(240, 200)})
+	app.applyDesktopCommand(desktopCommand{Kind: desktopCommandMoveNode, WorkspaceID: "ws-1", NodeID: "prompt", Position: image.Pt(360, 280)})
+	app.applyDesktopCommand(desktopCommand{Kind: desktopCommandEndNodeMove, WorkspaceID: "ws-1", NodeID: "prompt"})
+	if got := len(app.workflowHistory("ws-1").Undo); got != 1 {
+		t.Fatalf("desktop move undo entries=%d want 1", got)
+	}
+	app.applyDesktopCommand(desktopCommand{Kind: desktopCommandUndoWorkflow, WorkspaceID: "ws-1"})
+	undone, _ := app.workflowGraph("ws-1").node("prompt")
+	if undone.Position != image.Pt(72, 92) {
+		t.Fatalf("desktop undo position=%v", undone.Position)
+	}
+	app.applyDesktopCommand(desktopCommand{Kind: desktopCommandRedoWorkflow, WorkspaceID: "ws-1"})
+	redone, _ := app.workflowGraph("ws-1").node("prompt")
+	if redone.Position != image.Pt(360, 280) {
+		t.Fatalf("desktop redo position=%v", redone.Position)
+	}
+}
+
+func TestQueuedDesktopMoveFlushesBeforeImmediateUndo(t *testing.T) {
+	app := newWorkflowHistoryTestApp("ws-1")
+	app.desktopCommands = make(chan desktopCommand, 8)
+	app.desktopPendingMoves = map[string]desktopCommand{}
+	app.enqueueDesktopCommand(desktopCommand{Kind: desktopCommandBeginNodeMove, WorkspaceID: "ws-1", NodeID: "prompt"})
+	for index := 0; index < 40; index++ {
+		app.enqueueDesktopCommand(desktopCommand{
+			Kind: desktopCommandMoveNode, WorkspaceID: "ws-1", NodeID: "prompt", Position: image.Pt(300+index, 240+index),
+		})
+	}
+	app.enqueueDesktopCommand(desktopCommand{Kind: desktopCommandEndNodeMove, WorkspaceID: "ws-1", NodeID: "prompt"})
+	app.enqueueDesktopCommand(desktopCommand{Kind: desktopCommandUndoWorkflow, WorkspaceID: "ws-1"})
+	app.processDesktopCommands()
+
+	node, _ := app.workflowGraph("ws-1").node("prompt")
+	if node.Position != image.Pt(72, 92) {
+		t.Fatalf("immediate undo position=%v want original", node.Position)
+	}
+	if !app.canRedoWorkflowGraph("ws-1") {
+		t.Fatal("immediate undo did not retain final coalesced move for redo")
+	}
+	app.redoWorkflowGraph("ws-1")
+	node, _ = app.workflowGraph("ws-1").node("prompt")
+	if node.Position != image.Pt(339, 279) {
+		t.Fatalf("coalesced redo position=%v want final move", node.Position)
+	}
+}
+
+func TestDesktopCommandsToggleAndDeleteWorkflowNode(t *testing.T) {
+	app := newWorkflowHistoryTestApp("ws-1")
+	app.applyDesktopCommand(desktopCommand{Kind: desktopCommandToggleWorkflowNode, WorkspaceID: "ws-1", NodeID: "preview"})
+	preview, ok := app.workflowGraph("ws-1").node("preview")
+	if !ok || preview.Enabled {
+		t.Fatalf("toggle command preview=%+v ok=%t", preview, ok)
+	}
+	app.applyDesktopCommand(desktopCommand{Kind: desktopCommandDeleteWorkflowNode, WorkspaceID: "ws-1", NodeID: "preview"})
+	if _, ok := app.workflowGraph("ws-1").node("preview"); ok {
+		t.Fatal("delete command retained preview node")
+	}
+	if got := len(app.workflowHistory("ws-1").Undo); got != 2 {
+		t.Fatalf("desktop graph edit undo entries=%d want 2", got)
 	}
 }
 
