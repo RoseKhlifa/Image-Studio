@@ -16,7 +16,7 @@ export function AndroidUpstreamEmptyState({
       </div>
       <div className="android-upstream-empty-copy">
         <h4>添加第一个上游</h4>
-        <p>保存中转站根地址和 API Key 后，生成、编辑和提示词优化都会走当前配置。</p>
+        <p>保存中转站根地址和 API Key 后，可分别指定生图渠道与 AI 优化 / 图片反推渠道。</p>
       </div>
       <div className="android-upstream-create-grid">
         <button type="button" onClick={() => void onQuickImport()} className="android-upstream-quick-import-card">

@@ -1,0 +1,17 @@
+{
+  "format": "image-studio-workflow-node",
+  "schemaVersion": 1,
+  "id": "com.example.cinematic-generate",
+  "version": "1.0.0",
+  "displayName": "电影感生成",
+  "description": "预配置高质量 3:2 电影感生成参数",
+  "category": "自定义/生成",
+  "operator": "generate",
+  "defaults": {
+    "mode": "generate",
+    "quality": "high",
+    "size": "1536x1024",
+    "image_model": "gpt-image-2",
+    "batch_count": "1"
+  }
+}

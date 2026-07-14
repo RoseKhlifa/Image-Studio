@@ -73,3 +73,16 @@ test("legacy profiles preserve fallbackProfileId when present", () => {
   });
   assert.equal(parsed?.fallbackProfileId, "backup-profile");
 });
+
+test("AI profile selection stays independent from the active image profile", () => {
+  const imageProfile = { ...makeProfile("image"), apiMode: "images" };
+  const aiProfile = makeProfile("ai");
+  assert.equal(profiles.pickAIProfile([imageProfile, aiProfile], "ai", "image")?.id, "ai");
+});
+
+test("AI profile selection falls back only to Responses profiles", () => {
+  const firstImage = { ...makeProfile("image-a"), apiMode: "images" };
+  const activeAI = makeProfile("responses-active");
+  assert.equal(profiles.pickAIProfile([firstImage, activeAI], "missing", "responses-active")?.id, "responses-active");
+  assert.equal(profiles.pickAIProfile([firstImage], "missing", "image-a"), null);
+});

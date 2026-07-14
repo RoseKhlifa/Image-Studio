@@ -238,8 +238,8 @@ func TestWorkflowNodeCatalogSupportsDeleteAddAndDisable(t *testing.T) {
 		}
 	}
 	available := workflowAvailableNodes(withoutGenerate)
-	if len(available) != 1 || available[0].ID != "generate" {
-		t.Fatalf("available nodes=%+v want generate", available)
+	if len(available) != len(workflowNodeCatalog()) {
+		t.Fatalf("available nodes=%d want repeatable catalog size %d", len(available), len(workflowNodeCatalog()))
 	}
 	if err := validateWorkflowForRun(withoutGenerate, false); err == nil {
 		t.Fatal("workflow without generate node was accepted")
@@ -255,6 +255,17 @@ func TestWorkflowNodeCatalogSupportsDeleteAddAndDisable(t *testing.T) {
 	}
 	if len(restored.Edges) != len(withoutGenerate.Edges) {
 		t.Fatal("adding a node unexpectedly rebuilt deleted connections")
+	}
+	withDuplicate, duplicatedID, err := addWorkflowNodeInstance(restored, "generate")
+	if err != nil {
+		t.Fatalf("add duplicate generate: %v", err)
+	}
+	if duplicatedID != "generate-2" {
+		t.Fatalf("duplicate id=%q want generate-2", duplicatedID)
+	}
+	duplicate, ok := withDuplicate.node(duplicatedID)
+	if !ok || duplicate.Kind != workflowNodeGenerate || len(duplicate.Properties) == 0 {
+		t.Fatalf("duplicate generate=%+v ok=%t", duplicate, ok)
 	}
 
 	disabled := setWorkflowNodeEnabled(restored, "generate", false)

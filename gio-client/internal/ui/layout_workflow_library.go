@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"strings"
 
 	"image-studio/gio-client/internal/windowing"
 
@@ -20,6 +21,9 @@ func (a *App) layoutWorkflowLibrary(gtx layout.Context, snap snapshot, spec desk
 	for a.workflowAddWorkspaceButton.Clicked(gtx) {
 		a.createWorkspace()
 	}
+	for a.workflowImportNodeButton.Clicked(gtx) {
+		a.importCustomWorkflowNode()
+	}
 	for _, workspace := range a.workspaces {
 		workspace := workspace
 		for a.workflowSidebarWorkspaceButton(workspace.ID).Clicked(gtx) {
@@ -30,9 +34,9 @@ func (a *App) layoutWorkflowLibrary(gtx layout.Context, snap snapshot, spec desk
 		}
 	}
 	graph := a.workflowGraph(a.activeWorkspaceID)
-	for _, node := range workflowAvailableNodes(graph) {
-		for a.workflowAddNodeButton(node.ID).Clicked(gtx) {
-			if err := a.addWorkflowNode(a.activeWorkspaceID, node.ID); err != nil {
+	for _, node := range workflowAvailableNodesFromCatalog(graph, a.workflowNodeCatalog()) {
+		for a.workflowAddNodeButton(workflowNodeTypeID(node)).Clicked(gtx) {
+			if err := a.addWorkflowNode(a.activeWorkspaceID, workflowNodeTypeID(node)); err != nil {
 				a.appendLog("添加节点失败: " + err.Error())
 			}
 		}
@@ -103,6 +107,9 @@ func (a *App) workflowLibraryHeader(gtx layout.Context, spec desktopThemeTokens)
 					return a.label(gtx, "工作区与真实执行节点", workflowTextSize(spec, 11, 9), spec.Colors.textDim, font.Normal)
 				}),
 			)
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return a.headerIconButtonIcon(gtx, &a.workflowImportNodeButton, uiIconFolder, false, "导入自定义节点")
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return a.headerIconButtonIcon(gtx, &a.workflowAddWorkspaceButton, uiIconAdd, false, "新建工作区")
@@ -182,7 +189,7 @@ func (a *App) workflowNodeLibrarySection(gtx layout.Context, data workflowCanvas
 			return a.workflowNodeLibraryRow(gtx, node, data.Runtime[node.ID], data.Selected == node.ID, spec)
 		}))
 	}
-	available := workflowAvailableNodes(data.Graph)
+	available := workflowAvailableNodesFromCatalog(data.Graph, a.workflowNodeCatalog())
 	if len(available) > 0 {
 		children = append(children,
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -191,7 +198,7 @@ func (a *App) workflowNodeLibrarySection(gtx layout.Context, data workflowCanvas
 				})
 			}),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return a.workflowSectionTitle(gtx, "可添加节点", fmt.Sprintf("%d", len(available)), spec)
+				return a.workflowSectionTitle(gtx, "添加模块", fmt.Sprintf("%d 类", len(available)), spec)
 			}),
 		)
 		for _, node := range available {
@@ -205,7 +212,7 @@ func (a *App) workflowNodeLibrarySection(gtx layout.Context, data workflowCanvas
 }
 
 func (a *App) workflowAvailableNodeRow(gtx layout.Context, node workflowNodeModel, spec desktopThemeTokens) layout.Dimensions {
-	button := a.workflowAddNodeButton(node.ID)
+	button := a.workflowAddNodeButton(workflowNodeTypeID(node))
 	return a.surfaceButton(gtx, button, rgba(0xffffff, 0x00), spec.Colors.surface2, withAlpha(spec.Colors.accent, 0x14), spec.Metrics.ControlRadius, layout.Inset{Top: 8, Bottom: 8, Left: 9, Right: 9}, func(gtx layout.Context) layout.Dimensions {
 		semantic.LabelOp("添加" + node.Title).Add(gtx.Ops)
 		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle, Gap: gtx.Dp(unit.Dp(8))}.Layout(gtx,
@@ -217,7 +224,18 @@ func (a *App) workflowAvailableNodeRow(gtx layout.Context, node workflowNodeMode
 				})
 			}),
 			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-				return a.singleLineLabel(gtx, node.Title, workflowTextSize(spec, 12, 10), spec.Colors.text, font.Medium)
+				return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(unit.Dp(2))}.Layout(gtx,
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return a.singleLineLabel(gtx, node.Title, workflowTextSize(spec, 12, 10), spec.Colors.text, font.Medium)
+					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						metadata := chooseNonEmpty(node.Category, workflowNodeOperatorName(node.Kind))
+						if version := strings.TrimSpace(node.TypeVersion); version != "" {
+							metadata += " · v" + version
+						}
+						return a.singleLineLabel(gtx, metadata, workflowTextSize(spec, 10, 9), spec.Colors.textMuted, font.Normal)
+					}),
+				)
 			}),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				return fixedWidth(gtx, unit.Dp(14), func(gtx layout.Context) layout.Dimensions {

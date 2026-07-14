@@ -1,5 +1,5 @@
 import { lazy, Suspense, useRef, useState } from "react";
-import { ListPlus, Sparkles } from "lucide-react";
+import { ListPlus, ScanSearch, Sparkles } from "lucide-react";
 import { submitShortcutLabel } from "../../platform";
 import { usePlatform } from "../../platform/context";
 import { useStudioStore } from "../../state/studioStore";
@@ -16,9 +16,12 @@ export function PromptEditorSection({
   promptPopover,
   setPromptPopover,
   optimizeReady,
+  inferReady,
   isOptimizingPrompt,
+  isInferringPrompt,
   onSetPrompt,
   onOptimizePrompt,
+  onInferPrompt,
 }: {
   mode: "generate" | "edit";
   prompt: string;
@@ -26,9 +29,12 @@ export function PromptEditorSection({
   promptPopover: boolean;
   setPromptPopover: (open: boolean | ((v: boolean) => boolean)) => void;
   optimizeReady: boolean;
+  inferReady: boolean;
   isOptimizingPrompt: boolean;
+  isInferringPrompt: boolean;
   onSetPrompt: (value: string) => void;
   onOptimizePrompt: () => void;
+  onInferPrompt: () => void;
 }) {
   const { isMac, usesFluentUI } = usePlatform();
   const promptTemplates = useStudioStore((s) => s.promptTemplates);
@@ -85,7 +91,7 @@ export function PromptEditorSection({
         ))}
       </div>
       <div className={`windows-prompt-toolbar mt-3 ${isMac ? "flex flex-col gap-3" : "flex gap-2.5 items-center justify-between"}`}>
-        <div className={`windows-prompt-actions ${isMac ? "grid grid-cols-2 gap-2.5" : "flex gap-2.5 items-center"}`}>
+        <div className={`windows-prompt-actions ${isMac ? "grid grid-cols-3 gap-2.5" : "flex gap-2.5 items-center"}`}>
           <div className={`relative ${isMac ? "min-w-0" : "shrink-0"}`}>
             <button
               ref={promptPopoverAnchorRef}
@@ -114,7 +120,7 @@ export function PromptEditorSection({
           <button
             type="button"
             onClick={onOptimizePrompt}
-            disabled={!optimizeReady || isOptimizingPrompt}
+            disabled={!optimizeReady || isOptimizingPrompt || isInferringPrompt}
             className={`platform-pill inline-flex items-center justify-center gap-1.5 ${isMac ? "min-h-[38px] w-full px-3 py-2 text-[11px] font-medium" : "px-3 py-1.5 text-[10px]"} transition-colors ${
               isOptimizingPrompt
                 ? "bg-[var(--accent-soft)] text-[var(--accent)]"
@@ -124,6 +130,20 @@ export function PromptEditorSection({
           >
             <Sparkles className={`w-3 h-3 ${isOptimizingPrompt ? "animate-pulse" : ""}`} />
             {isOptimizingPrompt ? "优化中..." : "AI 优化"}
+          </button>
+          <button
+            type="button"
+            onClick={onInferPrompt}
+            disabled={!inferReady || isOptimizingPrompt || isInferringPrompt}
+            className={`platform-pill inline-flex items-center justify-center gap-1.5 ${isMac ? "min-h-[38px] w-full px-3 py-2 text-[11px] font-medium" : "px-3 py-1.5 text-[10px]"} transition-colors ${
+              isInferringPrompt
+                ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-300"
+                : "text-zinc-500 hover:bg-emerald-500/10 hover:text-emerald-600 dark:hover:text-emerald-300"
+            } disabled:cursor-not-allowed disabled:opacity-50 ${usesFluentUI ? "rounded-[8px]" : "rounded-full"}`}
+            title="使用 AI 分析画布中的图片并反推提示词"
+          >
+            <ScanSearch className={`w-3 h-3 ${isInferringPrompt ? "animate-pulse" : ""}`} />
+            {isInferringPrompt ? "反推中..." : "图片反推"}
           </button>
         </div>
         <div className={`windows-prompt-shortcut flex ${isMac ? "items-center justify-between gap-2.5" : "ml-auto items-center gap-2.5"}`}>

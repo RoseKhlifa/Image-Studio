@@ -8,6 +8,7 @@ import type { ThemeMode, HistoryItem, Annotation } from "../types/domain";
 import type { ModeConfig, Stroke } from "./studioStore.types";
 import { isWindows } from "../platform";
 import { ACTIVE_PROFILE_LS_KEY, PROFILES_LS_KEY, tryParseProfile } from "../lib/profiles";
+export { loadStoredAIProfileId, persistAIProfileId } from "../lib/profiles";
 import type { UpstreamProfile } from "../types/domain";
 import { pruneHistoryStorage } from "../lib/storage";
 import { dataURLFromBase64, getImageDimensionsFromBase64 } from "../lib/images";

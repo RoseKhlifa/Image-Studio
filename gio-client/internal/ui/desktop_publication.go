@@ -313,64 +313,12 @@ func desktopRunQueued(queue []string, workspaceID string) bool {
 }
 
 func workflowRuntimeForInactiveWorkspace(workspace workspaceState, graph workflowGraphModel) map[string]workflowNodeRuntime {
-	promptConnected := workflowEdgeConnected(graph, workflowEdgeModel{FromNode: "prompt", FromPort: "text", ToNode: "generate", ToPort: "prompt"})
-	sourceConnected := workflowEdgeConnected(graph, workflowEdgeModel{FromNode: "source", FromPort: "image", ToNode: "generate", ToPort: "source"})
-	previewConnected := workflowEdgeConnected(graph, workflowEdgeModel{FromNode: "generate", FromPort: "job", ToNode: "preview", ToPort: "job"})
-	exportConnected := workflowEdgeConnected(graph, workflowEdgeModel{FromNode: "preview", FromPort: "image", ToNode: "export", ToPort: "image"})
-	promptPhase := workflowNodePhaseSuccess
-	promptDetail := strings.TrimSpace(workspace.Prompt)
-	if promptDetail == "" {
-		promptPhase = workflowNodePhaseWarning
-		promptDetail = "等待输入提示词"
-	} else if !promptConnected {
-		promptPhase = workflowNodePhaseWarning
-		promptDetail = "提示词端口未连接"
-	}
-	sourceCount := len(kernel.ParseSourcePaths(workspace.SourcePathsText))
-	sourcePhase := workflowNodePhaseIdle
-	sourceDetail := "无参考图"
-	if sourceCount > 0 {
-		sourcePhase = workflowNodePhaseSuccess
-		sourceDetail = fmt.Sprintf("已载入 %d 个图像输入", sourceCount)
-	}
-	requireSource := workspace.Mode == "edit" || workspace.BatchMode
-	if !sourceConnected && (sourceCount > 0 || requireSource) {
-		sourcePhase = workflowNodePhaseWarning
-		sourceDetail = "图像输入端口未连接"
-	}
-	resultPhase := workflowNodePhaseIdle
-	resultDetail := "等待任务输出"
-	if workspace.ResultHasItem || strings.TrimSpace(workspace.ResultSavedPath) != "" {
-		resultPhase = workflowNodePhaseSuccess
-		resultDetail = "已有工作区结果"
-	}
-	generatePhase := resultPhase
-	generateDetail := resultDetail
-	if !promptConnected || (requireSource && !sourceConnected) {
-		generatePhase = workflowNodePhaseWarning
-		generateDetail = "等待必需输入连接"
-	}
-	previewPhase := resultPhase
-	previewDetail := resultDetail
-	if !previewConnected {
-		previewPhase = workflowNodePhaseWarning
-		previewDetail = "任务输入端口未连接"
-	}
-	exportPhase := resultPhase
-	exportDetail := chooseNonEmpty(workspace.ResultSavedPath, "等待导出")
-	if !exportConnected {
-		exportPhase = workflowNodePhaseWarning
-		exportDetail = "图像输入端口未连接"
-	}
-	runtime := map[string]workflowNodeRuntime{
-		"prompt":   {Phase: promptPhase, Detail: promptDetail, Progress: chooseProgress(promptPhase, 0)},
-		"source":   {Phase: sourcePhase, Detail: sourceDetail, Progress: chooseProgress(sourcePhase, 0)},
-		"generate": {Phase: generatePhase, Detail: generateDetail, Progress: chooseProgress(generatePhase, 0)},
-		"preview":  {Phase: previewPhase, Detail: previewDetail, Progress: chooseProgress(previewPhase, 0)},
-		"export":   {Phase: exportPhase, Detail: exportDetail, Progress: chooseProgress(exportPhase, 0)},
-	}
-	applyDisabledWorkflowRuntime(graph, runtime)
-	return runtime
+	return workflowRuntimeForGraph(graph, workflowRuntimeContext{
+		BatchMode:       workspace.BatchMode,
+		ResultAvailable: workspace.ResultHasItem || strings.TrimSpace(workspace.ResultSavedPath) != "",
+		ResultSavedPath: workspace.ResultSavedPath,
+		Total:           max(workspace.BatchCount, 1),
+	})
 }
 
 func (a *App) desktopSnapshot() desktopPublication {

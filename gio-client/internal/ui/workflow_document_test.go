@@ -11,6 +11,13 @@ import (
 func TestWorkflowDocumentRoundTripPreservesGraphAndDraft(t *testing.T) {
 	graph := removeWorkflowNode(defaultWorkflowGraph(), "source")
 	graph = setWorkflowNodeEnabled(graph, "preview", false)
+	graph, promptID, err := addWorkflowNodeInstance(graph, "prompt")
+	if err != nil {
+		t.Fatalf("add repeated prompt: %v", err)
+	}
+	prompt, _ := graph.node(promptID)
+	prompt.Properties[workflowPropertyPrompt] = "alternate branch"
+	graph = configureWorkflowNode(graph, promptID, "备用提示词", prompt.Properties)
 	draft := desktopstate.WorkspaceDraft{
 		Prompt:       "cinematic city",
 		Mode:         "generate",
@@ -39,6 +46,10 @@ func TestWorkflowDocumentRoundTripPreservesGraphAndDraft(t *testing.T) {
 	if !ok || preview.Enabled {
 		t.Fatalf("restored preview=%+v ok=%t", preview, ok)
 	}
+	repeated, ok := restored.node(promptID)
+	if !ok || repeated.Title != "备用提示词" || repeated.Properties[workflowPropertyPrompt] != "alternate branch" {
+		t.Fatalf("restored repeated prompt=%+v ok=%t", repeated, ok)
+	}
 }
 
 func TestParseWorkflowDocumentRejectsForeignInvalidAndOversizedFiles(t *testing.T) {
@@ -59,6 +70,19 @@ func TestParseWorkflowDocumentRejectsForeignInvalidAndOversizedFiles(t *testing.
 	}
 	if _, _, err := parseWorkflowDocument(data); err == nil {
 		t.Fatal("unsupported workflow node was accepted")
+	}
+	invalid = workflowDocument{
+		Format:  workflowDocumentFormat,
+		Version: workflowDocumentVersion,
+		Graph:   desktopWorkflowGraph(defaultWorkflowGraph()),
+	}
+	invalid.Graph.Nodes[0].Properties["command"] = "whoami"
+	data, err = json.Marshal(invalid)
+	if err != nil {
+		t.Fatalf("marshal invalid workflow properties: %v", err)
+	}
+	if _, _, err := parseWorkflowDocument(data); err == nil {
+		t.Fatal("unknown workflow node property was accepted")
 	}
 	if _, _, err := parseWorkflowDocument([]byte(strings.Repeat("x", maxWorkflowDocumentBytes+1))); err == nil {
 		t.Fatal("oversized workflow was accepted")

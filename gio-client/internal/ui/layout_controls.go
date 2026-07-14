@@ -62,6 +62,9 @@ func (a *App) layoutControls(gtx layout.Context, snap snapshot) layout.Dimension
 	for a.manageUpstreamButton.Clicked(gtx) {
 		a.openSettingsModal()
 	}
+	if normalizeDesktopStyle(a.desktopStyle) == desktopStyleMacOS {
+		return a.layoutMacControls(gtx, snap)
+	}
 
 	return a.borderedSurface(gtx, fluent.sidebar, unit.Dp(0), fluent.border, func(gtx layout.Context) layout.Dimensions {
 		gtx.Constraints.Min = gtx.Constraints.Max
@@ -4843,6 +4846,9 @@ func (a *App) layoutAdvancedContent(gtx layout.Context) layout.Dimensions {
 func (a *App) layoutAdvancedLauncherCard(gtx layout.Context) layout.Dimensions {
 	defer a.recordLayoutTiming(layoutTimingAdvancedCard, time.Now())
 	summary := a.advancedSummary()
+	if normalizeDesktopStyle(a.desktopStyle) == desktopStyleMacOS {
+		return a.layoutMacAdvancedLauncherRow(gtx, summary)
+	}
 	return a.elevatedBorderedSurface(gtx, fluent.surfaceElevated, fluentCardRadius, fluent.border, image.Pt(0, 1), func(gtx layout.Context) layout.Dimensions {
 		return layout.UniformInset(unit.Dp(12)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			return a.surfaceButton(
@@ -4892,6 +4898,9 @@ func (a *App) layoutAdvancedLauncherCard(gtx layout.Context) layout.Dimensions {
 
 func (a *App) layoutLoopLauncherCard(gtx layout.Context) layout.Dimensions {
 	summary := a.loopSummaryText()
+	if normalizeDesktopStyle(a.desktopStyle) == desktopStyleMacOS {
+		return a.layoutMacLoopLauncherRow(gtx, summary)
+	}
 	return a.elevatedBorderedSurface(gtx, fluent.surfaceElevated, fluentCardRadius, fluent.border, image.Pt(0, 1), func(gtx layout.Context) layout.Dimensions {
 		return layout.UniformInset(unit.Dp(12)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			return a.surfaceButton(

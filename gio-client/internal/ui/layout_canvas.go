@@ -232,13 +232,14 @@ func (a *App) canvasToolbar(gtx layout.Context, snap snapshot) layout.Dimensions
 			a.openResultDetail(snap.Result.Item)
 		}
 	}
+	for a.macCanvasMoreButton.Clicked(gtx) {
+		if snap.Result.HasItem {
+			a.openHistoryActionMenu(snap.Result.Item, "canvas")
+		}
+	}
 	currentSavedPath := strings.TrimSpace(snap.Result.SavedPath)
 	hasCanvasResult := snap.Result.HasItem || currentSavedPath != ""
 	compareActive := snap.Compare.HasItem && snap.Compare.Image != nil && !snap.ResultGridOpen
-	var resultDisplay historyItemDisplay
-	if snap.Result.HasItem {
-		resultDisplay = a.historyItemDisplay(snap.Result.Item)
-	}
 	showLatestJump := hasLatest && latestItem.ID != "" && latestItem.ID != snap.SelectedHistoryID
 	if normalizeDesktopStyle(a.desktopStyle) == desktopStyleMacOS {
 		return a.layoutMacCanvasToolbar(gtx, snap, macCanvasToolbarState{
@@ -257,8 +258,11 @@ func (a *App) canvasToolbar(gtx layout.Context, snap snapshot) layout.Dimensions
 			currentBrushSize:     currentBrushSize,
 			annotationKind:       currentAnnotationKind,
 			annotationColor:      currentAnnotationColor,
-			resultDisplay:        resultDisplay,
 		})
+	}
+	var resultDisplay historyItemDisplay
+	if snap.Result.HasItem {
+		resultDisplay = a.historyItemDisplay(snap.Result.Item)
 	}
 
 	return a.borderedSurface(gtx, fluent.panel2, unit.Dp(0), fluent.border, func(gtx layout.Context) layout.Dimensions {
@@ -751,7 +755,9 @@ func (a *App) resultSurface(gtx layout.Context, snap snapshot) layout.Dimensions
 	gtx.Constraints.Min = gtx.Constraints.Max
 	return a.surface(gtx, fluent.canvasBg, unit.Dp(0), func(gtx layout.Context) layout.Dimensions {
 		gtx.Constraints.Min = gtx.Constraints.Max
-		a.paintCheckerboard(gtx, clip.Rect{Max: gtx.Constraints.Max}.Op(), gtx.Dp(unit.Dp(22)), fluent.canvasBg, fluent.canvasTile)
+		if normalizeDesktopStyle(a.desktopStyle) != desktopStyleMacOS || snap.Result.Image != nil {
+			a.paintCheckerboard(gtx, clip.Rect{Max: gtx.Constraints.Max}.Op(), gtx.Dp(unit.Dp(22)), fluent.canvasBg, fluent.canvasTile)
+		}
 		liveBatchTotal := 0
 		if snap.Running {
 			liveBatchTotal = snap.BatchLiveSlotCount
@@ -1700,6 +1706,9 @@ func (a *App) layoutBatchGridPendingTile(gtx layout.Context, index int) layout.D
 }
 
 func (a *App) layoutCanvasEmptyState(gtx layout.Context) layout.Dimensions {
+	if normalizeDesktopStyle(a.desktopStyle) == desktopStyleMacOS {
+		return a.layoutMacCanvasEmptyState(gtx)
+	}
 	copy := "先在左侧写提示词，再开始生成第一张图。"
 	if a.mode == string(client.ModeEdit) {
 		copy = "图生图时可直接导入一张本地图片，或从历史结果里挑一张继续编辑。"

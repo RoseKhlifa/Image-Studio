@@ -1,6 +1,6 @@
 import { useState } from "react";
 import {
-  FileText, ListPlus, RotateCw, Settings, Sparkles, X,
+  FileText, ListPlus, RotateCw, ScanSearch, Settings, Sparkles, X,
 } from "lucide-react";
 import { useStudioStore } from "../../state/studioStore";
 import { OpenFile } from "../runtime/host";
@@ -45,10 +45,10 @@ export function AndroidPhoneComposePanel({
     apiKey, mode, prompt, background, imageStyle, inputFidelity, moderation, negativePrompt, outputCompression, size, quality, seed, styleTag,
     userIdentifier, partialImages,
     outputFormat, batchCount, editAutoAspectResolution, loopGeneration, sources, currentImage, errorMessage, errorCanRetry, errorRawPath,
-    isRunning, lastPayload, isOptimizingPrompt, apiMode, requestPolicy, baseURL, profiles, imageModelID,
+    isRunning, lastPayload, isOptimizingPrompt, isInferringPrompt, apiMode, requestPolicy, baseURL, profiles, aiProfileId, imageModelID,
     customAspectRatios,
     setField, clearError, pushToast, selectSourceImage,
-    removeSource, clearSources, viewSourceOnCanvas, openCustomAspectRatioModal, openCustomSizeModal, openUpstreamConfig, submit, cancel, retryLast, optimizePrompt,
+    removeSource, clearSources, viewSourceOnCanvas, openCustomAspectRatioModal, openCustomSizeModal, openUpstreamConfig, submit, cancel, retryLast, optimizePrompt, inferPromptFromCanvas,
     compareSourceOnCanvas,
   } = useStudioStore();
   const [templateOpen, setTemplateOpen] = useState(false);
@@ -58,11 +58,10 @@ export function AndroidPhoneComposePanel({
   const promptTemplates = useStudioStore((s) => s.promptTemplates);
   const promptLen = prompt.length;
   const needsUpstreamSetup = !apiKey.trim() || !baseURL.trim();
-  const hasUsableResponsesProfile = profiles.some(
-    (p) => p.apiMode === "responses" && p.baseURL.trim(),
-  );
+  const aiProfile = profiles.find((profile) => profile.id === aiProfileId && profile.apiMode === "responses");
+  const aiReady = !!aiProfile?.baseURL.trim();
   const optimizeReady = !!(
-    prompt.trim() && (hasUsableResponsesProfile || (apiKey.trim() && baseURL.trim()))
+    prompt.trim() && aiReady
   );
   const capabilityInput = { apiMode, requestPolicy, imageModelID };
   const normalizedSize = normalizeSizeSelection(size, capabilityInput, customAspectRatios);
@@ -164,6 +163,11 @@ export function AndroidPhoneComposePanel({
   const handleOptimize = () => {
     vibrateForPlatform(10);
     optimizePrompt();
+  };
+
+  const handleInferPrompt = () => {
+    vibrateForPlatform(10);
+    inferPromptFromCanvas();
   };
 
   const handleSelectSource = () => {
@@ -324,7 +328,7 @@ export function AndroidPhoneComposePanel({
           <button
             type="button"
             onClick={handleOptimize}
-            disabled={!optimizeReady || isOptimizingPrompt}
+            disabled={!optimizeReady || isOptimizingPrompt || isInferringPrompt}
             className={`platform-pill android-phone-action-pill inline-flex min-h-[38px] items-center gap-1.5 px-3 text-[11px] ${
               isOptimizingPrompt
                 ? "bg-[var(--accent-soft)] text-[var(--accent)]"
@@ -333,6 +337,20 @@ export function AndroidPhoneComposePanel({
           >
             <Sparkles className={`h-3.5 w-3.5 ${isOptimizingPrompt ? "animate-pulse" : ""}`} />
             {isOptimizingPrompt ? "优化中..." : "AI 优化"}
+          </button>
+          <button
+            type="button"
+            onClick={handleInferPrompt}
+            disabled={!currentImage || !aiReady || isOptimizingPrompt || isInferringPrompt}
+            className={`platform-pill android-phone-action-pill inline-flex min-h-[38px] items-center gap-1.5 px-3 text-[11px] ${
+              isInferringPrompt
+                ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-300"
+                : "text-zinc-500 hover:bg-emerald-500/10 hover:text-emerald-600 dark:hover:text-emerald-300"
+            } disabled:cursor-not-allowed disabled:opacity-50`}
+            title="反推画布图片提示词"
+          >
+            <ScanSearch className={`h-3.5 w-3.5 ${isInferringPrompt ? "animate-pulse" : ""}`} />
+            {isInferringPrompt ? "反推中..." : "图片反推"}
           </button>
         </div>
       </section>

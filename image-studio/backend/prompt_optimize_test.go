@@ -97,6 +97,12 @@ func TestOptimizePromptRejectsEmptyPrompt(t *testing.T) {
 	}
 }
 
+func TestDescribePromptRequiresCanvasImage(t *testing.T) {
+	if _, err := optimizePromptWithLLM(t.Context(), "https://example.com", "sk-test", "", "describe", "", nil, client.ProxyConfig{}); err == nil || !strings.Contains(err.Error(), "画布图片") {
+		t.Fatalf("expected canvas image error, got %v", err)
+	}
+}
+
 func TestPrepareUploadSourcePathsReturnsOpaquePath(t *testing.T) {
 	dir := t.TempDir()
 	srcPath := filepath.Join(dir, "opaque.png")

@@ -72,6 +72,8 @@ type snapshot struct {
 	Fullscreen                bool
 	LastErrorMessage          string
 	LastRunAvailable          bool
+	LastRunWorkflowWorkspace  string
+	LastRunWorkflowOutput     string
 	LastLowFPSSnapshotPath    string
 	RawResponseModalPath      string
 	RawResponseModalText      string
@@ -274,6 +276,8 @@ type App struct {
 	experienceMode           string
 	fontScale                float64
 	reducedEffects           bool
+	macSidebarHidden         bool
+	macInspectorHidden       bool
 	imagesNewAPICompat       bool
 	batchCount               int
 
@@ -491,6 +495,7 @@ type App struct {
 	workflowQualityButtons                   []widget.Clickable
 	workflowFormatButtons                    []widget.Clickable
 	workflowSizeButtons                      []widget.Clickable
+	workflowBatchCountButtons                []widget.Clickable
 	workflowBottomTabButtons                 []widget.Clickable
 	workflowPreviewButtons                   []widget.Clickable
 	workflowZoomOutButton                    widget.Clickable
@@ -510,21 +515,30 @@ type App struct {
 	workflowResetGraphButton                 widget.Clickable
 	workflowCopyLogsButton                   widget.Clickable
 	workflowAddWorkspaceButton               widget.Clickable
+	workflowImportNodeButton                 widget.Clickable
 	workflowAddSourcesButton                 widget.Clickable
 	workflowClearSourcesButton               widget.Clickable
 	workflowOpenOutputButton                 widget.Clickable
 	workflowDeleteNodeButton                 widget.Clickable
+	workflowDuplicateNodeButton              widget.Clickable
 	workflowToggleNodeButton                 widget.Clickable
+	workflowNodeTitleInput                   widget.Editor
+	workflowEditingNodeKey                   string
 	workflowNodeButtons                      map[string]*widget.Clickable
 	workflowAddNodeButtons                   map[string]*widget.Clickable
 	workflowConnectionButtons                map[string]*widget.Clickable
 	workflowSidebarWorkspaceButtons          map[string]*widget.Clickable
 	workflowWorkspaceWindowButtons           map[string]*widget.Clickable
+	workflowCustomNodeTemplates              []workflowNodeModel
+	workflowNodeManifestDir                  string
 	headerAddWorkspaceButton                 widget.Clickable
 	headerQuoteButton                        widget.Clickable
 	githubButton                             widget.Clickable
 	headerStarButton                         widget.Clickable
 	settingsButton                           widget.Clickable
+	macToggleSidebarButton                   widget.Clickable
+	macToggleInspectorButton                 widget.Clickable
+	macCanvasMoreButton                      widget.Clickable
 	fullscreenButton                         widget.Clickable
 	resultDetailButton                       widget.Clickable
 	batchGridDragOutButton                   widget.Clickable
@@ -711,6 +725,8 @@ type App struct {
 	lastRunBatchCount              int
 	lastRunConcurrency             int
 	lastRunValid                   bool
+	lastRunWorkflowWorkspace       string
+	lastRunWorkflowOutput          string
 	lastErrorMessage               string
 	rawResponseModalPath           string
 	rawResponseModalText           string
@@ -826,7 +842,7 @@ type App struct {
 	workflowSelectedNodes            map[string]string
 	workflowCanvas                   workflowCanvasViewState
 	workflowConsoleList              widget.List
-	macCanvasToolbarLists            [4]widget.List
+	macCanvasToolbarList             widget.List
 	workflowConsoleOpen              bool
 	workflowBottomTab                string
 	desktopStore                     *desktopstate.Store
@@ -983,6 +999,7 @@ func New() *App {
 		workflowQualityButtons:                  make([]widget.Clickable, len(qualityChoices)),
 		workflowFormatButtons:                   make([]widget.Clickable, len(formatChoices)),
 		workflowSizeButtons:                     make([]widget.Clickable, len(sizeChoices)),
+		workflowBatchCountButtons:               make([]widget.Clickable, len(batchCountChoices)),
 		workflowBottomTabButtons:                make([]widget.Clickable, 4),
 		workflowPreviewButtons:                  make([]widget.Clickable, len(partialPreviewChoices)),
 		pruneGeneralHistoryButtons:              make([]widget.Clickable, 2),
@@ -1061,6 +1078,7 @@ func New() *App {
 		workflowBottomTab:                       "console",
 		desktopStore:                            desktopStore,
 		desktopState:                            desktopState,
+		workflowNodeManifestDir:                 workflowNodeManifestDir(desktopStore),
 		desktopCommands:                         make(chan desktopCommand, 256),
 		desktopPendingMoves:                     map[string]desktopCommand{},
 		workflowSidebarWorkspaceButtons:         map[string]*widget.Clickable{},
@@ -1110,12 +1128,11 @@ func New() *App {
 	a.workspaceList.List.Alignment = layout.Middle
 	a.workspaceList.List.ScrollAnyAxis = true
 	a.workflowConsoleList.List.Axis = layout.Vertical
-	for index := range a.macCanvasToolbarLists {
-		a.macCanvasToolbarLists[index].List.Axis = layout.Horizontal
-		a.macCanvasToolbarLists[index].List.ScrollAnyAxis = true
-	}
+	a.macCanvasToolbarList.List.Axis = layout.Horizontal
+	a.macCanvasToolbarList.List.ScrollAnyAxis = true
 	a.workflowLibraryList.List.Axis = layout.Vertical
 	a.workflowInspectorList.List.Axis = layout.Vertical
+	a.workflowNodeTitleInput.SingleLine = true
 	a.compareSplitSlider.Value = 0.5
 	a.configureEditors(cfg)
 	a.historyQueryInput.SingleLine = true
@@ -1124,6 +1141,9 @@ func New() *App {
 	a.batchConcurrencyInput.SingleLine = true
 	a.batchConcurrencyInput.SetText(strconv.Itoa(normalizeBatchProcessConcurrency(a.batchConcurrency)))
 	a.batchOutputPrefixInput.SetText(defaultBatchOutputPrefix)
+	for _, warning := range a.reloadWorkflowNodeCatalog() {
+		a.appendLogLocked("自定义节点目录警告: " + warning.Error())
+	}
 	a.runStartupHistoryThumbPrewarm()
 	a.startHistoryPreviewWarmup()
 	if latest, ok := newestHistoryItem(a.history); ok {

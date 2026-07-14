@@ -20,7 +20,7 @@ import type {
   ThemeMode,
   UpstreamProfile,
 } from "../types/domain.ts";
-import { ACTIVE_PROFILE_LS_KEY, PROFILES_LS_KEY, tryParseProfile } from "./profiles.ts";
+import { ACTIVE_PROFILE_LS_KEY, AI_PROFILE_LS_KEY, PROFILES_LS_KEY, tryParseProfile } from "./profiles.ts";
 import { normalizeProxyMode, persistProxyConfig } from "./proxy.ts";
 import {
   normalizeCustomAspectRatios,
@@ -89,6 +89,7 @@ export type CompatibilityState = {
   };
   profiles: UpstreamProfile[];
   activeProfileId: string;
+  aiProfileId?: string;
   history: HistoryItem[];
   historyFull?: Array<{ id: string; imageB64: string }>;
 };
@@ -97,6 +98,7 @@ export type CompatibilityExportInput = {
   history: HistoryItem[];
   profiles: UpstreamProfile[];
   activeProfileId: string;
+  aiProfileId: string;
   proxyMode: ProxyMode;
   proxyURL: string;
   theme: ThemeMode;
@@ -158,6 +160,7 @@ export function compatibilityExportFingerprint(input: CompatibilityExportInput):
   return JSON.stringify({
     profiles: input.profiles,
     activeProfileId: input.activeProfileId,
+    aiProfileId: input.aiProfileId,
     proxyMode: input.proxyMode,
     proxyURL: input.proxyURL,
     theme: input.theme,
@@ -230,6 +233,7 @@ function buildCompatibilityState(input: CompatibilityExportInput): Compatibility
     },
     profiles: normalizeProfiles(input.profiles),
     activeProfileId: input.activeProfileId || "",
+    aiProfileId: input.aiProfileId || "",
     history,
     historyFull: history
       .filter((item) => typeof item.imageB64 === "string" && item.imageB64.trim())
@@ -242,6 +246,8 @@ function applyCompatibilityLocalStorage(state: CompatibilityState): void {
   writeLocalStorageJSON(PROFILES_LS_KEY, profiles);
   if (state.activeProfileId) writeLocalStorageString(ACTIVE_PROFILE_LS_KEY, state.activeProfileId);
   else removeLocalStorage(ACTIVE_PROFILE_LS_KEY);
+  if (state.aiProfileId) writeLocalStorageString(AI_PROFILE_LS_KEY, state.aiProfileId);
+  else removeLocalStorage(AI_PROFILE_LS_KEY);
 
   const settings = state.settings ?? {};
   if (settings.proxyMode) persistProxyConfig(normalizeProxyMode(settings.proxyMode), settings.proxyURL ?? "");
@@ -309,6 +315,7 @@ function normalizeCompatibilityState(raw: unknown): CompatibilityState | null {
     settings: normalizeSettings(source.settings),
     profiles: normalizeProfiles(Array.isArray(source.profiles) ? source.profiles : []),
     activeProfileId: typeof source.activeProfileId === "string" ? source.activeProfileId : "",
+    aiProfileId: typeof source.aiProfileId === "string" ? source.aiProfileId : "",
     history: (Array.isArray(source.history) ? source.history : [])
       .map(toSerializableHistoryItem)
       .filter((item): item is HistoryItem => item !== null),
@@ -441,6 +448,7 @@ function cloneExportInput(input: CompatibilityExportInput): CompatibilityExportI
     history: input.history.map((item) => ({ ...item, imageBlob: null, previewBlob: null })),
     profiles: input.profiles.map((profile) => ({ ...profile })),
     activeProfileId: input.activeProfileId,
+    aiProfileId: input.aiProfileId,
     proxyMode: input.proxyMode,
     proxyURL: input.proxyURL,
     theme: input.theme,

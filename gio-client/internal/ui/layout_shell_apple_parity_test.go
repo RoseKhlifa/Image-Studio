@@ -14,10 +14,10 @@ import (
 	"gioui.org/widget/material"
 )
 
-func TestAppleShellContractMatchesReactWorkspace(t *testing.T) {
+func TestAppleShellContractMatchesHIGWorkspace(t *testing.T) {
 	mac := desktopThemeSpec(desktopStyleMacOS, desktopColorModeLight)
-	if mac.Metrics.HeaderHeight != unit.Dp(68) {
-		t.Fatalf("macOS header height=%v want 68", mac.Metrics.HeaderHeight)
+	if mac.Metrics.HeaderHeight != unit.Dp(52) {
+		t.Fatalf("macOS header height=%v want 52", mac.Metrics.HeaderHeight)
 	}
 	if shellShowsGlobalFooter(mac.Style) {
 		t.Fatal("macOS shell must not render the global footer")
@@ -26,24 +26,24 @@ func TestAppleShellContractMatchesReactWorkspace(t *testing.T) {
 		t.Fatal("macOS header must not render GitHub, Star, or quote actions")
 	}
 	headerInsets := headerInsetsForStyle(mac.Style)
-	if headerInsets.Left != unit.Dp(20) || headerInsets.Right != unit.Dp(20) {
-		t.Fatalf("macOS header horizontal insets=%v/%v want 20/20", headerInsets.Left, headerInsets.Right)
+	if headerInsets.Left != unit.Dp(12) || headerInsets.Right != unit.Dp(12) {
+		t.Fatalf("macOS header horizontal insets=%v/%v want 12/12", headerInsets.Left, headerInsets.Right)
 	}
 	brand := appleHeaderBrandMetrics()
-	if brand.iconSize != unit.Dp(40) || brand.iconRadius != unit.Dp(14) || brand.titleSize != unit.Sp(16) || brand.subtitleSize != unit.Sp(12) {
+	if brand.titleSize != unit.Sp(13) {
 		t.Fatalf("macOS brand contract=%+v", brand)
 	}
-	if appleWorkspaceTabHeight(false) != unit.Dp(32) || appleWorkspaceTabHeight(true) != unit.Dp(34) {
+	if appleWorkspaceTabHeight(false) != unit.Dp(28) || appleWorkspaceTabHeight(true) != unit.Dp(28) {
 		t.Fatalf("macOS tab heights inactive=%v active=%v", appleWorkspaceTabHeight(false), appleWorkspaceTabHeight(true))
 	}
 
 	wideContract := simplePaneContractForStyle(mac.Style, mac.Metrics, false)
 	wide := fitSimplePaneWidths(1440, int(wideContract.preferredLeft), int(wideContract.preferredRight), int(wideContract.minimumLeft), int(wideContract.minimumRight), int(wideContract.minimumCenter))
-	if wide != (simplePaneWidths{left: 408, right: 352, center: 680}) {
+	if wide != (simplePaneWidths{left: 312, right: 320, center: 808}) {
 		t.Fatalf("wide macOS panes=%+v", wide)
 	}
 	minimum := fitSimplePaneWidths(1040, int(wideContract.preferredLeft), int(wideContract.preferredRight), int(wideContract.minimumLeft), int(wideContract.minimumRight), int(wideContract.minimumCenter))
-	if minimum != (simplePaneWidths{left: 380, right: 300, center: 360}) {
+	if minimum != (simplePaneWidths{left: 312, right: 288, center: 440}) {
 		t.Fatalf("minimum macOS panes=%+v", minimum)
 	}
 
@@ -66,14 +66,14 @@ func TestAppleHeaderSemanticsHideCommunityActions(t *testing.T) {
 	installDesktopThemeSpec(desktopStyleMacOS, desktopColorModeLight)
 	var ops op.Ops
 	var router input.Router
-	gtx := shellParityContext(&ops, router.Source(), image.Pt(1200, 68))
+	gtx := shellParityContext(&ops, router.Source(), image.Pt(1200, 52))
 	dims := app.layoutHeader(gtx)
 	router.Frame(&ops)
-	if dims.Size != image.Pt(1200, 68) {
+	if dims.Size != image.Pt(1200, 52) {
 		t.Fatalf("Apple header size=%v", dims.Size)
 	}
 	nodes := router.AppendSemantics(nil)
-	for _, label := range []string{"Image Studio", "图像工作区", "新建工作区", "使用系统主题", "打开设置"} {
+	for _, label := range []string{"主工作区", "隐藏生成设置", "新建工作区", "隐藏历史记录", "打开设置"} {
 		if !shellSemanticTreeContains(nodes, label) {
 			t.Errorf("Apple header missing semantic label %q", label)
 		}
@@ -164,18 +164,37 @@ func TestAppleWorkspaceTabAndExperienceSwitchDimensions(t *testing.T) {
 		Constraints: layout.Constraints{Max: image.Pt(260, 40)},
 		Now:         time.Now(),
 	}
-	if got := app.layoutWorkspaceTab(gtx, app.workspaces[0], true).Size.Y; got != 34 {
-		t.Fatalf("active Apple tab height=%d want 34", got)
+	if got := app.layoutWorkspaceTab(gtx, app.workspaces[0], true).Size.Y; got != 28 {
+		t.Fatalf("active Apple tab height=%d want 28", got)
 	}
 	ops.Reset()
-	if got := app.layoutWorkspaceTab(gtx, app.workspaces[1], false).Size.Y; got != 32 {
-		t.Fatalf("inactive Apple tab height=%d want 32", got)
+	if got := app.layoutWorkspaceTab(gtx, app.workspaces[1], false).Size.Y; got != 28 {
+		t.Fatalf("inactive Apple tab height=%d want 28", got)
 	}
 
 	ops.Reset()
 	gtx.Constraints = layout.Constraints{Max: image.Pt(300, 60)}
-	if got := app.layoutExperienceSwitch(gtx).Size; got != image.Pt(208, 34) {
-		t.Fatalf("Apple experience switch size=%v want 208x34", got)
+	if got := app.layoutExperienceSwitch(gtx).Size; got != image.Pt(176, 28) {
+		t.Fatalf("Apple experience switch size=%v want 176x28", got)
+	}
+}
+
+func TestAppleSimplePaneVisibilityPreservesCanvasPriority(t *testing.T) {
+	mac := desktopThemeSpec(desktopStyleMacOS, desktopColorModeLight)
+	contract := simplePaneContractForStyle(mac.Style, mac.Metrics, false)
+	metric := func(value unit.Dp) int { return int(value) }
+
+	if got := fitVisiblePaneWidths(1440, contract, metric, true, true); got != (simplePaneWidths{left: 312, right: 320, center: 808}) {
+		t.Fatalf("visible Apple panes=%+v", got)
+	}
+	if got := fitVisiblePaneWidths(1440, contract, metric, true, false); got != (simplePaneWidths{left: 312, center: 1128}) {
+		t.Fatalf("sidebar-only Apple panes=%+v", got)
+	}
+	if got := fitVisiblePaneWidths(1440, contract, metric, false, true); got != (simplePaneWidths{right: 320, center: 1120}) {
+		t.Fatalf("inspector-only Apple panes=%+v", got)
+	}
+	if got := fitVisiblePaneWidths(1440, contract, metric, false, false); got != (simplePaneWidths{center: 1440}) {
+		t.Fatalf("canvas-only Apple panes=%+v", got)
 	}
 }
 

@@ -56,16 +56,24 @@ func parseWorkflowDocument(data []byte) (workflowDocument, workflowGraphModel, e
 	}
 	seen := make(map[string]struct{}, len(document.Graph.Nodes))
 	for _, saved := range document.Graph.Nodes {
-		node, ok := workflowNodeTemplate(saved.ID)
+		if err := validatePersistedWorkflowNodeDescriptor(saved); err != nil {
+			return workflowDocument{}, workflowGraphModel{}, err
+		}
+		node, ok := workflowNodeTemplateForDescriptor(saved.ID, saved.TypeID, saved.TypeVersion, saved.Category, saved.Subtitle, saved.Kind)
 		if !ok {
-			return workflowDocument{}, workflowGraphModel{}, fmt.Errorf("不支持的工作流节点 %q", saved.ID)
+			return workflowDocument{}, workflowGraphModel{}, fmt.Errorf("不支持的工作流节点 %q (%s)", saved.ID, saved.Kind)
 		}
-		if _, duplicate := seen[node.ID]; duplicate {
-			return workflowDocument{}, workflowGraphModel{}, fmt.Errorf("工作流节点 %q 重复", node.ID)
+		if _, duplicate := seen[saved.ID]; duplicate {
+			return workflowDocument{}, workflowGraphModel{}, fmt.Errorf("工作流节点 %q 重复", saved.ID)
 		}
-		seen[node.ID] = struct{}{}
+		seen[saved.ID] = struct{}{}
 		if kind := strings.TrimSpace(saved.Kind); kind != "" && kind != string(node.Kind) {
-			return workflowDocument{}, workflowGraphModel{}, fmt.Errorf("工作流节点 %q 类型不匹配", node.ID)
+			return workflowDocument{}, workflowGraphModel{}, fmt.Errorf("工作流节点 %q 类型不匹配", saved.ID)
+		}
+		node.Properties = mergeWorkflowProperties(node.Properties, saved.Properties)
+		delete(node.Properties, "enabled")
+		if err := validateWorkflowNodeDefaults(node); err != nil {
+			return workflowDocument{}, workflowGraphModel{}, fmt.Errorf("工作流节点 %q 的属性无效: %w", saved.ID, err)
 		}
 	}
 	document.Graph.Explicit = true
@@ -74,6 +82,38 @@ func parseWorkflowDocument(data []byte) (workflowDocument, workflowGraphModel, e
 		return workflowDocument{}, workflowGraphModel{}, fmt.Errorf("工作流包含无效节点连接")
 	}
 	return document, graph, nil
+}
+
+func validatePersistedWorkflowNodeDescriptor(saved desktopstate.WorkflowNode) error {
+	instanceID := strings.TrimSpace(saved.ID)
+	if instanceID == "" || len(instanceID) > 192 {
+		return fmt.Errorf("工作流节点 ID 长度无效")
+	}
+	for _, r := range instanceID {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '-' && r != '.' {
+			return fmt.Errorf("工作流节点 ID %q 包含无效字符", saved.ID)
+		}
+	}
+	if err := validateWorkflowNodeLabel("名称", strings.TrimSpace(saved.Title), 128, false); err != nil {
+		return fmt.Errorf("工作流节点 %q: %w", saved.ID, err)
+	}
+	if err := validateWorkflowNodeLabel("说明", strings.TrimSpace(saved.Subtitle), workflowNodeManifestDescription, false); err != nil {
+		return fmt.Errorf("工作流节点 %q: %w", saved.ID, err)
+	}
+	if err := validateWorkflowNodeLabel("分类", strings.TrimSpace(saved.Category), 64, false); err != nil {
+		return fmt.Errorf("工作流节点 %q: %w", saved.ID, err)
+	}
+	typeID := strings.TrimSpace(saved.TypeID)
+	if typeID == "" || typeID == strings.TrimSpace(saved.Kind) {
+		return nil
+	}
+	if err := validateWorkflowNodeTypeID(typeID); err != nil {
+		return fmt.Errorf("工作流节点 %q 的类型无效: %w", saved.ID, err)
+	}
+	if !validWorkflowNodeVersion(strings.TrimSpace(saved.TypeVersion)) {
+		return fmt.Errorf("工作流节点 %q 缺少有效的类型版本", saved.ID)
+	}
+	return nil
 }
 
 func (a *App) exportWorkflowJSON() {
@@ -169,6 +209,7 @@ func (a *App) applyWorkflowDocument(data []byte) error {
 		a.pushWorkflowUndo(workspace.ID, currentGraph)
 	}
 	a.applyWorkflowGraph(workspace.ID, graph)
+	a.clearWorkflowNodeEditor(workspace.ID)
 	a.workflowCanvas.resetViewport()
 	return nil
 }

@@ -18,6 +18,7 @@ import {
   SetStoredAPIKey,
   RegisterMediaAsset,
   RegisterImportedImageAsset,
+  ReadImageAsBase64,
   SetKeepLogsEnabled,
   SetCleanupPreviewCacheOnExitEnabled,
   SetOutputDir,
@@ -75,6 +76,7 @@ import {
 import { normalizeAppUpdateInfo } from "../lib/appUpdate.ts";
 import { appVersion } from "../lib/version.ts";
 import { normalizeSavePromptRequest, type SavePromptRequest } from "../lib/savePromptState";
+import { detectImageMimeTypeFromBase64 } from "../lib/images";
 import {
   readSavePromptSuppressed,
   writeSavePromptSuppressed,
@@ -113,6 +115,7 @@ import {
   duplicateProfile as cloneProfile,
   genProfileId,
   keyringUserFor,
+  pickAIProfile,
   pickActiveProfile,
 } from "../lib/profiles";
 import { isMac, readRuntimePlatformState } from "../platform";
@@ -162,9 +165,11 @@ import {
   imageDims,
   loadModeConfig,
   loadStoredActiveProfileId,
+  loadStoredAIProfileId,
   loadStoredProfiles,
   MAX_HISTORY_ITEMS,
   persistActiveProfileId,
+  persistAIProfileId,
   persistProfiles,
   persistTrimmedHistory,
   registerTrustedOutputRoots,
@@ -644,6 +649,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   noPromptRevision: true,
   profiles: [],
   activeProfileId: "",
+  aiProfileId: "",
   sources: [],
 
   runningJobs: [],
@@ -792,6 +798,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   closeSettings: () => set({ settingsOpen: false }),
   isTestingKey: false,
   isOptimizingPrompt: false,
+  isInferringPrompt: false,
   upstreamModalOpen: false,
   upstreamReturnTarget: "app",
   openUpstreamConfig: (returnTarget = "app") => set({
@@ -1101,6 +1108,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   deleteProfile: async (id) => profileActions.deleteProfile(id),
   duplicateProfile: async (id) => profileActions.duplicateProfile(id),
   setActiveProfile: async (id) => profileActions.setActiveProfile(id),
+  setAIProfile: async (id) => profileActions.setAIProfile(id),
 
   clearError: () => {
     const wsId = get().activeWorkspaceId;
@@ -1546,6 +1554,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         noPromptRevision: true,
         profiles: [preview.profile],
         activeProfileId: preview.profile.id,
+        aiProfileId: preview.profile.apiMode === "responses" ? preview.profile.id : "",
         sources: preview.sources,
         runningJobs: [],
         jobsTotal: 0,
@@ -1605,6 +1614,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         settingsOpen: false,
         isTestingKey: false,
         isOptimizingPrompt: false,
+        isInferringPrompt: false,
         customAspectRatioModalOpen: false,
         customSizeModalOpen: false,
         upstreamModalOpen: false,
@@ -1715,6 +1725,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     //    个 profile,顺手清理老 localStorage 键。
     let profiles = loadStoredProfiles();
     let activeProfileId = loadStoredActiveProfileId();
+    let aiProfileId = loadStoredAIProfileId();
     if (profiles.length === 0) {
       // 检测老格式
       let legacyApiMode: APIMode = "responses";
@@ -1806,6 +1817,11 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     if (activeProfile && activeProfile.id !== activeProfileId) {
       activeProfileId = activeProfile.id;
       persistActiveProfileId(activeProfileId);
+    }
+    const aiProfile = pickAIProfile(profiles, aiProfileId, activeProfileId);
+    if ((aiProfile?.id ?? "") !== aiProfileId) {
+      aiProfileId = aiProfile?.id ?? "";
+      persistAIProfileId(aiProfileId);
     }
     const apiMode: APIMode = activeProfile?.apiMode ?? "responses";
     const responsesTransport = activeProfile?.responsesTransport ?? "sse";
@@ -1902,6 +1918,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       autoRetryEnabled,
       profiles,
       activeProfileId,
+      aiProfileId,
       workspaces: [initialWorkspace],
       activeWorkspaceId: wsId,
       selectedPresetId: initialWorkspace.selectedPresetId ?? null,
@@ -2197,30 +2214,20 @@ export const useStudioStore = create<StudioState>((set, get) => ({
 
   optimizePrompt: async () => {
     const s = get();
-    if (s.isRunning || s.isOptimizingPrompt) return;
-    // prompt 优化必须走 Responses(它要文本模型),如果用户 active 的是 Images
-    // profile,要回头找一个 Responses profile 来跑;它的 key 还是从 keyring 拿。
-    let optimizeAPIKey = s.apiKey;
-    let optimizeBaseURL = s.baseURL;
-    let optimizeTextModelID = s.textModelID;
-    if (s.apiMode !== "responses") {
-      const responsesProfile = s.profiles.find((p) => p.apiMode === "responses" && p.baseURL);
-      if (responsesProfile) {
-        optimizeBaseURL = responsesProfile.baseURL;
-        optimizeTextModelID = responsesProfile.textModelID;
-        const k = await GetStoredAPIKey(keyringUserFor(responsesProfile.id)).catch(() => "");
-        if (k) optimizeAPIKey = k;
-      }
-    }
-    optimizeAPIKey = optimizeAPIKey.trim();
-    optimizeBaseURL = cleanBaseURL(optimizeBaseURL);
-    optimizeTextModelID = optimizeTextModelID.trim();
-    if (!optimizeAPIKey) {
-      s.pushToast("先填入 API Key", "warn");
+    if (s.isRunning || s.isOptimizingPrompt || s.isInferringPrompt) return;
+    const aiProfile = pickAIProfile(s.profiles, s.aiProfileId, s.activeProfileId);
+    if (!aiProfile) {
+      s.pushToast("先在上游配置里指定一个 Responses 配置作为 AI 渠道", "warn", 5000);
       return;
     }
-    if (!optimizeBaseURL) {
-      s.pushToast("先在上游配置里填入可用于 AI 优化的 Responses API 地址", "warn", 5000);
+    const apiKey = (await GetStoredAPIKey(keyringUserFor(aiProfile.id)).catch(() => "")).trim();
+    const baseURL = cleanBaseURL(aiProfile.baseURL);
+    if (!apiKey) {
+      s.pushToast(`AI 渠道「${aiProfile.name}」缺少 API Key`, "warn", 5000);
+      return;
+    }
+    if (!baseURL) {
+      s.pushToast(`AI 渠道「${aiProfile.name}」缺少 BASE_URL`, "warn", 5000);
       return;
     }
     if (!s.prompt.trim()) {
@@ -2236,28 +2243,91 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     set({ isOptimizingPrompt: true, errorMessage: null, errorCanRetry: false, errorRawPath: null });
     try {
       const optimized = await wailsOptimizePrompt({
-        apiKey: optimizeAPIKey,
+        apiKey,
         prompt: s.prompt,
         mode: s.mode,
-        baseURL: optimizeBaseURL,
-        textModelID: optimizeTextModelID,
+        baseURL,
+        textModelID: aiProfile.textModelID.trim(),
         proxyMode: s.proxyMode,
         proxyURL: s.proxyURL,
         imagePaths: sourcePaths,
         imagePath: "",
+        sourceImages: s.mode === "edit" ? s.sources : undefined,
       } satisfies PromptOptimizeRequest);
       const trimmed = optimized.trim();
-      if (!trimmed) {
-        throw new Error("上游没有返回可用的优化结果");
-      }
+      if (!trimmed) throw new Error("上游没有返回可用的优化结果");
       set({ prompt: trimmed });
-      s.pushToast("已优化提示词", "success");
+      s.pushToast(`已通过「${aiProfile.name}」优化提示词`, "success");
     } catch (e: any) {
       const msg = `优化失败:${e?.message ?? e}`;
       set({ errorMessage: msg, errorCanRetry: false, errorRawPath: null });
       s.pushToast(msg, "error", 6000);
     } finally {
       set({ isOptimizingPrompt: false });
+    }
+  },
+
+  inferPromptFromCanvas: async () => {
+    const s = get();
+    if (s.isRunning || s.isOptimizingPrompt || s.isInferringPrompt) return;
+    if (!s.currentImage) {
+      s.pushToast("画布中还没有可供反推的图片", "warn");
+      return;
+    }
+    const aiProfile = pickAIProfile(s.profiles, s.aiProfileId, s.activeProfileId);
+    if (!aiProfile) {
+      s.pushToast("先在上游配置里指定一个 Responses 配置作为 AI 渠道", "warn", 5000);
+      return;
+    }
+    const apiKey = (await GetStoredAPIKey(keyringUserFor(aiProfile.id)).catch(() => "")).trim();
+    const baseURL = cleanBaseURL(aiProfile.baseURL);
+    if (!apiKey || !baseURL) {
+      s.pushToast(`AI 渠道「${aiProfile.name}」配置不完整`, "warn", 5000);
+      return;
+    }
+    set({ isInferringPrompt: true, errorMessage: null, errorCanRetry: false, errorRawPath: null });
+    try {
+      const full = await ensureFullHistoryItem(s.currentImage);
+      if (!full) throw new Error("无法读取画布图片");
+      let imageB64 = full.imageB64?.trim() ?? "";
+      let imageBlob = full.imageBlob ?? null;
+      if (!imageB64 && full.savedPath) {
+        imageB64 = await ReadImageAsBase64(full.savedPath).catch(() => "");
+      }
+      if (!imageB64 && !imageBlob && full.fullUrl) {
+        imageBlob = await fetch(full.fullUrl).then((response) => response.ok ? response.blob() : null).catch(() => null);
+      }
+      if (!full.savedPath && !imageB64 && !imageBlob) {
+        throw new Error("画布图片没有可读取的本地数据");
+      }
+      const inferred = await wailsOptimizePrompt({
+        apiKey,
+        prompt: "",
+        mode: "describe",
+        baseURL,
+        textModelID: aiProfile.textModelID.trim(),
+        proxyMode: s.proxyMode,
+        proxyURL: s.proxyURL,
+        imagePaths: full.savedPath ? [full.savedPath] : [],
+        imagePath: "",
+        sourceImages: [{
+          path: full.savedPath,
+          name: full.savedPath?.split(/[\\/]/).pop() ?? "canvas-image.png",
+          mimeType: detectImageMimeTypeFromBase64(imageB64) || imageBlob?.type || null,
+          imageB64: imageB64 || undefined,
+          imageBlob,
+        }],
+      } satisfies PromptOptimizeRequest);
+      const trimmed = inferred.trim();
+      if (!trimmed) throw new Error("上游没有返回可用的反推提示词");
+      set({ prompt: trimmed });
+      s.pushToast(`已通过「${aiProfile.name}」反推画布提示词`, "success");
+    } catch (e: any) {
+      const msg = `图片反推失败:${e?.message ?? e}`;
+      set({ errorMessage: msg, errorCanRetry: false, errorRawPath: null });
+      s.pushToast(msg, "error", 6000);
+    } finally {
+      set({ isInferringPrompt: false });
     }
   },
 

@@ -16,7 +16,7 @@ gio-client/
 └── internal/kernel/           # adapter around go-cli/pkg/client
 ```
 
-The top bar switches between two experiences:
+The compact toolbar switches between two experiences:
 
 - **Simple** keeps the existing control-panel / image-canvas / history-rail workflow for new users.
 - **Workflow** provides a node canvas, workspace library, inspector, queue, console, error view, and artifact view for advanced desktop use.
@@ -25,7 +25,7 @@ Workflow mode can open four independent native top-level windows: canvas, consol
 
 The design language is selectable in Settings independently of light/dark appearance:
 
-- **macOS** follows compact HIG desktop metrics, system-blue semantics, solid surfaces, and macOS typography fallbacks.
+- **macOS** follows compact HIG desktop metrics, system-blue semantics, solid semantic surfaces, a contextual toolbar, hideable creation/history sidebars, and macOS typography fallbacks.
 - **Windows** follows the existing Fluent visual contract, including its tighter radii and Windows desktop dimensions.
 
 Request payload construction, retry behavior, SSE parsing, Images API support, proxy handling, and default model constants remain owned by `go-cli/pkg/client`.
@@ -48,6 +48,38 @@ Gio-only preferences and workspace documents live at:
 This file stores the selected desktop style, simple/workflow mode, window preferences, workspace drafts, stable result references, and workflow graph positions. It does not store API keys, image bytes, base64 payloads, thumbnails, or process-local `memory://` references. See `internal/desktopstate/README.md` and `internal/ui/README.md` for ownership and extension rules.
 
 Gio does not expose cross-platform window coordinates, parent/owner relationships, or reliable always-on-top behavior on Windows/Linux. Detached windows can be moved between monitors manually; their role and size can be restored, but exact display coordinates are not persisted.
+
+## Custom Workflow Nodes
+
+Workflow mode can install versioned declarative node types from the node-library import button. Installed manifests live at:
+
+```text
+<stable data root>/gio/workflow-nodes/<node-id>@<version>.json
+```
+
+A manifest creates a real reusable node type with its own globally namespaced ID, semantic version, display name, category, description, and defaults. It selects one of the trusted runtime operators (`prompt`, `source`, `generate`, `preview`, or `export`) instead of loading Go plugins, native libraries, or shell commands into the desktop process. Unknown fields, operators, properties, invalid defaults, oversized files, and attempts to replace an existing `ID@Version` are rejected.
+
+```json
+{
+  "format": "image-studio-workflow-node",
+  "schemaVersion": 1,
+  "id": "com.example.cinematic-generate",
+  "version": "1.0.0",
+  "displayName": "Cinematic Generate",
+  "description": "High-quality 3:2 cinematic generation preset",
+  "category": "Custom/Generate",
+  "operator": "generate",
+  "defaults": {
+    "mode": "generate",
+    "quality": "high",
+    "size": "1536x1024",
+    "image_model": "gpt-image-2",
+    "batch_count": "1"
+  }
+}
+```
+
+Workflow documents pin `typeId`, `typeVersion`, and the trusted operator contract. Existing workflows therefore remain executable when their installed catalog entry is temporarily unavailable; installing a newer manifest version only affects newly added nodes.
 
 ## Prompt Import Protocol
 

@@ -681,7 +681,7 @@ html[data-target-platform="android"] .liquid-button {
 
 html[data-target-platform="android"] .android-phone-action-row {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
   margin-top: 8px;
 }

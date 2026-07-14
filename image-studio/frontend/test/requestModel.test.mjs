@@ -5,6 +5,7 @@ import {
   DEFAULT_AUTO_RETRY_COUNT,
   DEFAULT_PARTIAL_IMAGES,
   DEFAULT_REASONING_EFFORT,
+  buildPromptOptimizePayload,
   buildResponsesPayload,
   describeProblem,
   extractInvalidSize,
@@ -18,6 +19,19 @@ import {
   shouldUseImagesNewAPICompat,
   shouldUseGoogleNativeInteractions,
 } from "../../../shared/kernel/requestModel.js";
+
+test("prompt inference payload sends the canvas image and describe-only instructions", () => {
+  const payload = buildPromptOptimizePayload({
+    prompt: "",
+    mode: "describe",
+    textModelID: "gpt-5.5",
+  }, ["data:image/png;base64,YWJj"]);
+  assert.match(payload.instructions, /attached image/);
+  assert.match(payload.instructions, /Simplified Chinese/);
+  assert.equal(payload.input[0].content[0].type, "input_text");
+  assert.equal(payload.input[0].content[1].type, "input_image");
+  assert.equal(payload.input[0].content[1].image_url, "data:image/png;base64,YWJj");
+});
 
 test("Responses payload defaults partial_images to streaming preview count", () => {
   const payload = buildResponsesPayload({

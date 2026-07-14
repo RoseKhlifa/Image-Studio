@@ -181,13 +181,15 @@ func TestRetryLastRunDoesNotBypassWorkflowValidation(t *testing.T) {
 		t.Fatalf("disconnect preview: %v", err)
 	}
 	app := &App{
-		experienceMode:        experienceModeWorkflow,
-		activeWorkspaceID:     "ws-1",
-		workflowGraphs:        map[string]workflowGraphModel{"ws-1": graph},
-		workflowSelectedNodes: map[string]string{"ws-1": "preview"},
-		lastRunValid:          true,
-		lastRunBatchCount:     1,
-		lastRunConfig:         kernel.Config{Mode: client.ModeGenerate},
+		experienceMode:           experienceModeWorkflow,
+		activeWorkspaceID:        "ws-1",
+		workflowGraphs:           map[string]workflowGraphModel{"ws-1": graph},
+		workflowSelectedNodes:    map[string]string{"ws-1": "preview"},
+		lastRunValid:             true,
+		lastRunBatchCount:        1,
+		lastRunConfig:            kernel.Config{Mode: client.ModeGenerate},
+		lastRunWorkflowWorkspace: "ws-1",
+		lastRunWorkflowOutput:    "export",
 	}
 
 	app.retryLastRun()
@@ -197,6 +199,19 @@ func TestRetryLastRunDoesNotBypassWorkflowValidation(t *testing.T) {
 	}
 	if len(app.logs) == 0 || !strings.Contains(app.logs[len(app.logs)-1], "工作流无效") {
 		t.Fatalf("missing retry validation log: %#v", app.logs)
+	}
+}
+
+func TestBatchSourcePathsForRunUsesCompiledWorkflowSources(t *testing.T) {
+	app := &App{}
+	app.sourcePathsInput.SetText("/tmp/global.png")
+	compiled := []string{"/tmp/branch-one.png", "/tmp/branch-two.png"}
+	paths, err := app.batchSourcePathsForRunWithManual(compiled)
+	if err != nil {
+		t.Fatalf("batch sources: %v", err)
+	}
+	if len(paths) != len(compiled) || paths[0] != compiled[0] || paths[1] != compiled[1] {
+		t.Fatalf("batch sources=%v want compiled branch %v", paths, compiled)
 	}
 }
 

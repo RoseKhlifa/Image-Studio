@@ -112,6 +112,38 @@ func TestMacWorkflowPresentationMetrics(t *testing.T) {
 	}
 }
 
+func TestMacWorkflowCommandBarKeepsIconActionsAccessible(t *testing.T) {
+	isolateGioStableDataRoot(t)
+	previousTheme := installedDesktopTheme
+	defer installDesktopThemeSpec(previousTheme.Style, previousTheme.ColorMode)
+	spec := installDesktopThemeSpec(desktopStyleMacOS, desktopColorModeLight)
+	app := New()
+	app.desktopStyle = desktopStyleMacOS
+	app.installResolvedTheme(desktopColorModeLight)
+	var (
+		ops    op.Ops
+		router input.Router
+	)
+	gtx := layout.Context{
+		Ops:         &ops,
+		Source:      router.Source(),
+		Metric:      unit.Metric{PxPerDp: 1, PxPerSp: 1},
+		Constraints: layout.Exact(image.Pt(1040, int(spec.Metrics.CommandBarHeight))),
+	}
+	dims := app.layoutMacWorkflowCommandBar(gtx, snapshot{}, spec)
+	if dims.Size != image.Pt(1040, int(spec.Metrics.CommandBarHeight)) {
+		t.Fatalf("Apple workflow command bar size=%v", dims.Size)
+	}
+	router.Frame(&ops)
+	nodes := router.AppendSemantics(nil)
+	consoleLabel := chooseString(app.workflowConsoleOpen, "隐藏底部", "显示底部")
+	for _, label := range []string{"撤销", "重做", "保存", "加载", "缩小", "适合画布", "放大", "画布窗口", "控制台窗口", "进度窗口", consoleLabel, "重置布局", "运行"} {
+		if _, ok := semanticTreeButtonByLabel(nodes, label); !ok {
+			t.Fatalf("Apple workflow command %q is missing an accessible label", label)
+		}
+	}
+}
+
 func TestWorkflowLibraryRowsExposeSelectedSemantics(t *testing.T) {
 	previousTheme := installedDesktopTheme
 	defer installDesktopThemeSpec(previousTheme.Style, previousTheme.ColorMode)
@@ -177,7 +209,18 @@ func TestWorkflowLibraryAndInspectorRouteCatalogNodeActions(t *testing.T) {
 	if _, ok := app.workflowGraph(workspaceID).node("source"); !ok {
 		t.Fatal("library add button did not restore source")
 	}
+	app.workflowAddNodeButton("prompt").Click()
+	app.layoutWorkflowLibrary(libraryContext(), snapshot{}, spec)
+	if repeated, ok := app.workflowGraph(workspaceID).node("prompt-2"); !ok || repeated.Kind != workflowNodePrompt {
+		t.Fatalf("library repeat add prompt=%+v ok=%t", repeated, ok)
+	}
 
+	app.selectWorkflowNode(workspaceID, "source")
+	app.workflowDuplicateNodeButton.Click()
+	app.layoutWorkflowInspector(libraryContext(), snapshot{}, spec)
+	if duplicated, ok := app.workflowGraph(workspaceID).node("source-2"); !ok || duplicated.Kind != workflowNodeSource {
+		t.Fatalf("inspector duplicate source=%+v ok=%t", duplicated, ok)
+	}
 	app.selectWorkflowNode(workspaceID, "source")
 	app.workflowToggleNodeButton.Click()
 	app.layoutWorkflowInspector(libraryContext(), snapshot{}, spec)

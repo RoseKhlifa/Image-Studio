@@ -35,8 +35,8 @@ export function UpstreamConfigModal({
 }) {
   const { isAndroidPhone, usesFluentUI, usesAppleUI } = usePlatform();
   const {
-    profiles, activeProfileId,
-    createProfile, updateProfile, deleteProfile, duplicateProfile, setActiveProfile,
+    profiles, activeProfileId, aiProfileId,
+    createProfile, updateProfile, deleteProfile, duplicateProfile, setActiveProfile, setAIProfile,
     testAPIKey, isTestingKey, pushToast,
   } = useStudioStore();
   const canSyncCodexConfig = canLoadCodexAPIConfig();
@@ -169,7 +169,8 @@ export function UpstreamConfigModal({
       const apiKeysById = Object.fromEntries(await Promise.all(
         currentProfiles.map(async (profile) => [profile.id, await GetStoredAPIKey(keyringUserFor(profile.id)).catch(() => "")] as const),
       ));
-      const payload = buildUpstreamConfigExportFile(currentProfiles, useStudioStore.getState().activeProfileId, apiKeysById);
+      const currentState = useStudioStore.getState();
+      const payload = buildUpstreamConfigExportFile(currentProfiles, currentState.activeProfileId, apiKeysById, currentState.aiProfileId);
       const dst = await ExportUpstreamConfigToFile(JSON.stringify(payload, null, 2));
       if (dst) pushToast(`已导出上游配置 → ${dst.split(/[\\/]/).pop()}`, "success");
     } catch (error: any) {
@@ -194,6 +195,7 @@ export function UpstreamConfigModal({
       createProfile,
       updateProfile,
       setActiveProfile,
+      setAIProfile,
     });
     const targetId = result.activeProfileId || result.importedProfileIds[0] || selectedId;
     const selectedProfile = useStudioStore.getState().profiles.find((profile) => profile.id === targetId)
@@ -270,6 +272,22 @@ export function UpstreamConfigModal({
   async function handleSetActive() {
     if (!draft) return;
     await setActiveProfile(draft.id);
+  }
+
+  async function handleSetAI() {
+    if (!draft) return;
+    if (draft.apiMode !== "responses") {
+      pushToast("AI 优化与图片反推需要 Responses API 配置", "warn", 5000);
+      return;
+    }
+    if (!canSave) {
+      pushToast("先补全并保存这条配置的 BASE_URL 与 API Key", "warn", 5000);
+      return;
+    }
+    await handleSave();
+    if (await setAIProfile(draft.id)) {
+      pushToast(`已将「${draft.name}」设为 AI 渠道`, "success");
+    }
   }
 
   async function handleTest() {
@@ -351,7 +369,7 @@ export function UpstreamConfigModal({
               <div className="min-w-0">
                 <h4 className={`text-zinc-900 dark:text-zinc-100 ${isAndroidPhone ? "text-[17px] font-semibold" : "text-[18px] font-semibold"}`}>先连上一个可用上游</h4>
                 <p className={`mt-1 text-zinc-500 dark:text-zinc-400 ${isAndroidPhone ? "text-[13px] leading-6" : "text-sm leading-6"}`}>
-                  先保存一条可用的 API 中转配置，后面所有生成、编辑、提示词优化都会走这里。
+                  先保存一条可用配置。生图与 AI 操作可以分别指定渠道，图片反推与提示词优化使用 Responses API。
                 </p>
               </div>
             </div>
@@ -442,7 +460,9 @@ export function UpstreamConfigModal({
           profiles={profiles}
           selectedId={selectedId}
           activeProfileId={activeProfileId}
+          aiProfileId={aiProfileId}
           draftId={draft?.id}
+          draftAPIMode={draft?.apiMode}
           isAndroidPhone={isAndroidPhone}
           canSyncCodexConfig={canSyncCodexConfig}
           isSyncingCodexConfig={syncingCodexConfig}
@@ -454,6 +474,7 @@ export function UpstreamConfigModal({
           onHandleImport={handleImportConfigs}
           onHandleQuickImport={() => setQuickImportOpen(true)}
           onHandleSetActive={handleSetActive}
+          onHandleSetAI={handleSetAI}
           onHandleSyncCodex={handleSyncCodex}
         />
 

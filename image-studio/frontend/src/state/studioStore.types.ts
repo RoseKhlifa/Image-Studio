@@ -49,13 +49,20 @@ export interface ModeConfig {
 export interface PromptOptimizeRequest {
   apiKey: string;
   prompt: string;
-  mode: Mode;
+  mode: Mode | "describe";
   baseURL: string;
   textModelID: string;
   proxyMode: ProxyMode;
   proxyURL: string;
   imagePaths: string[];
   imagePath: string;
+  sourceImages?: Array<{
+    path?: string;
+    name?: string;
+    mimeType?: string | null;
+    imageB64?: string | null;
+    imageBlob?: Blob | null;
+  }>;
 }
 
 export interface Stroke {
@@ -103,6 +110,7 @@ export interface StudioState {
   noPromptRevision: boolean;
   profiles: UpstreamProfile[];
   activeProfileId: string;
+  aiProfileId: string;
   sources: SourceImage[];
   editSourceMode: EditSourceMode;
   editAutoAspectResolution: AutoAspectResolutionPreset;
@@ -182,6 +190,7 @@ export interface StudioState {
   deleteProfile: (id: string) => Promise<void>;
   duplicateProfile: (id: string) => Promise<string | null>;
   setActiveProfile: (id: string) => Promise<void>;
+  setAIProfile: (id: string) => Promise<boolean>;
   selectSourceImage: () => Promise<void>;
   chooseBatchInputDir: () => Promise<void>;
   chooseBatchInputFiles: () => Promise<void>;
@@ -282,7 +291,9 @@ export interface StudioState {
   testAPIKey: () => Promise<void>;
   isTestingKey: boolean;
   isOptimizingPrompt: boolean;
+  isInferringPrompt: boolean;
   optimizePrompt: () => Promise<void>;
+  inferPromptFromCanvas: () => Promise<void>;
   upstreamModalOpen: boolean;
   upstreamReturnTarget: "app" | "settings";
   openUpstreamConfig: (returnTarget?: "app" | "settings") => void;

@@ -144,14 +144,18 @@ type WorkflowGraph struct {
 }
 
 type WorkflowNode struct {
-	ID         string            `json:"id"`
-	Kind       string            `json:"kind"`
-	Title      string            `json:"title,omitempty"`
-	X          float64           `json:"x"`
-	Y          float64           `json:"y"`
-	WidthDp    int               `json:"widthDp,omitempty"`
-	HeightDp   int               `json:"heightDp,omitempty"`
-	Properties map[string]string `json:"properties,omitempty"`
+	ID          string            `json:"id"`
+	TypeID      string            `json:"typeId,omitempty"`
+	TypeVersion string            `json:"typeVersion,omitempty"`
+	Category    string            `json:"category,omitempty"`
+	Kind        string            `json:"kind"`
+	Title       string            `json:"title,omitempty"`
+	Subtitle    string            `json:"subtitle,omitempty"`
+	X           float64           `json:"x"`
+	Y           float64           `json:"y"`
+	WidthDp     int               `json:"widthDp,omitempty"`
+	HeightDp    int               `json:"heightDp,omitempty"`
+	Properties  map[string]string `json:"properties,omitempty"`
 }
 
 type WorkflowEdge struct {

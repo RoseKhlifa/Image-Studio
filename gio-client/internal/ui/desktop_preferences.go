@@ -274,17 +274,24 @@ func desktopWorkflowGraph(graph workflowGraphModel) desktopstate.WorkflowGraph {
 		Edges:    make([]desktopstate.WorkflowEdge, 0, len(graph.Edges)),
 	}
 	for _, node := range graph.Nodes {
-		var properties map[string]string
+		properties := cloneWorkflowProperties(node.Properties)
 		if !node.Enabled {
-			properties = map[string]string{"enabled": "false"}
+			if properties == nil {
+				properties = map[string]string{}
+			}
+			properties["enabled"] = "false"
 		}
 		document.Nodes = append(document.Nodes, desktopstate.WorkflowNode{
-			ID:         node.ID,
-			Kind:       string(node.Kind),
-			Title:      node.Title,
-			X:          float64(node.Position.X),
-			Y:          float64(node.Position.Y),
-			Properties: properties,
+			ID:          node.ID,
+			TypeID:      workflowNodeTypeID(node),
+			TypeVersion: node.TypeVersion,
+			Category:    node.Category,
+			Kind:        string(node.Kind),
+			Title:       node.Title,
+			Subtitle:    node.Subtitle,
+			X:           float64(node.Position.X),
+			Y:           float64(node.Position.Y),
+			Properties:  properties,
 		})
 	}
 	for _, edge := range graph.Edges {
@@ -305,12 +312,20 @@ func workflowGraphFromDesktop(document desktopstate.WorkflowGraph) workflowGraph
 	}
 	graph := workflowGraphModel{Revision: 1}
 	for _, saved := range document.Nodes {
-		node, ok := workflowNodeTemplate(saved.ID)
+		if err := validatePersistedWorkflowNodeDescriptor(saved); err != nil {
+			continue
+		}
+		node, ok := workflowNodeTemplateForDescriptor(saved.ID, saved.TypeID, saved.TypeVersion, saved.Category, saved.Subtitle, saved.Kind)
 		if !ok {
 			continue
 		}
+		if title := strings.TrimSpace(saved.Title); title != "" {
+			node.Title = title
+		}
 		node.Position = image.Pt(int(saved.X), int(saved.Y))
 		node.Enabled = !strings.EqualFold(strings.TrimSpace(saved.Properties["enabled"]), "false")
+		node.Properties = mergeWorkflowProperties(node.Properties, saved.Properties)
+		delete(node.Properties, "enabled")
 		graph.Nodes = append(graph.Nodes, node)
 	}
 	for _, edge := range document.Edges {

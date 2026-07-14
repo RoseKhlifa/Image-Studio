@@ -1210,12 +1210,22 @@ func (a *App) monoLabel(gtx layout.Context, text string, size unit.Sp, color col
 }
 
 func (a *App) card(gtx layout.Context, w layout.Widget) layout.Dimensions {
+	if normalizeDesktopStyle(a.desktopStyle) == desktopStyleMacOS {
+		return a.borderedSurface(gtx, fluent.surfaceElevated, fluentCardRadius, fluent.border, func(gtx layout.Context) layout.Dimensions {
+			return layout.UniformInset(unit.Dp(10)).Layout(gtx, w)
+		})
+	}
 	return a.elevatedBorderedSurface(gtx, fluent.surfaceElevated, fluentCardRadius, fluent.border, image.Pt(0, 1), func(gtx layout.Context) layout.Dimensions {
 		return layout.UniformInset(unit.Dp(12)).Layout(gtx, w)
 	})
 }
 
 func (a *App) controlCard(gtx layout.Context, w layout.Widget) layout.Dimensions {
+	if normalizeDesktopStyle(a.desktopStyle) == desktopStyleMacOS {
+		return a.borderedSurface(gtx, fluent.surfaceElevated, fluentCardRadius, fluent.border, func(gtx layout.Context) layout.Dimensions {
+			return layout.UniformInset(unit.Dp(10)).Layout(gtx, w)
+		})
+	}
 	bg := withAlpha(fluent.white, 0xb3)
 	if a.isDarkTheme() {
 		bg = fluent.surfaceElevated
@@ -1353,7 +1363,7 @@ func (a *App) borderedSurface(gtx layout.Context, bg color.NRGBA, radius unit.Dp
 }
 
 func (a *App) surfaceEffectsEnabled() bool {
-	return a != nil && !a.reducedEffects
+	return a != nil && !a.reducedEffects && normalizeDesktopStyle(a.desktopStyle) != desktopStyleMacOS
 }
 
 func (a *App) borderedTopTabSurface(

@@ -112,53 +112,92 @@ func (a *App) layoutHistoryAndLogs(gtx layout.Context, snap snapshot) layout.Dim
 		}
 	}
 
+	macOS := normalizeDesktopStyle(a.desktopStyle) == desktopStyleMacOS
 	return a.borderedSurface(gtx, fluent.inspector, unit.Dp(0), fluent.border, func(gtx layout.Context) layout.Dimensions {
 		gtx.Constraints.Min = gtx.Constraints.Max
-		return layout.Inset{Top: 12, Bottom: 12, Left: 12, Right: 12}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			children := []layout.FlexChild{
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return a.layoutUpstreamCard(gtx, snap)
-				}),
-				layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return a.layoutHistorySummaryCard(gtx, snap, filteredCount, generateCount, editCount)
-				}),
-			}
-
-			if snap.Compare.HasItem {
-				children = append(children,
-					layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return a.compactIconTextButton(gtx, clearCompareBtn, uiIconCompare, "退出对比", true)
-					}),
-				)
-			}
-
-			if !a.historyRailCollapsed && hasLatest {
-				children = append(children,
-					layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return a.layoutLatestHistoryCard(gtx, latest, snap.SelectedHistoryID == latest.ID, compareItemID)
-					}),
-				)
-			}
-
-			children = append(children, layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout))
-			if !a.historyRailCollapsed && len(visible) > 0 {
-				children = append(children, layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-					return a.layoutHistoryResultsCard(gtx, snap, filteredCount, entries, visible, compareItemID)
-				}))
-			} else {
-				children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					if a.historyRailCollapsed {
-						return layout.Dimensions{}
-					}
-					return a.layoutHistoryResultsCard(gtx, snap, filteredCount, entries, visible, compareItemID)
-				}))
-			}
-			return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
+		inset := layout.Inset{Top: 12, Bottom: 12, Left: 12, Right: 12}
+		if macOS {
+			inset = layout.Inset{Top: 10, Bottom: 10, Left: 10, Right: 10}
+		}
+		return inset.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return a.layoutHistoryRailContents(gtx, snap, clearCompareBtn, filteredCount, generateCount, editCount, entries, visible, latest, hasLatest, compareItemID, !macOS)
 		})
 	})
+}
+
+func (a *App) layoutHistoryRailContents(
+	gtx layout.Context,
+	snap snapshot,
+	clearCompareBtn *widget.Clickable,
+	filteredCount int,
+	generateCount int,
+	editCount int,
+	entries []historyPromptEntry,
+	visible []historyPromptEntry,
+	latest sharedCompat.HistoryItem,
+	hasLatest bool,
+	compareItemID string,
+	includeUpstream bool,
+) layout.Dimensions {
+	children := make([]layout.FlexChild, 0, 8)
+	if !includeUpstream {
+		children = append(children,
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return layout.Inset{Bottom: unit.Dp(8), Left: unit.Dp(2), Right: unit.Dp(2)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Baseline}.Layout(gtx,
+						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+							return a.label(gtx, "历史记录", unit.Sp(13), fluent.text, font.SemiBold)
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return a.singleLineLabel(gtx, strconv.Itoa(filteredCount)+" 项", unit.Sp(11), fluent.textMuted, font.Normal)
+						}),
+					)
+				})
+			}),
+		)
+	}
+	if includeUpstream {
+		children = append(children,
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return a.layoutUpstreamCard(gtx, snap)
+			}),
+			layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
+		)
+	}
+	children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+		return a.layoutHistorySummaryCard(gtx, snap, filteredCount, generateCount, editCount)
+	}))
+
+	if snap.Compare.HasItem {
+		children = append(children,
+			layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return a.compactIconTextButton(gtx, clearCompareBtn, uiIconCompare, "退出对比", true)
+			}),
+		)
+	}
+	if !a.historyRailCollapsed && hasLatest {
+		children = append(children,
+			layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return a.layoutLatestHistoryCard(gtx, latest, snap.SelectedHistoryID == latest.ID, compareItemID)
+			}),
+		)
+	}
+	children = append(children, layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout))
+	if !a.historyRailCollapsed && len(visible) > 0 {
+		children = append(children, layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			return a.layoutHistoryResultsCard(gtx, snap, filteredCount, entries, visible, compareItemID)
+		}))
+	} else {
+		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if a.historyRailCollapsed {
+				return layout.Dimensions{}
+			}
+			return a.layoutHistoryResultsCard(gtx, snap, filteredCount, entries, visible, compareItemID)
+		}))
+	}
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
 }
 
 func (a *App) handleHistoryItemClick(click widget.Click, item sharedCompat.HistoryItem, closeTimeline bool) {

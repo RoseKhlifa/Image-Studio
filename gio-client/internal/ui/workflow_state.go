@@ -140,6 +140,7 @@ func (a *App) undoWorkflowGraph(workspaceID string) bool {
 	history.Undo = history.Undo[:len(history.Undo)-1]
 	history.Redo = appendWorkflowHistoryEntry(history.Redo, current)
 	restored.Revision = current.Revision + 1
+	a.clearWorkflowNodeEditor(workspaceID)
 	a.applyWorkflowGraph(workspaceID, restored)
 	return true
 }
@@ -156,6 +157,7 @@ func (a *App) redoWorkflowGraph(workspaceID string) bool {
 	history.Redo = history.Redo[:len(history.Redo)-1]
 	history.Undo = appendWorkflowHistoryEntry(history.Undo, current)
 	restored.Revision = current.Revision + 1
+	a.clearWorkflowNodeEditor(workspaceID)
 	a.applyWorkflowGraph(workspaceID, restored)
 	return true
 }
@@ -170,7 +172,7 @@ func (a *App) ensureWorkflowGraph(workspaceID string) workflowGraphModel {
 	}
 	graph, ok := a.workflowGraphs[workspaceID]
 	if !ok {
-		graph = defaultWorkflowGraph()
+		graph = a.workflowGraphWithControlProperties(defaultWorkflowGraph())
 		a.workflowGraphs[workspaceID] = graph
 	}
 	if a.workflowSelectedNodes == nil {
@@ -203,10 +205,22 @@ func (a *App) selectedWorkflowNode(workspaceID string) string {
 
 func (a *App) selectWorkflowNode(workspaceID string, nodeID string) {
 	graph := a.ensureWorkflowGraph(workspaceID)
-	if _, ok := graph.node(nodeID); !ok {
+	node, ok := graph.node(nodeID)
+	if !ok {
 		return
 	}
+	previousID := a.workflowSelectedNodes[workspaceID]
+	if previousID == nodeID {
+		a.ensureWorkflowNodeControlsLoaded(workspaceID, node)
+		return
+	}
+	if previous, exists := graph.node(previousID); exists {
+		a.syncWorkflowNodeControls(workspaceID, previous, false)
+		graph = a.ensureWorkflowGraph(workspaceID)
+		node, _ = graph.node(nodeID)
+	}
 	a.workflowSelectedNodes[workspaceID] = nodeID
+	a.loadWorkflowNodeControls(workspaceID, node)
 	a.invalidateNow()
 }
 
@@ -232,14 +246,66 @@ func (a *App) addWorkflowNode(workspaceID string, nodeID string) error {
 	}
 	a.finishWorkflowMove(workspaceID)
 	graph := a.ensureWorkflowGraph(workspaceID)
-	next, err := addWorkflowNode(graph, nodeID)
+	next, addedID, err := addWorkflowNodeInstanceFromCatalog(graph, nodeID, a.workflowNodeCatalog())
 	if err != nil {
 		return err
 	}
+	added, _ := next.node(addedID)
+	properties := cloneWorkflowProperties(added.Properties)
+	if workflowNodeTypeID(added) == string(added.Kind) {
+		properties = a.workflowPropertiesFromControls(added.Kind, nil)
+	}
+	next = configureWorkflowNode(next, addedID, added.Title, properties)
 	a.pushWorkflowUndo(workspaceID, graph)
-	a.workflowSelectedNodes[workspaceID] = strings.TrimSpace(nodeID)
+	a.workflowSelectedNodes[workspaceID] = addedID
 	a.applyWorkflowGraph(workspaceID, next)
+	added, _ = next.node(addedID)
+	a.loadWorkflowNodeControls(workspaceID, added)
 	return nil
+}
+
+func (a *App) duplicateSelectedWorkflowNode(workspaceID string) bool {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return false
+	}
+	a.finishWorkflowMove(workspaceID)
+	graph := a.ensureWorkflowGraph(workspaceID)
+	selectedID := a.selectedWorkflowNode(workspaceID)
+	if selected, ok := graph.node(selectedID); ok {
+		a.syncWorkflowNodeControls(workspaceID, selected, false)
+		graph = a.ensureWorkflowGraph(workspaceID)
+	}
+	next, duplicatedID, err := duplicateWorkflowNode(graph, selectedID)
+	if err != nil {
+		a.appendLog("复制节点失败: " + err.Error())
+		return false
+	}
+	a.pushWorkflowUndo(workspaceID, graph)
+	a.workflowSelectedNodes[workspaceID] = duplicatedID
+	a.applyWorkflowGraph(workspaceID, next)
+	duplicated, _ := next.node(duplicatedID)
+	a.loadWorkflowNodeControls(workspaceID, duplicated)
+	return true
+}
+
+func (a *App) configureWorkflowNode(workspaceID string, nodeID string, title string, properties map[string]string, recordHistory bool) bool {
+	workspaceID = strings.TrimSpace(workspaceID)
+	nodeID = strings.TrimSpace(nodeID)
+	if workspaceID == "" || nodeID == "" {
+		return false
+	}
+	graph := a.ensureWorkflowGraph(workspaceID)
+	next := configureWorkflowNode(graph, nodeID, title, properties)
+	if next.Revision == graph.Revision {
+		return false
+	}
+	if recordHistory {
+		a.finishWorkflowMove(workspaceID)
+		a.pushWorkflowUndo(workspaceID, graph)
+	}
+	a.applyWorkflowGraph(workspaceID, next)
+	return true
 }
 
 func (a *App) deleteWorkflowNode(workspaceID string, nodeID string) bool {
@@ -256,6 +322,9 @@ func (a *App) deleteWorkflowNode(workspaceID string, nodeID string) bool {
 	}
 	a.pushWorkflowUndo(workspaceID, graph)
 	a.applyWorkflowGraph(workspaceID, next)
+	if a.workflowEditingNodeKey == workflowNodeEditorKey(workspaceID, nodeID) {
+		a.workflowEditingNodeKey = ""
+	}
 	return true
 }
 
@@ -330,13 +399,14 @@ func (a *App) resetWorkflowGraph(workspaceID string) {
 	}
 	a.finishWorkflowMove(workspaceID)
 	current := a.ensureWorkflowGraph(workspaceID)
-	next := defaultWorkflowGraph()
+	next := a.workflowGraphWithControlProperties(defaultWorkflowGraph())
 	next.Revision = max(next.Revision, current.Revision+1)
 	if !workflowGraphContentEqual(current, next) {
 		a.pushWorkflowUndo(workspaceID, current)
 	}
 	a.workflowGraphs[workspaceID] = next
 	a.workflowSelectedNodes[workspaceID] = "generate"
+	a.clearWorkflowNodeEditor(workspaceID)
 	if a.workflowCanvas.workspaceID == workspaceID {
 		a.workflowCanvas.clearOverrides()
 		a.workflowCanvas.graphRevision = next.Revision
@@ -355,13 +425,10 @@ func (a *App) deleteWorkflowWorkspaceState(workspaceID string) {
 func (a *App) workflowCanvasData(snap snapshot, workspaceID string) workflowCanvasData {
 	graph := a.workflowGraph(workspaceID)
 	selected := a.selectedWorkflowNode(workspaceID)
-	runtime := make(map[string]workflowNodeRuntime, len(graph.Nodes))
-	promptConnected := workflowEdgeConnected(graph, workflowEdgeModel{FromNode: "prompt", FromPort: "text", ToNode: "generate", ToPort: "prompt"})
-	sourceConnected := workflowEdgeConnected(graph, workflowEdgeModel{FromNode: "source", FromPort: "image", ToNode: "generate", ToPort: "source"})
-	previewConnected := workflowEdgeConnected(graph, workflowEdgeModel{FromNode: "generate", FromPort: "job", ToNode: "preview", ToPort: "job"})
-	exportConnected := workflowEdgeConnected(graph, workflowEdgeModel{FromNode: "preview", FromPort: "image", ToNode: "export", ToPort: "image"})
-	sourceCount := len(a.parseSourcePathsCached(a.sourcePathsInput.Text()))
-	prompt := strings.TrimSpace(a.promptInput.Text())
+	preferredOutputID := workflowPreferredOutputNodeID(graph, selected)
+	if snap.Running && snap.LastRunWorkflowWorkspace == workspaceID && strings.TrimSpace(snap.LastRunWorkflowOutput) != "" {
+		preferredOutputID = snap.LastRunWorkflowOutput
+	}
 	completed := len(snap.BatchResults)
 	if completed == 0 && snap.Result.HasItem {
 		completed = 1
@@ -370,82 +437,19 @@ func (a *App) workflowCanvasData(snap snapshot, workspaceID string) workflowCanv
 	if total < 1 {
 		total = max(a.batchCount, 1)
 	}
-	progress := float32(completed) / float32(max(total, 1))
-	if progress > 1 {
-		progress = 1
-	}
-
-	sourcePhase := workflowNodePhaseIdle
-	sourceDetail := "无需参考图，当前为文生图"
-	if sourceCount > 0 {
-		sourcePhase = workflowNodePhaseSuccess
-		sourceDetail = fmt.Sprintf("已载入 %d 个图像输入", sourceCount)
-	} else if a.mode == "edit" {
-		sourcePhase = workflowNodePhaseWarning
-		sourceDetail = "图生图需要至少一张参考图"
-	}
-	if !sourceConnected && (sourceCount > 0 || a.mode == "edit" || a.batchMode) {
-		sourcePhase = workflowNodePhaseWarning
-		sourceDetail = "图像输入端口未连接"
-	}
-	runtime["source"] = workflowNodeRuntime{Phase: sourcePhase, Detail: sourceDetail, Progress: chooseProgress(sourcePhase, 0)}
-
-	promptPhase := workflowNodePhaseSuccess
-	promptDetail := fmt.Sprintf("%d 字符 · %s", len([]rune(prompt)), chooseNonEmpty(a.styleTag, "无风格标签"))
-	if prompt == "" {
-		promptPhase = workflowNodePhaseWarning
-		promptDetail = "等待输入提示词"
-	} else if !promptConnected {
-		promptPhase = workflowNodePhaseWarning
-		promptDetail = "提示词端口未连接"
-	}
-	runtime["prompt"] = workflowNodeRuntime{Phase: promptPhase, Detail: promptDetail, Progress: chooseProgress(promptPhase, 0)}
-
-	generatePhase := workflowNodePhaseIdle
-	generateDetail := fmt.Sprintf("%s · %s · %s", strings.ToUpper(a.size), a.quality, a.imageModelInput.Text())
-	if snap.Running {
-		generatePhase = workflowNodePhaseRunning
-		generateDetail = snap.Status
-	} else if strings.TrimSpace(snap.LastErrorMessage) != "" {
-		generatePhase = workflowNodePhaseError
-		generateDetail = snap.LastErrorMessage
-	} else if snap.Result.HasItem || strings.TrimSpace(snap.Result.SavedPath) != "" {
-		generatePhase = workflowNodePhaseSuccess
-		generateDetail = "生成任务已完成"
-	}
-	if !snap.Running && (!promptConnected || ((a.mode == "edit" || a.batchMode) && !sourceConnected)) {
-		generatePhase = workflowNodePhaseWarning
-		generateDetail = "等待必需输入连接"
-	}
-	runtime["generate"] = workflowNodeRuntime{Phase: generatePhase, Detail: generateDetail, Progress: progress}
-
-	previewPhase := workflowNodePhaseIdle
-	previewDetail := "等待任务输出"
-	if snap.Running && (len(snap.BatchPreviewItems) > 0 || snap.Result.Image != nil) {
-		previewPhase = workflowNodePhaseRunning
-		previewDetail = fmt.Sprintf("实时预览 %d/%d", max(completed, len(snap.BatchPreviewItems)), total)
-	} else if snap.Result.Image != nil || snap.Result.HasItem {
-		previewPhase = workflowNodePhaseSuccess
-		previewDetail = "画布结果可用"
-	}
-	if !snap.Running && !previewConnected {
-		previewPhase = workflowNodePhaseWarning
-		previewDetail = "任务输入端口未连接"
-	}
-	runtime["preview"] = workflowNodeRuntime{Phase: previewPhase, Detail: previewDetail, Progress: progress}
-
-	exportPhase := workflowNodePhaseIdle
-	exportDetail := chooseNonEmpty(a.outputDirInput.Text(), "等待配置输出目录")
-	if strings.TrimSpace(snap.Result.SavedPath) != "" {
-		exportPhase = workflowNodePhaseSuccess
-		exportDetail = snap.Result.SavedPath
-	}
-	if !snap.Running && !exportConnected {
-		exportPhase = workflowNodePhaseWarning
-		exportDetail = "图像输入端口未连接"
-	}
-	runtime["export"] = workflowNodeRuntime{Phase: exportPhase, Detail: exportDetail, Progress: chooseProgress(exportPhase, progress)}
-	applyDisabledWorkflowRuntime(graph, runtime)
+	runtime := workflowRuntimeForGraph(graph, workflowRuntimeContext{
+		PreferredOutputID: preferredOutputID,
+		BatchMode:         a.batchMode,
+		Running:           snap.Running,
+		Status:            snap.Status,
+		LastError:         snap.LastErrorMessage,
+		ResultAvailable:   snap.Result.HasItem || strings.TrimSpace(snap.Result.SavedPath) != "",
+		ResultSavedPath:   snap.Result.SavedPath,
+		PreviewAvailable:  len(snap.BatchPreviewItems) > 0 || snap.Result.Image != nil,
+		PreviewCount:      len(snap.BatchPreviewItems),
+		Completed:         completed,
+		Total:             total,
+	})
 
 	return workflowCanvasData{
 		Graph:     graph,

@@ -84,8 +84,11 @@ func TestDetachedStatusChipsSeparateTextAndFillTokens(t *testing.T) {
 }
 
 func TestWorkflowShellDisablesSimpleModeBackgroundEffects(t *testing.T) {
-	if !(&App{}).shellEffectsEnabled() {
-		t.Fatal("default simple mode should retain shell effects")
+	if !(&App{desktopStyle: desktopStyleWindows}).shellEffectsEnabled() {
+		t.Fatal("Windows simple mode should retain shell effects")
+	}
+	if (&App{desktopStyle: desktopStyleMacOS}).shellEffectsEnabled() {
+		t.Fatal("macOS must use a solid shell background")
 	}
 	if (&App{experienceMode: experienceModeWorkflow}).shellEffectsEnabled() {
 		t.Fatal("workflow mode must use a solid shell background")
@@ -96,8 +99,11 @@ func TestWorkflowShellDisablesSimpleModeBackgroundEffects(t *testing.T) {
 }
 
 func TestSurfaceEffectsFollowReducedEffectsPreference(t *testing.T) {
-	if !(&App{}).surfaceEffectsEnabled() {
-		t.Fatal("default surfaces should retain static glass highlights and shadows")
+	if !(&App{desktopStyle: desktopStyleWindows}).surfaceEffectsEnabled() {
+		t.Fatal("Windows surfaces should retain static highlights and shadows")
+	}
+	if (&App{desktopStyle: desktopStyleMacOS}).surfaceEffectsEnabled() {
+		t.Fatal("macOS surfaces must not add custom highlights or shadows")
 	}
 	if (&App{reducedEffects: true}).surfaceEffectsEnabled() {
 		t.Fatal("reduced effects must disable static glass highlights and shadows")
@@ -180,7 +186,7 @@ func TestSharedControlsUseDesktopThemeDimensions(t *testing.T) {
 		controlHeight int
 		iconTarget    int
 	}{
-		{name: "macos", style: desktopStyleMacOS, controlHeight: 34, iconTarget: 32},
+		{name: "macos", style: desktopStyleMacOS, controlHeight: 30, iconTarget: 30},
 		{name: "windows", style: desktopStyleWindows, controlHeight: 32, iconTarget: 32},
 	}
 	for _, theme := range themes {

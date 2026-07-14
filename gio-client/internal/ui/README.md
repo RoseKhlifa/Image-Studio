@@ -40,6 +40,7 @@ The workflow experience is divided as follows:
 | File | Responsibility |
 | --- | --- |
 | [`workflow_model.go`](workflow_model.go) | Typed node, port, edge, and graph model; default graph; cloning; connection validation; cycle detection; node movement. |
+| [`workflow_custom_nodes.go`](workflow_custom_nodes.go) | Versioned declarative node manifests, trusted-operator validation, immutable installation, and the dynamic node catalog. |
 | [`workflow_state.go`](workflow_state.go) | Per-workspace graph selection and runtime projection from the active generation state. |
 | [`layout_workflow_shell.go`](layout_workflow_shell.go) | Workflow command bar, three-pane body, center canvas/dock composition, and command button events. |
 | [`layout_workflow_library.go`](layout_workflow_library.go) | Workspace list and node library in the left pane. |
@@ -161,20 +162,28 @@ acyclic.
 
 ### Add a workflow node
 
-1. Add the node kind and compatible ports in `workflow_model.go`, then include
-   the node and any default edges in `defaultWorkflowGraph`.
-2. Add active runtime projection in `workflowCanvasData` and inactive projection
-   in `workflowRuntimeForInactiveWorkspace`.
-3. Add the selected-node editor in `layout_workflow_inspector.go`. The library
-   and generic canvas render nodes from the graph automatically.
-4. Update `desktopWorkflowGraph` and `workflowGraphFromDesktop` if the node needs
-   persisted properties beyond identity and position.
-5. Extend `workflow_model_test.go` with valid ports, invalid connections, cycle,
-   normalization, and movement coverage.
+There are two extension levels. Product developers add a new trusted operator by
+defining its kind, ports, property allowlist, execution semantics, runtime state,
+and inspector in code. End users create reusable node types by importing an
+`image-studio-workflow-node` manifest that selects one of those trusted
+operators and declares a namespaced ID, semantic version, metadata, and defaults.
+The manifest path intentionally cannot load Go plugins, native libraries, shell
+commands, or arbitrary host code.
 
-The current graph uses a fixed executable product node catalog, not a plugin
-registry. Catalog nodes can be deleted, restored from the left library, and
-muted from the inspector or with `Ctrl+M`; `Delete` removes the selected node.
+To add a trusted operator:
+
+1. Add the node kind and compatible ports in `workflow_model.go`, then include
+   any built-in instance and default edges in `defaultWorkflowGraph`.
+2. Add its allowed property keys and default validation in
+   `workflow_custom_nodes.go`.
+3. Add execution planning and runtime projection in `workflow_execution.go` and
+   `workflow_runtime.go`.
+4. Add the selected-node editor in `layout_workflow_inspector.go`. The library
+   and generic canvas render nodes from the catalog automatically.
+5. Extend the model, manifest, execution, persistence, and invalid-input tests.
+
+Catalog nodes can be added repeatedly, deleted, duplicated, and muted from the
+inspector or with `Ctrl+M`; `Delete` removes the selected instance.
 Removing a node also removes its incident edges, while adding it again leaves
 connections explicit instead of silently rebuilding the default graph.
 Compatible input connections are editable from the selected-node inspector and
@@ -187,14 +196,17 @@ Graph edits keep a workspace-local 64-step undo/redo history. A complete node
 drag is one history entry, while connection changes and graph reset each create
 their own entry; new edits after undo discard the stale redo branch.
 The command bar saves and loads versioned `image-studio-workflow` JSON documents
-containing the graph and current workspace draft. The importer accepts only the
-five executable catalog nodes and valid edges; ComfyUI workflow JSON is not
-treated as directly executable or silently converted. `Ctrl+S` and `Ctrl+O`
+containing the graph and current workspace draft. Documents pin each custom
+node's `typeId`, `typeVersion`, and trusted operator, so existing graphs can
+restore without resolving the currently installed catalog version. Foreign
+operators and invalid edges/properties are rejected; ComfyUI workflow JSON is
+not treated as directly executable or silently converted. `Ctrl+S` and `Ctrl+O`
 route to the same save/load actions in the main workflow window.
 `workflowGraphFromDesktop` rebuilds saved catalog membership, positions, enabled
 state, and edges. The persisted `Explicit`
 marker distinguishes an intentionally empty canvas from an older missing graph.
-A persisted unknown node alone does not make a new runtime node available.
+A persisted namespaced node is executable only when it records a supported
+trusted operator; its type identity alone never grants runtime capabilities.
 Although `desktopstate.WorkflowGraph` has a Viewport
 field, the current UI bridge does not round-trip it; pan/zoom remains
 window-local `workflowCanvasViewState` until an explicit per-window persistence
