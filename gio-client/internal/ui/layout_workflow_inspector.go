@@ -12,12 +12,19 @@ import (
 )
 
 func (a *App) layoutWorkflowInspector(gtx layout.Context, snap snapshot, spec desktopThemeTokens) layout.Dimensions {
-	a.handleWorkflowInspectorEvents(gtx)
 	data := a.workflowCanvasData(snap, a.activeWorkspaceID)
 	node, ok := data.Graph.node(data.Selected)
 	if !ok && len(data.Graph.Nodes) > 0 {
 		node = data.Graph.Nodes[0]
 	}
+	a.ensureWorkflowNodeControlsLoaded(a.activeWorkspaceID, node)
+	if a.syncWorkflowNodeControls(a.activeWorkspaceID, node, false) {
+		data = a.workflowCanvasData(snap, a.activeWorkspaceID)
+		node, _ = data.Graph.node(data.Selected)
+	}
+	a.handleWorkflowInspectorEvents(gtx, node)
+	data = a.workflowCanvasData(snap, a.activeWorkspaceID)
+	node, _ = data.Graph.node(data.Selected)
 	if a.handleWorkflowConnectionEvents(gtx, data.Graph, node) {
 		data = a.workflowCanvasData(snap, a.activeWorkspaceID)
 		node, _ = data.Graph.node(data.Selected)
@@ -57,6 +64,9 @@ func (a *App) layoutWorkflowInspector(gtx layout.Context, snap snapshot, spec de
 
 func (a *App) layoutWorkflowInspectorContent(gtx layout.Context, snap snapshot, graph workflowGraphModel, node workflowNodeModel, spec desktopThemeTokens) layout.Dimensions {
 	children := []layout.FlexChild{
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return a.technicalField(gtx, "节点名称", &a.workflowNodeTitleInput, "输入节点名称", unit.Dp(42))
+		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return a.layoutWorkflowNodeInspector(gtx, snap, node, spec)
 		}),
@@ -142,9 +152,13 @@ func (a *App) workflowInspectorSectionCard(gtx layout.Context, spec desktopTheme
 	})
 }
 
-func (a *App) handleWorkflowInspectorEvents(gtx layout.Context) {
+func (a *App) handleWorkflowInspectorEvents(gtx layout.Context, node workflowNodeModel) {
+	recordNodeChange := false
 	for a.workflowDeleteNodeButton.Clicked(gtx) {
 		a.deleteSelectedWorkflowNode(a.activeWorkspaceID)
+	}
+	for a.workflowDuplicateNodeButton.Clicked(gtx) {
+		a.duplicateSelectedWorkflowNode(a.activeWorkspaceID)
 	}
 	for a.workflowToggleNodeButton.Clicked(gtx) {
 		a.toggleSelectedWorkflowNodeEnabled(a.activeWorkspaceID)
@@ -152,31 +166,40 @@ func (a *App) handleWorkflowInspectorEvents(gtx layout.Context) {
 	for index, choice := range modeChoices {
 		for a.workflowModeButtons[index].Clicked(gtx) {
 			a.mode = choice.Value
-			a.invalidateNow()
+			recordNodeChange = true
 		}
 	}
 	for index, choice := range qualityChoices {
 		for a.workflowQualityButtons[index].Clicked(gtx) {
 			a.quality = choice.Value
-			a.invalidateNow()
+			recordNodeChange = true
 		}
 	}
 	for index, choice := range formatChoices {
 		for a.workflowFormatButtons[index].Clicked(gtx) {
 			a.format = choice.Value
-			a.invalidateNow()
+			recordNodeChange = true
 		}
 	}
 	for index, choice := range sizeChoices {
 		for a.workflowSizeButtons[index].Clicked(gtx) {
 			a.size = choice.Value
-			a.invalidateNow()
+			recordNodeChange = true
+		}
+	}
+	for index, choice := range batchCountChoices {
+		for a.workflowBatchCountButtons[index].Clicked(gtx) {
+			count, err := strconv.Atoi(choice.Value)
+			if err == nil {
+				a.batchCount = normalizeBatchCount(count)
+				recordNodeChange = true
+			}
 		}
 	}
 	for index, choice := range partialPreviewChoices {
 		for a.workflowPreviewButtons[index].Clicked(gtx) {
 			a.partialImagesInput.SetText(choice.Value)
-			a.invalidateNow()
+			recordNodeChange = true
 		}
 	}
 	for a.workflowAddSourcesButton.Clicked(gtx) {
@@ -187,9 +210,11 @@ func (a *App) handleWorkflowInspectorEvents(gtx layout.Context) {
 		}
 		current := a.parseSourcePathsCached(a.sourcePathsInput.Text())
 		a.setSourcePaths(append(current, paths...))
+		recordNodeChange = true
 	}
 	for a.workflowClearSourcesButton.Clicked(gtx) {
 		a.setSourcePaths(nil)
+		recordNodeChange = true
 	}
 	for a.workflowOpenOutputButton.Clicked(gtx) {
 		if err := openPath(a.outputDirInput.Text()); err != nil {
@@ -199,10 +224,17 @@ func (a *App) handleWorkflowInspectorEvents(gtx layout.Context) {
 	for a.optimizePromptButton.Clicked(gtx) {
 		a.startPromptOptimize()
 	}
+	if recordNodeChange {
+		graph := a.workflowGraph(a.activeWorkspaceID)
+		current, ok := graph.node(node.ID)
+		if ok {
+			a.syncWorkflowNodeControls(a.activeWorkspaceID, current, true)
+		}
+	}
 }
 
 func (a *App) workflowInspectorHeader(gtx layout.Context, node workflowNodeModel, runtimeState workflowNodeRuntime, spec desktopThemeTokens) layout.Dimensions {
-	return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(unit.Dp(5))}.Layout(gtx,
+	children := []layout.FlexChild{
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			children := []layout.FlexChild{
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -228,6 +260,9 @@ func (a *App) workflowInspectorHeader(gtx layout.Context, node workflowNodeModel
 						return a.headerIconButtonIcon(gtx, &a.workflowToggleNodeButton, toggleIcon, !node.Enabled, toggleLabel)
 					}),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return a.headerIconButtonIcon(gtx, &a.workflowDuplicateNodeButton, uiIconCopy, false, "复制"+node.Title)
+					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						return a.headerIconButtonIcon(gtx, &a.workflowDeleteNodeButton, uiIconDelete, false, "删除"+node.Title)
 					}),
 				)
@@ -237,7 +272,20 @@ func (a *App) workflowInspectorHeader(gtx layout.Context, node workflowNodeModel
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return a.label(gtx, chooseNonEmpty(runtimeState.Detail, node.Subtitle), workflowTextSize(spec, 11, 9), spec.Colors.textMuted, font.Normal)
 		}),
-	)
+	}
+	if typeID := workflowNodeTypeID(node); typeID != string(node.Kind) {
+		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			metadata := typeID
+			if version := strings.TrimSpace(node.TypeVersion); version != "" {
+				metadata += " · v" + version
+			}
+			if category := strings.TrimSpace(node.Category); category != "" {
+				metadata = category + " · " + metadata
+			}
+			return a.singleLineLabel(gtx, metadata, workflowTextSize(spec, 10, 9), spec.Colors.textDim, font.Normal)
+		}))
+	}
+	return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(unit.Dp(5))}.Layout(gtx, children...)
 }
 
 func (a *App) layoutWorkflowNodeInspector(gtx layout.Context, snap snapshot, node workflowNodeModel, spec desktopThemeTokens) layout.Dimensions {
@@ -345,10 +393,10 @@ func (a *App) layoutWorkflowGenerateInspector(gtx layout.Context, spec desktopTh
 			return a.workflowChoiceSection(gtx, "常用尺寸", sizeChoices, a.workflowSizeButtons, a.size, commonSizes, spec)
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return a.workflowInspectorKeyValue(gtx, "模型", chooseNonEmpty(a.imageModelInput.Text(), "未配置"), spec)
+			return a.technicalField(gtx, "图像模型", &a.imageModelInput, "gpt-image-2", unit.Dp(42))
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return a.workflowInspectorKeyValue(gtx, "批量", fmt.Sprintf("%d 张", a.batchCount), spec)
+			return a.workflowChoiceSection(gtx, "生成张数", batchCountChoices, a.workflowBatchCountButtons, strconv.Itoa(a.batchCount), nil, spec)
 		}),
 	)
 }
@@ -371,11 +419,7 @@ func (a *App) layoutWorkflowPreviewInspector(gtx layout.Context, snap snapshot, 
 }
 
 func (a *App) layoutWorkflowExportInspector(gtx layout.Context, snap snapshot, spec desktopThemeTokens) layout.Dimensions {
-	path := strings.TrimSpace(a.outputDirInput.Text())
-	if strings.TrimSpace(snap.Result.SavedPath) != "" {
-		path = snap.Result.SavedPath
-	}
-	return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(unit.Dp(10))}.Layout(gtx,
+	children := []layout.FlexChild{
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return a.workflowChoiceSection(gtx, "输出格式", formatChoices, a.workflowFormatButtons, a.format, nil, spec)
 		}),
@@ -383,19 +427,18 @@ func (a *App) layoutWorkflowExportInspector(gtx layout.Context, snap snapshot, s
 			return workflowDivider(gtx, spec.Colors.border)
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return a.workflowInspectorSectionLabel(gtx, "输出位置", "", spec)
-		}),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return a.borderedSurface(gtx, spec.Colors.surface, spec.Metrics.ControlRadius, spec.Colors.border, func(gtx layout.Context) layout.Dimensions {
-				return layout.Inset{Top: 9, Bottom: 9, Left: 10, Right: 10}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-					return a.label(gtx, chooseNonEmpty(path, "未设置"), workflowTextSize(spec, 11, 9), spec.Colors.textMuted, font.Normal)
-				})
-			})
+			return a.technicalField(gtx, "输出目录", &a.outputDirInput, "选择输出目录", unit.Dp(42))
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return a.compactIconTextButton(gtx, &a.workflowOpenOutputButton, uiIconFolder, "打开输出目录", false)
 		}),
-	)
+	}
+	if strings.TrimSpace(snap.Result.SavedPath) != "" {
+		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return a.workflowInspectorKeyValue(gtx, "最近结果", snap.Result.SavedPath, spec)
+		}))
+	}
+	return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(unit.Dp(10))}.Layout(gtx, children...)
 }
 
 func (a *App) workflowChoiceSection(gtx layout.Context, title string, choices []choice, buttons []widget.Clickable, selected string, indexes []int, spec desktopThemeTokens) layout.Dimensions {

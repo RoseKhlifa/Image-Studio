@@ -36,25 +36,19 @@ type simplePaneWidths struct {
 }
 
 type appleHeaderBrandContract struct {
-	iconSize     unit.Dp
-	iconRadius   unit.Dp
-	titleSize    unit.Sp
-	subtitleSize unit.Sp
+	titleSize unit.Sp
 }
 
 func headerInsetsForStyle(style string) layout.Inset {
 	if normalizeDesktopStyle(style) == desktopStyleMacOS {
-		return layout.Inset{Top: 8, Bottom: 8, Left: 20, Right: 20}
+		return layout.Inset{Top: 6, Bottom: 6, Left: 12, Right: 12}
 	}
 	return layout.Inset{Top: 8, Bottom: 8, Left: 12, Right: 12}
 }
 
 func appleHeaderBrandMetrics() appleHeaderBrandContract {
 	return appleHeaderBrandContract{
-		iconSize:     unit.Dp(40),
-		iconRadius:   unit.Dp(14),
-		titleSize:    unit.Sp(16),
-		subtitleSize: unit.Sp(12),
+		titleSize: unit.Sp(13),
 	}
 }
 
@@ -71,9 +65,9 @@ func simplePaneContractForStyle(style string, metrics desktopThemeMetrics, compa
 		return simplePaneContract{
 			preferredLeft:  metrics.LeftPaneWidth,
 			preferredRight: metrics.RightPaneWidth,
-			minimumLeft:    unit.Dp(352),
-			minimumRight:   unit.Dp(300),
-			minimumCenter:  unit.Dp(360),
+			minimumLeft:    unit.Dp(280),
+			minimumRight:   unit.Dp(280),
+			minimumCenter:  unit.Dp(440),
 		}
 	}
 	contract := simplePaneContract{
@@ -250,7 +244,7 @@ func (a *App) layout(gtx layout.Context) layout.Dimensions {
 }
 
 func (a *App) shellEffectsEnabled() bool {
-	return a != nil && !a.reducedEffects && normalizeExperienceMode(a.experienceMode) == experienceModeSimple
+	return a != nil && !a.reducedEffects && normalizeDesktopStyle(a.desktopStyle) != desktopStyleMacOS && normalizeExperienceMode(a.experienceMode) == experienceModeSimple
 }
 
 func (a *App) layoutHeader(gtx layout.Context) layout.Dimensions {
@@ -285,6 +279,14 @@ func (a *App) layoutHeader(gtx layout.Context) layout.Dimensions {
 	}
 	for a.settingsButton.Clicked(gtx) {
 		a.openGeneralSettingsModal()
+	}
+	for a.macToggleSidebarButton.Clicked(gtx) {
+		a.macSidebarHidden = !a.macSidebarHidden
+		a.invalidateNow()
+	}
+	for a.macToggleInspectorButton.Clicked(gtx) {
+		a.macInspectorHidden = !a.macInspectorHidden
+		a.invalidateNow()
 	}
 
 	if normalizeDesktopStyle(a.desktopStyle) == desktopStyleMacOS {
@@ -335,7 +337,17 @@ func (a *App) layoutAppleHeader(gtx layout.Context) layout.Dimensions {
 		return headerInsetsForStyle(desktopStyleMacOS).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-					return a.layoutHeaderBrand(gtx)
+					return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							label := "隐藏生成设置"
+							if a.macSidebarHidden {
+								label = "显示生成设置"
+							}
+							return a.headerIconButtonIcon(gtx, &a.macToggleSidebarButton, uiIconList, !a.macSidebarHidden, label)
+						}),
+						layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
+						layout.Flexed(1, a.layoutHeaderBrand),
+					)
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					return a.layoutExperienceSwitch(gtx)
@@ -346,9 +358,13 @@ func (a *App) layoutAppleHeader(gtx layout.Context) layout.Dimensions {
 				}),
 				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return a.layoutHeaderThemeSelector(gtx)
+					label := "隐藏历史记录"
+					if a.macInspectorHidden {
+						label = "显示历史记录"
+					}
+					return a.headerIconButtonIcon(gtx, &a.macToggleInspectorButton, uiIconHistory, !a.macInspectorHidden, label)
 				}),
-				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+				layout.Rigid(layout.Spacer{Width: unit.Dp(4)}.Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					return a.headerIconButtonIcon(gtx, &a.settingsButton, uiIconSettings, a.generalSettingsOpen, "打开设置")
 				}),
@@ -435,34 +451,11 @@ func (a *App) layoutHeaderBrand(gtx layout.Context) layout.Dimensions {
 func (a *App) layoutAppleHeaderBrand(gtx layout.Context) layout.Dimensions {
 	spec := desktopThemeSpec(a.desktopStyle, a.resolvedThemeMode)
 	contract := appleHeaderBrandMetrics()
-	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle, Gap: gtx.Dp(unit.Dp(14))}.Layout(gtx,
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return fixedWidth(gtx, contract.iconSize, func(gtx layout.Context) layout.Dimensions {
-				return fixedHeight(gtx, contract.iconSize, func(gtx layout.Context) layout.Dimensions {
-					return a.elevatedBorderedSurface(gtx, spec.Colors.surfaceElevated, contract.iconRadius, spec.Colors.border, image.Pt(0, 2), func(gtx layout.Context) layout.Dimensions {
-						return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-							return fixedWidth(gtx, unit.Dp(18), func(gtx layout.Context) layout.Dimensions {
-								return fixedHeight(gtx, unit.Dp(18), func(gtx layout.Context) layout.Dimensions {
-									return uiIconPhoto.Layout(gtx, spec.Colors.accent)
-								})
-							})
-						})
-					})
-				})
-			})
-		}),
-		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return a.titleLabel(gtx, "Image Studio", contract.titleSize)
-				}),
-				layout.Rigid(layout.Spacer{Height: unit.Dp(3)}.Layout),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return a.singleLineLabel(gtx, "图像工作区", contract.subtitleSize, spec.Colors.textMuted, font.Normal)
-				}),
-			)
-		}),
-	)
+	title := strings.TrimSpace(a.currentWorkspaceDisplayName())
+	if title == "" {
+		title = "图像生成"
+	}
+	return a.singleLineLabel(gtx, title, contract.titleSize, spec.Colors.text, font.SemiBold)
 }
 
 func (a *App) layoutFooter(gtx layout.Context, snap snapshot) layout.Dimensions {
@@ -566,6 +559,9 @@ func (a *App) layoutBody(gtx layout.Context, snap snapshot) layout.Dimensions {
 	}
 	if a.experienceMode == experienceModeWorkflow {
 		return a.layoutWorkflowShell(gtx, snap)
+	}
+	if normalizeDesktopStyle(a.desktopStyle) == desktopStyleMacOS {
+		return a.layoutMacSimpleBody(gtx, snap)
 	}
 	width := gtx.Constraints.Max.X
 	spec := desktopThemeSpec(a.desktopStyle, a.resolvedThemeMode)
@@ -803,11 +799,8 @@ func (a *App) layoutWindowsWorkspaceTab(gtx layout.Context, ws workspaceState, a
 	})
 }
 
-func appleWorkspaceTabHeight(active bool) unit.Dp {
-	if active {
-		return unit.Dp(34)
-	}
-	return unit.Dp(32)
+func appleWorkspaceTabHeight(_ bool) unit.Dp {
+	return unit.Dp(28)
 }
 
 func (a *App) layoutAppleWorkspaceTab(gtx layout.Context, ws workspaceState, active bool) layout.Dimensions {

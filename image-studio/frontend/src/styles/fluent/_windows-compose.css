@@ -145,7 +145,7 @@ html[data-platform="windows"][data-ui-family="fluent"] .windows-prompt-actions {
   display: grid;
   min-width: 0;
   flex: 1;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
 }
 

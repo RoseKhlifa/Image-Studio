@@ -45,8 +45,8 @@ export function ControlPanel({
     userIdentifier, partialImages,
     outputFormat, batchCount, editSourceMode, editAutoAspectResolution, batchProcess, loopGeneration,
     sources, currentImage,
-    errorMessage, errorCanRetry, errorRawPath, isRunning, lastPayload, isTestingKey, isOptimizingPrompt,
-    apiMode, requestPolicy, baseURL, profiles, imageModelID,
+    errorMessage, errorCanRetry, errorRawPath, isRunning, lastPayload, isTestingKey, isOptimizingPrompt, isInferringPrompt,
+    apiMode, requestPolicy, baseURL, profiles, aiProfileId, imageModelID,
     customAspectRatios,
     setField, clearError, pushToast,
     selectSourceImage, chooseBatchInputDir, chooseBatchInputFiles, refreshBatchInputDir, removeSource, clearSources, viewSourceOnCanvas,
@@ -54,7 +54,7 @@ export function ControlPanel({
     openCustomAspectRatioModal,
     openCustomSizeModal,
     openUpstreamConfig,
-    submit, cancel, retryLast, optimizePrompt,
+    submit, cancel, retryLast, optimizePrompt, inferPromptFromCanvas,
   } = useStudioStore();
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [promptPopover, setPromptPopover] = useState(false);
@@ -71,12 +71,8 @@ export function ControlPanel({
   }
 
   const promptLen = prompt.length;
-  // 优化按钮只要有任一可用的 Responses profile 或当前 active 已配置就启用。
-  // (实际 prompt 优化在 store.optimizePrompt 里会找到 Responses 那条 profile 跑;
-  // 这里只判断 UI 是否能点。)
-  const hasUsableResponsesProfile = profiles.some(
-    (p) => p.apiMode === "responses" && p.baseURL.trim(),
-  );
+  const aiProfile = profiles.find((profile) => profile.id === aiProfileId && profile.apiMode === "responses");
+  const aiReady = !!aiProfile?.baseURL.trim();
   const capabilityInput = { apiMode, requestPolicy, imageModelID };
   const normalizedSize = normalizeSizeSelection(size, capabilityInput, customAspectRatios);
   const normalizedQuality = normalizeQualitySelection(quality, imageModelID);
@@ -127,7 +123,7 @@ export function ControlPanel({
   const activeQualityLabel = qualityOptions.find((item) => item.value === normalizedQuality)?.label ?? normalizedQuality;
   const availableResolutions = availableResolutionPresets(capabilityInput);
   const optimizeReady = !!(
-    prompt.trim() && (hasUsableResponsesProfile || (apiKey.trim() && baseURL.trim()))
+    prompt.trim() && aiReady
   );
   const compactMacCompose = isMac;
   const compactWindowsCompose = isWindows;
@@ -264,9 +260,12 @@ export function ControlPanel({
         promptPopover={promptPopover}
         setPromptPopover={setPromptPopover}
         optimizeReady={optimizeReady}
+        inferReady={!!currentImage && aiReady}
         isOptimizingPrompt={isOptimizingPrompt}
+        isInferringPrompt={isInferringPrompt}
         onSetPrompt={(value) => setField("prompt", value)}
         onOptimizePrompt={optimizePrompt}
+        onInferPrompt={inferPromptFromCanvas}
       />
 
       {!compactMacCompose && !compactWindowsCompose ? (

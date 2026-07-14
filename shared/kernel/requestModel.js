@@ -419,11 +419,17 @@ export function buildResponsesPayload(payload, sourceDataURLs, options = {}) {
 }
 
 export function buildPromptOptimizePayload(input, sourceDataURLs) {
+  const operation = String(input.mode || "").trim();
+  const isDescribe = operation === "describe";
   let instruction = "Rewrite the user's image prompt into a clearer, more detailed prompt for image generation. Keep the meaning, preserve the requested subject, and only return the improved prompt text. Do not add explanations, labels, markdown, or quotes.";
-  if (String(input.mode || "").trim() === "edit") {
+  let inputText = `Original prompt:\n${normalizePromptText(input.prompt)}`;
+  if (isDescribe) {
+    instruction = "Analyze the attached image and reconstruct a detailed image-generation prompt that could reproduce it. Describe the subject, composition, perspective, lighting, colors, materials, environment, and visual style. Return the prompt in Simplified Chinese. Only return the prompt text; do not add explanations, labels, markdown, or quotes.";
+    inputText = "为所附图片反推一段可用于重新生成相似画面的完整提示词。";
+  } else if (operation === "edit") {
     instruction += " Treat any attached images as reference context and preserve edit intent.";
   }
-  const content = [{ type: "input_text", text: `Original prompt:\n${normalizePromptText(input.prompt)}` }];
+  const content = [{ type: "input_text", text: inputText }];
   for (const dataURL of sourceDataURLs) {
     content.push({ type: "input_image", image_url: dataURL });
   }

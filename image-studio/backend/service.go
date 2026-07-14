@@ -227,8 +227,12 @@ func (s *Service) OptimizePrompt(opts PromptOptimizeOptions) (string, error) {
 	if strings.TrimSpace(opts.APIKey) == "" {
 		return "", errors.New("API Key 不能为空")
 	}
-	if strings.TrimSpace(opts.Prompt) == "" {
+	operation := strings.TrimSpace(opts.Mode)
+	if operation != "describe" && strings.TrimSpace(opts.Prompt) == "" {
 		return "", errors.New("提示词不能为空")
+	}
+	if operation == "describe" && len(opts.collectPaths()) == 0 {
+		return "", errors.New("图片反推必须提供画布图片")
 	}
 	baseURL, err := client.ValidateBaseURL(opts.BaseURL)
 	if err != nil {

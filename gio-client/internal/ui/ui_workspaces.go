@@ -159,6 +159,7 @@ func (a *App) saveActiveWorkspaceSnapshot() {
 }
 
 func (a *App) applyWorkspace(ws workspaceState) {
+	a.clearWorkflowNodeEditor("")
 	a.promptInput.SetText(ws.Prompt)
 	a.negativePromptInput.SetText(ws.NegativePrompt)
 	a.mode = ws.Mode

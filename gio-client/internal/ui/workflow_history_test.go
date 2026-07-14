@@ -255,3 +255,29 @@ func TestWorkflowNodeCatalogEditsParticipateInHistory(t *testing.T) {
 		t.Fatal("undo did not re-enable generate")
 	}
 }
+
+func TestWorkflowNodePropertiesAndTitleParticipateInHistory(t *testing.T) {
+	app := newWorkflowHistoryTestApp("ws-one")
+	graph := app.workflowGraph("ws-one")
+	prompt, _ := graph.node("prompt")
+	properties := cloneWorkflowProperties(prompt.Properties)
+	properties[workflowPropertyPrompt] = "custom branch prompt"
+	if !app.configureWorkflowNode("ws-one", prompt.ID, "主分支提示词", properties, true) {
+		t.Fatal("configure prompt returned false")
+	}
+	configured, _ := app.workflowGraph("ws-one").node(prompt.ID)
+	if configured.Title != "主分支提示词" || configured.Properties[workflowPropertyPrompt] != "custom branch prompt" {
+		t.Fatalf("configured prompt=%+v", configured)
+	}
+	app.workflowEditingNodeKey = workflowNodeEditorKey("ws-one", prompt.ID)
+	if !app.undoWorkflowGraph("ws-one") {
+		t.Fatal("undo properties returned false")
+	}
+	restored, _ := app.workflowGraph("ws-one").node(prompt.ID)
+	if restored.Title != prompt.Title || restored.Properties[workflowPropertyPrompt] != prompt.Properties[workflowPropertyPrompt] {
+		t.Fatalf("restored prompt=%+v", restored)
+	}
+	if app.workflowEditingNodeKey != "" {
+		t.Fatalf("undo retained stale editor key %q", app.workflowEditingNodeKey)
+	}
+}

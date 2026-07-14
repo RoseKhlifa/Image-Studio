@@ -65,6 +65,13 @@ export type PromptOptimizeOptionsLike = {
   proxyURL?: string;
   imagePaths: string[];
   imagePath: string;
+  sourceImages?: Array<{
+    path?: string;
+    name?: string;
+    mimeType?: string | null;
+    imageB64?: string | null;
+    imageBlob?: Blob | null;
+  }>;
 };
 
 export type ProbeUpstreamOptionsLike = {

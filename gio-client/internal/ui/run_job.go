@@ -30,15 +30,36 @@ func (a *App) startRun() {
 	a.syncBatchSettingsFromInputs()
 	workflowMode := normalizeExperienceMode(a.experienceMode) == experienceModeWorkflow
 	graph := workflowGraphModel{}
-	requireWorkflowSource := client.Mode(a.mode) == client.ModeEdit || a.batchMode
+	plan := workflowExecutionPlan{}
+	workflowWorkspaceID := ""
+	workflowOutputID := ""
+	total := normalizeBatchCount(a.batchCount)
 	if workflowMode {
 		graph = a.workflowGraph(a.activeWorkspaceID)
-		if err := validateWorkflowForRun(graph, requireWorkflowSource); err != nil {
+		selectedID := a.selectedWorkflowNode(a.activeWorkspaceID)
+		if selected, ok := graph.node(selectedID); ok {
+			a.syncWorkflowNodeControls(a.activeWorkspaceID, selected, false)
+			graph = a.workflowGraph(a.activeWorkspaceID)
+		}
+		preferredOutputID := workflowPreferredOutputNodeID(graph, selectedID)
+		var err error
+		plan, err = buildWorkflowExecutionPlan(graph, preferredOutputID, false)
+		if err != nil {
 			a.appendLog("工作流无效: " + err.Error())
 			return
 		}
+		workflowWorkspaceID = a.activeWorkspaceID
+		workflowOutputID = plan.Export.ID
 	}
-	if client.Mode(a.mode) == client.ModeEdit && len(a.sourcePaths()) == 0 {
+	cfg := a.currentConfig()
+	if workflowMode {
+		cfg, total = a.applyWorkflowExecutionPlan(cfg, plan)
+		if (cfg.Mode == client.ModeEdit || a.batchMode) && len(plan.Sources) == 0 {
+			a.appendLog("工作流无效: 生成节点 " + plan.Generate.Title + " 在图生图模式下需要参考图输入")
+			return
+		}
+	}
+	if !workflowMode && cfg.Mode == client.ModeEdit && len(cfg.SourcePaths) == 0 && len(cfg.SourceImageDataURLs) == 0 {
 		snap := a.readSnapshot()
 		if strings.TrimSpace(snap.Result.SavedPath) == "" && strings.TrimSpace(snap.Result.Item.ImageB64) != "" {
 			if normalizeKernelRuntimeMode(a.kernelRuntimeMode) != "remote" {
@@ -50,14 +71,12 @@ func (a *App) startRun() {
 				a.appendLog("当前结果未落盘，无法直接用作源图。")
 				return
 			}
+			cfg = a.currentConfig()
 		}
 	}
-	cfg := a.currentConfig()
-	if workflowMode && !workflowEdgeConnected(graph, workflowEdgeModel{
-		FromNode: "source", FromPort: "image", ToNode: "generate", ToPort: "source",
-	}) {
-		cfg.SourcePaths = nil
-		cfg.SourceImageDataURLs = nil
+	if cfg.Mode == client.ModeEdit && !a.batchMode && len(cfg.SourcePaths) == 0 && len(cfg.SourceImageDataURLs) == 0 {
+		a.appendLog("图生图模式需要在当前分支的参考图节点中配置至少一张图像。")
+		return
 	}
 	if strings.TrimSpace(cfg.APIKey) == "" || strings.TrimSpace(cfg.BaseURL) == "" {
 		return
@@ -66,7 +85,7 @@ func (a *App) startRun() {
 		a.appendLog("请先填写提示词，再开始生成。")
 		return
 	}
-	if a.batchMode && strings.TrimSpace(a.batchInputDirInput.Text()) == "" && len(a.sourcePaths()) == 0 {
+	if a.batchMode && strings.TrimSpace(a.batchInputDirInput.Text()) == "" && len(cfg.SourcePaths) == 0 {
 		a.appendLog("请先为批处理选择输入目录或多张源图。")
 		return
 	}
@@ -74,12 +93,11 @@ func (a *App) startRun() {
 		a.appendLog("请先为循环出图配置自动另存为路径。")
 		return
 	}
-	total := normalizeBatchCount(a.batchCount)
 	if a.loopEnabled {
 		total = normalizeLoopGenerationCount(a.loopTotalCount)
 	}
 	if a.batchMode {
-		batchSources, err := a.batchSourcePathsForRun()
+		batchSources, err := a.batchSourcePathsForRunWithManual(cfg.SourcePaths)
 		if err != nil {
 			a.appendLog("读取批处理目录失败: " + err.Error())
 			return
@@ -99,7 +117,7 @@ func (a *App) startRun() {
 		a.appendLog(runConcurrencyLimitError(cfg.APIMode, limit, requiredConcurrency, a.batchMode, a.loopEnabled))
 		return
 	}
-	a.startRunWithConfig(cfg, total)
+	a.startRunWithConfig(cfg, total, workflowWorkspaceID, workflowOutputID)
 }
 
 func parseConcurrencyLimit(raw string) int {
@@ -205,27 +223,32 @@ func (a *App) retryLastRun() {
 	cfg := a.lastRunConfig
 	total := a.lastRunBatchCount
 	ok := a.lastRunValid
+	workflowWorkspaceID := a.lastRunWorkflowWorkspace
+	workflowOutputID := a.lastRunWorkflowOutput
 	a.mu.Unlock()
 	if !ok {
 		return
 	}
 	if normalizeExperienceMode(a.experienceMode) == experienceModeWorkflow {
 		graph := a.workflowGraph(a.activeWorkspaceID)
-		if err := validateWorkflowForRun(graph, cfg.Mode == client.ModeEdit || a.batchMode); err != nil {
+		if workflowWorkspaceID != a.activeWorkspaceID {
+			a.appendLog("上次运行属于其他工作区，无法在当前工作区重试。")
+			return
+		}
+		plan, err := buildWorkflowExecutionPlan(graph, workflowOutputID, cfg.Mode == client.ModeEdit || a.batchMode)
+		if err != nil {
 			a.appendLog("工作流无效: " + err.Error())
 			return
 		}
-		if !workflowEdgeConnected(graph, workflowEdgeModel{
-			FromNode: "source", FromPort: "image", ToNode: "generate", ToPort: "source",
-		}) {
+		if len(plan.Sources) == 0 {
 			cfg.SourcePaths = nil
 			cfg.SourceImageDataURLs = nil
 		}
 	}
-	a.startRunWithConfig(cfg, total)
+	a.startRunWithConfig(cfg, total, workflowWorkspaceID, workflowOutputID)
 }
 
-func (a *App) startRunWithConfig(cfg kernel.Config, total int) {
+func (a *App) startRunWithConfig(cfg kernel.Config, total int, workflowWorkspaceID string, workflowOutputID string) {
 	if a.isRunning() {
 		return
 	}
@@ -234,7 +257,7 @@ func (a *App) startRunWithConfig(cfg kernel.Config, total int) {
 	total, runConcurrency := buildRunExecutionPlan(total, batchMode, a.batchConcurrency, loopEnabled, a.loopConcurrency)
 	batchSources := []string(nil)
 	if batchMode {
-		batchSources = a.batchSourcePaths()
+		batchSources, _ = a.batchSourcePathsForRunWithManual(cfg.SourcePaths)
 	}
 	batchOutputDir := a.effectiveBatchOutputDir()
 	batchOutputPrefix := a.effectiveBatchOutputPrefix()
@@ -259,6 +282,8 @@ func (a *App) startRunWithConfig(cfg kernel.Config, total int) {
 	a.lastRunBatchCount = total
 	a.lastRunConcurrency = runConcurrency
 	a.lastRunValid = true
+	a.lastRunWorkflowWorkspace = strings.TrimSpace(workflowWorkspaceID)
+	a.lastRunWorkflowOutput = strings.TrimSpace(workflowOutputID)
 	a.lastErrorMessage = ""
 	a.status = fmt.Sprintf("正在提交 1/%d", total)
 	a.activePromptGroup = historyPromptGroup{}
@@ -757,7 +782,11 @@ func (a *App) batchSourcePaths() []string {
 }
 
 func (a *App) batchSourcePathsForRun() ([]string, error) {
-	manual := a.sourcePaths()
+	return a.batchSourcePathsForRunWithManual(a.sourcePaths())
+}
+
+func (a *App) batchSourcePathsForRunWithManual(manual []string) ([]string, error) {
+	manual = append([]string(nil), manual...)
 	if len(manual) > 0 {
 		return manual, nil
 	}

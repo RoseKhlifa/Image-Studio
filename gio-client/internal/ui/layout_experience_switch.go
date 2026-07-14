@@ -16,7 +16,7 @@ type experienceSwitchContract struct {
 
 func experienceSwitchContractForStyle(style string, spec desktopThemeTokens) experienceSwitchContract {
 	if normalizeDesktopStyle(style) == desktopStyleMacOS {
-		return experienceSwitchContract{width: unit.Dp(208), height: unit.Dp(34), radius: unit.Dp(17)}
+		return experienceSwitchContract{width: unit.Dp(176), height: unit.Dp(28), radius: unit.Dp(7)}
 	}
 	return experienceSwitchContract{width: unit.Dp(224), radius: spec.Metrics.ControlRadius}
 }
@@ -98,7 +98,7 @@ func (a *App) layoutAppleExperienceSwitchButton(
 		fill,
 		hover,
 		border,
-		unit.Dp(15),
+		spec.Metrics.ControlRadius,
 		layout.Inset{Top: 4, Bottom: 4, Left: 10, Right: 10},
 		func(gtx layout.Context) layout.Dimensions {
 			semantic.LabelOp(label).Add(gtx.Ops)

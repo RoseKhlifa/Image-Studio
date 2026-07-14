@@ -11,6 +11,8 @@ import (
 	"gioui.org/font"
 	"gioui.org/io/semantic"
 	"gioui.org/layout"
+	"gioui.org/op"
+	"gioui.org/op/clip"
 	"gioui.org/unit"
 	"gioui.org/widget"
 )
@@ -91,14 +93,13 @@ func (a *App) handleWorkflowCommandEvents(gtx layout.Context, snap snapshot) {
 }
 
 func (a *App) layoutWorkflowCommandBar(gtx layout.Context, snap snapshot, spec desktopThemeTokens) layout.Dimensions {
-	compact := gtx.Constraints.Max.X < gtx.Dp(unit.Dp(1180))
-	verticalPadding := unit.Dp(6)
 	if spec.Style == desktopStyleMacOS {
-		verticalPadding = unit.Dp(4)
+		return a.layoutMacWorkflowCommandBar(gtx, snap, spec)
 	}
+	compact := gtx.Constraints.Max.X < gtx.Dp(unit.Dp(1180))
 	return a.borderedSurface(gtx, spec.Colors.toolbar, unit.Dp(0), spec.Colors.border, func(gtx layout.Context) layout.Dimensions {
 		gtx.Constraints.Min = gtx.Constraints.Max
-		return layout.Inset{Top: verticalPadding, Bottom: verticalPadding, Left: 10, Right: 10}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Inset{Top: 6, Bottom: 6, Left: 10, Right: 10}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					return a.workflowCommandStatus(gtx, snap, spec, compact)
@@ -167,6 +168,78 @@ func (a *App) layoutWorkflowCommandBar(gtx layout.Context, snap snapshot, spec d
 						return a.workflowPrimaryCommand(gtx, spec, &a.workflowCancelButton, uiIconCancel, "停止", spec.Colors.danger)
 					}
 					return a.workflowPrimaryCommand(gtx, spec, &a.workflowRunButton, uiIconPlay, chooseString(compact, "运行", "运行工作流"), spec.Colors.accent)
+				}),
+			)
+		})
+	})
+}
+
+func (a *App) layoutMacWorkflowCommandBar(gtx layout.Context, snap snapshot, spec desktopThemeTokens) layout.Dimensions {
+	const compact = true
+	return a.borderedSurface(gtx, spec.Colors.toolbar, unit.Dp(0), spec.Colors.border, func(gtx layout.Context) layout.Dimensions {
+		gtx.Constraints.Min = gtx.Constraints.Max
+		return layout.Inset{Top: 4, Bottom: 4, Left: 10, Right: 10}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return a.workflowCommandStatus(gtx, snap, spec, compact)
+				}),
+				layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return a.workflowCommandGroup(gtx, spec,
+						func(gtx layout.Context) layout.Dimensions {
+							return a.workflowToolbarButtonEnabled(gtx, spec, &a.workflowUndoButton, uiIconUndo, "撤销", false, compact, a.canUndoWorkflowGraph(a.activeWorkspaceID))
+						},
+						func(gtx layout.Context) layout.Dimensions {
+							return a.workflowToolbarButtonEnabled(gtx, spec, &a.workflowRedoButton, uiIconRedo, "重做", false, compact, a.canRedoWorkflowGraph(a.activeWorkspaceID))
+						},
+						func(gtx layout.Context) layout.Dimensions {
+							return a.workflowToolbarButton(gtx, spec, &a.workflowSaveButton, uiIconSave, "保存", false, compact)
+						},
+						func(gtx layout.Context) layout.Dimensions {
+							return a.workflowToolbarButton(gtx, spec, &a.workflowLoadButton, uiIconFolder, "加载", false, compact)
+						},
+					)
+				}),
+				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return a.workflowCommandGroup(gtx, spec,
+						func(gtx layout.Context) layout.Dimensions {
+							return a.workflowToolbarButton(gtx, spec, &a.workflowZoomOutButton, uiIconZoomOut, "缩小", false, compact)
+						},
+						func(gtx layout.Context) layout.Dimensions {
+							return a.workflowToolbarButton(gtx, spec, &a.workflowFitButton, uiIconFit, "适合画布", false, compact)
+						},
+						func(gtx layout.Context) layout.Dimensions {
+							return a.workflowToolbarButton(gtx, spec, &a.workflowZoomInButton, uiIconZoomIn, "放大", false, compact)
+						},
+					)
+				}),
+				layout.Flexed(1, layout.Spacer{}.Layout),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return a.workflowCommandGroup(gtx, spec,
+						func(gtx layout.Context) layout.Dimensions {
+							return a.workflowToolbarButton(gtx, spec, &a.workflowDetachCanvasButton, uiIconOpenWindow, "画布窗口", false, compact)
+						},
+						func(gtx layout.Context) layout.Dimensions {
+							return a.workflowToolbarButton(gtx, spec, &a.workflowDetachConsoleButton, uiIconConsole, "控制台窗口", false, compact)
+						},
+						func(gtx layout.Context) layout.Dimensions {
+							return a.workflowToolbarButton(gtx, spec, &a.workflowOpenProgressButton, uiIconProgress, "进度窗口", false, compact)
+						},
+						func(gtx layout.Context) layout.Dimensions {
+							return a.workflowToolbarButton(gtx, spec, &a.workflowToggleConsoleButton, uiIconConsole, chooseString(a.workflowConsoleOpen, "隐藏底部", "显示底部"), a.workflowConsoleOpen, compact)
+						},
+						func(gtx layout.Context) layout.Dimensions {
+							return a.workflowToolbarButton(gtx, spec, &a.workflowResetGraphButton, uiIconRefresh, "重置布局", false, compact)
+						},
+					)
+				}),
+				layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					if snap.Running {
+						return a.workflowPrimaryCommand(gtx, spec, &a.workflowCancelButton, uiIconCancel, "停止", spec.Colors.danger)
+					}
+					return a.workflowPrimaryCommand(gtx, spec, &a.workflowRunButton, uiIconPlay, "运行", spec.Colors.accent)
 				}),
 			)
 		})
@@ -324,7 +397,7 @@ func (a *App) workflowCommandGroup(gtx layout.Context, spec desktopThemeTokens, 
 	if spec.Style != desktopStyleMacOS {
 		return content(gtx)
 	}
-	return a.borderedSurface(gtx, spec.Colors.surface, unit.Dp(12), spec.Colors.border, content)
+	return a.borderedSurface(gtx, spec.Colors.surface, spec.Metrics.ControlRadius, spec.Colors.border, content)
 }
 
 func (a *App) workflowToolbarButton(gtx layout.Context, spec desktopThemeTokens, button *widget.Clickable, icon *widget.Icon, label string, selected bool, compact bool) layout.Dimensions {
@@ -391,8 +464,6 @@ func (a *App) workflowToolbarButtonEnabled(gtx layout.Context, spec desktopTheme
 	textSize := workflowTextSize(spec, 12, 11)
 	height := minimumTextControlHeight(gtx, spec.Metrics.ControlHeight, a.scaledSp(textSize), unit.Dp(8))
 	content := func(gtx layout.Context) layout.Dimensions {
-		semantic.LabelOp(label).Add(gtx.Ops)
-		semantic.EnabledOp(false).Add(gtx.Ops)
 		return layout.Inset{Left: 8, Right: 8}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				children := []layout.FlexChild{
@@ -417,10 +488,22 @@ func (a *App) workflowToolbarButtonEnabled(gtx layout.Context, spec desktopTheme
 		})
 	}
 	return fixedHeight(gtx, height, func(gtx layout.Context) layout.Dimensions {
+		macro := op.Record(gtx.Ops)
+		var dims layout.Dimensions
 		if compact {
-			return fixedWidth(gtx, spec.Metrics.IconTargetSize, content)
+			dims = fixedWidth(gtx, spec.Metrics.IconTargetSize, content)
+		} else {
+			dims = content(gtx)
 		}
-		return content(gtx)
+		call := macro.Stop()
+		area := clip.Rect(image.Rectangle{Max: dims.Size}).Push(gtx.Ops)
+		semantic.Button.Add(gtx.Ops)
+		semantic.LabelOp(label).Add(gtx.Ops)
+		semantic.SelectedOp(selected).Add(gtx.Ops)
+		semantic.EnabledOp(false).Add(gtx.Ops)
+		call.Add(gtx.Ops)
+		area.Pop()
+		return dims
 	})
 }
 

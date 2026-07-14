@@ -13,6 +13,7 @@ export function normalizeResponsesTransport(value: unknown): ResponsesTransport 
 // localStorage 键名规范:
 //   gptcodex.profiles        —— UpstreamProfile[] JSON(无 apiKey,key 在 keyring)
 //   gptcodex.activeProfileId —— 当前 active profile 的 id
+//   gptcodex.aiProfileId     —— AI 优化 / 图片反推专用 Responses profile
 //
 // 老格式(v0.1.5 及之前)在 bootstrap 一次性迁移:
 //   gptcodex.apiMode                            "responses" | "images"
@@ -23,6 +24,7 @@ export function normalizeResponsesTransport(value: unknown): ResponsesTransport 
 //   keyring api-key:responses / api-key:images  → 搬到 api-key:profile:<newId>
 export const PROFILES_LS_KEY = "gptcodex.profiles";
 export const ACTIVE_PROFILE_LS_KEY = "gptcodex.activeProfileId";
+export const AI_PROFILE_LS_KEY = "gptcodex.aiProfileId";
 
 // crypto.randomUUID 在 WebView2 / 现代 Chromium 都有。fallback 防御老内核。
 export function genProfileId(): string {
@@ -98,6 +100,29 @@ export function pickActiveProfile(
   if (byId) return byId;
   const sorted = [...profiles].sort((a, b) => (b.lastUsedAt ?? 0) - (a.lastUsedAt ?? 0));
   return sorted[0] ?? profiles[0];
+}
+
+export function pickAIProfile(
+  profiles: UpstreamProfile[],
+  aiProfileId: string,
+  activeProfileId = "",
+): UpstreamProfile | null {
+  const explicit = profiles.find((profile) => profile.id === aiProfileId && profile.apiMode === "responses");
+  if (explicit) return explicit;
+  const active = profiles.find((profile) => profile.id === activeProfileId && profile.apiMode === "responses");
+  if (active) return active;
+  return profiles.find((profile) => profile.apiMode === "responses") ?? null;
+}
+
+export function persistAIProfileId(id: string): void {
+  try {
+    if (id) localStorage.setItem(AI_PROFILE_LS_KEY, id);
+    else localStorage.removeItem(AI_PROFILE_LS_KEY);
+  } catch {}
+}
+
+export function loadStoredAIProfileId(): string {
+  try { return localStorage.getItem(AI_PROFILE_LS_KEY) ?? ""; } catch { return ""; }
 }
 
 export function nextDefaultProfileName(profiles: UpstreamProfile[] = []): string {

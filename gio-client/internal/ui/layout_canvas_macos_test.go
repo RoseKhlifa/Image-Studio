@@ -61,8 +61,8 @@ func TestMacCanvasChromeDimensions(t *testing.T) {
 		hasCanvasResult: true,
 		currentTool:     canvasToolPan,
 	})
-	if toolbar.Size.X != 1400 || toolbar.Size.Y < int(spec.Metrics.ControlHeight*2) {
-		t.Fatalf("Apple toolbar size=%v want full width and two control rows", toolbar.Size)
+	if toolbar.Size.X != 1400 || toolbar.Size.Y <= int(spec.Metrics.ControlHeight) || toolbar.Size.Y >= 60 {
+		t.Fatalf("Apple toolbar size=%v want a compact single control row", toolbar.Size)
 	}
 	compactToolbar := app.layoutMacCanvasToolbar(newContext(360, 300), snapshot{}, macCanvasToolbarState{
 		hasCanvasResult: true,
@@ -72,10 +72,8 @@ func TestMacCanvasChromeDimensions(t *testing.T) {
 	if compactToolbar.Size.X != 360 {
 		t.Fatalf("compact Apple toolbar width=%d want 360", compactToolbar.Size.X)
 	}
-	for index := range app.macCanvasToolbarLists {
-		if app.macCanvasToolbarLists[index].List.Axis != layout.Horizontal || !app.macCanvasToolbarLists[index].List.ScrollAnyAxis {
-			t.Fatalf("Apple toolbar list %d is not horizontally scrollable", index)
-		}
+	if app.macCanvasToolbarList.List.Axis != layout.Horizontal || !app.macCanvasToolbarList.List.ScrollAnyAxis {
+		t.Fatal("Apple toolbar is not horizontally scrollable")
 	}
 	if dims := app.layoutMacCanvasStatusBar(newContext(800, 100), snapshot{}); dims.Size != (image.Point{}) {
 		t.Fatalf("idle Apple status size=%v", dims.Size)
@@ -83,6 +81,31 @@ func TestMacCanvasChromeDimensions(t *testing.T) {
 	running := app.layoutMacCanvasStatusBar(newContext(800, 100), snapshot{Running: true, Status: "正在生成"})
 	if running.Size.X != 800 || running.Size.Y <= 0 || running.Size.Y >= 60 {
 		t.Fatalf("running Apple status size=%v", running.Size)
+	}
+}
+
+func TestMacCanvasEmptyStateKeepsReadableHierarchyAndPrimaryAction(t *testing.T) {
+	previousTheme := installedDesktopTheme
+	defer installDesktopThemeSpec(previousTheme.Style, previousTheme.ColorMode)
+	installDesktopThemeSpec(desktopStyleMacOS, desktopColorModeLight)
+	var (
+		ops    op.Ops
+		router input.Router
+	)
+	gtx := layout.Context{
+		Ops:         &ops,
+		Source:      router.Source(),
+		Metric:      unit.Metric{PxPerDp: 1, PxPerSp: 1},
+		Constraints: layout.Constraints{Max: image.Pt(400, 260)},
+	}
+	app := &App{th: material.NewTheme(), desktopStyle: desktopStyleMacOS, resolvedThemeMode: desktopColorModeLight, fontScale: 1}
+	dims := app.layoutMacCanvasEmptyState(gtx)
+	if dims.Size.X != 280 || dims.Size.Y < 130 || dims.Size.Y > 220 {
+		t.Fatalf("Apple empty state size=%v want 280px wide with a compact readable hierarchy", dims.Size)
+	}
+	router.Frame(&ops)
+	if _, ok := semanticTreeButtonByLabel(router.AppendSemantics(nil), "选择图像"); !ok {
+		t.Fatal("Apple empty state primary action is missing an accessible label")
 	}
 }
 
@@ -106,13 +129,13 @@ func TestMacCanvasToolbarControlSemantics(t *testing.T) {
 	app := &App{th: material.NewTheme(), desktopStyle: desktopStyleMacOS, resolvedThemeMode: desktopColorModeLight, fontScale: 1}
 	layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return app.macCanvasToolbarButton(gtx, spec, &selected, uiIconPanTool, "移动", true, false)
+			return app.macCanvasToolbarIconButton(gtx, spec, &selected, uiIconPanTool, "移动", true, false)
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return app.macCanvasToolbarButton(gtx, spec, &unselected, uiIconBrush, "蒙版", false, false)
+			return app.macCanvasToolbarIconButton(gtx, spec, &unselected, uiIconBrush, "蒙版", false, false)
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return app.macCanvasToolbarButton(gtx, spec, &disabled, uiIconUndo, "撤销", false, true)
+			return app.macCanvasToolbarIconButton(gtx, spec, &disabled, uiIconUndo, "撤销", false, true)
 		}),
 	)
 	router.Frame(&ops)

@@ -24,11 +24,13 @@ export type UpstreamConfigExportFile = {
   version: 1;
   exportedAt: string;
   activeProfileId: string;
+  aiProfileId?: string;
   profiles: UpstreamConfigExportProfile[];
 };
 
 export type ParsedUpstreamConfigImport = {
   activeProfileId: string;
+  aiProfileId?: string;
   profiles: UpstreamConfigExportProfile[];
 };
 
@@ -53,11 +55,13 @@ export type UpstreamConfigImportActions = {
     patch: Partial<Omit<UpstreamProfile, "id" | "createdAt">> & { apiKey?: string },
   ) => Promise<boolean>;
   setActiveProfile: (id: string) => Promise<void>;
+  setAIProfile?: (id: string) => Promise<boolean>;
 };
 
 export type AppliedUpstreamConfigImport = {
   importedCount: number;
   activeProfileId: string;
+  aiProfileId?: string;
   importedProfileIds: string[];
 };
 
@@ -273,11 +277,13 @@ export function buildUpstreamConfigExportFile(
   profiles: UpstreamProfile[],
   activeProfileId: string,
   apiKeysById: Record<string, string>,
+  aiProfileId = "",
 ): UpstreamConfigExportFile {
   return {
     version: 1,
     exportedAt: new Date().toISOString(),
     activeProfileId,
+    ...(aiProfileId ? { aiProfileId } : {}),
     profiles: profiles.map((profile) => ({
       ...profile,
       responsesTransport: profile.responsesTransport === "websocket" ? "websocket" : "sse",
@@ -302,8 +308,10 @@ export function parseUpstreamConfigImportFile(rawJSON: string): ParsedUpstreamCo
     throw new Error("暂不支持这类 JSON。当前支持：本应用导出文件、newapi_channel_conn、OpenCode provider 配置");
   }
   const activeProfileId = typeof parsed?.activeProfileId === "string" ? parsed.activeProfileId.trim() : "";
+  const aiProfileId = typeof parsed?.aiProfileId === "string" ? parsed.aiProfileId.trim() : "";
   return {
     activeProfileId,
+    ...(aiProfileId ? { aiProfileId } : {}),
     profiles,
   };
 }
@@ -385,10 +393,17 @@ export async function applyParsedUpstreamConfigImport(
   if (nextActiveProfileId) {
     await actions.setActiveProfile(nextActiveProfileId);
   }
+  const nextAIProfileId = parsed.aiProfileId?.trim()
+    ? (originalToActualID.get(parsed.aiProfileId.trim()) ?? "")
+    : "";
+  if (nextAIProfileId && actions.setAIProfile) {
+    await actions.setAIProfile(nextAIProfileId);
+  }
 
   return {
     importedCount: parsed.profiles.length,
     activeProfileId: nextActiveProfileId,
+    ...(nextAIProfileId ? { aiProfileId: nextAIProfileId } : {}),
     importedProfileIds,
   };
 }

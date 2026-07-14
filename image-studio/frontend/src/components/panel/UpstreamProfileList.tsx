@@ -6,7 +6,9 @@ export function UpstreamProfileList({
   profiles,
   selectedId,
   activeProfileId,
+  aiProfileId,
   draftId,
+  draftAPIMode,
   isAndroidPhone,
   canSyncCodexConfig,
   isSyncingCodexConfig,
@@ -18,12 +20,15 @@ export function UpstreamProfileList({
   onHandleImport,
   onHandleQuickImport,
   onHandleSetActive,
+  onHandleSetAI,
   onHandleSyncCodex,
 }: {
   profiles: UpstreamProfile[];
   selectedId: string;
   activeProfileId: string;
+  aiProfileId: string;
   draftId?: string;
+  draftAPIMode?: UpstreamProfile["apiMode"];
   isAndroidPhone: boolean;
   canSyncCodexConfig: boolean;
   isSyncingCodexConfig: boolean;
@@ -35,6 +40,7 @@ export function UpstreamProfileList({
   onHandleImport: () => void | Promise<void>;
   onHandleQuickImport: () => void | Promise<void>;
   onHandleSetActive: () => void | Promise<void>;
+  onHandleSetAI: () => void | Promise<void>;
   onHandleSyncCodex: () => void | Promise<void>;
 }) {
   const { usesFluentUI } = usePlatform();
@@ -49,6 +55,7 @@ export function UpstreamProfileList({
             {profiles.map((p) => {
               const isSel = p.id === selectedId;
               const isActive = p.id === activeProfileId;
+              const isAI = p.id === aiProfileId;
               return (
                 <button
                   key={p.id}
@@ -61,10 +68,12 @@ export function UpstreamProfileList({
                   } ${isAndroidPhone ? "min-w-[208px]" : "mb-1 w-full"} ${usesFluentUI ? "rounded-[8px]" : "rounded-[12px]"}`}
                 >
                   <span
-                    title={isActive ? "当前激活" : "点列表切换 selected;点「设为激活」激活"}
+                    title={isActive ? "当前生图渠道" : "选择后可设为生图渠道"}
                     className={`h-2 w-2 shrink-0 rounded-full ${isActive ? "bg-[var(--accent)] shadow-[0_0_5px_rgb(0_122_255_/_0.6)]" : "bg-zinc-300 dark:bg-zinc-700"}`}
                   />
                   <span className="min-w-0 flex-1 truncate break-words text-[13px] font-medium [overflow-wrap:anywhere]">{p.name}</span>
+                  {isActive ? <span className="shrink-0 text-[9px] font-medium text-[var(--accent)]">生图</span> : null}
+                  {isAI ? <span className="shrink-0 text-[9px] font-medium text-emerald-600 dark:text-emerald-400">AI</span> : null}
                   <span className="shrink-0 text-[9px] uppercase tracking-wider opacity-70">
                     {p.apiMode === "responses" ? "R" : "I"}
                   </span>
@@ -137,15 +146,25 @@ export function UpstreamProfileList({
           <Trash2 className="h-3 w-3" />
         </button>
       </div>
-      {draftId && draftId !== activeProfileId ? (
+      <div className="grid grid-cols-2 gap-1.5">
         <button
           type="button"
           onClick={() => void onHandleSetActive()}
-          className={`platform-action-btn inline-flex items-center justify-center gap-1 border border-[color:var(--accent)]/30 bg-[var(--accent-soft)] px-3 py-1.5 text-[11px] font-medium text-[var(--accent)] transition-colors hover:bg-[color:var(--accent)]/15 ${usesFluentUI ? "rounded-[8px]" : "rounded-full"}`}
+          disabled={!draftId || draftId === activeProfileId}
+          className={`platform-action-btn inline-flex min-w-0 items-center justify-center border border-[color:var(--accent)]/30 bg-[var(--accent-soft)] px-2 py-1.5 text-[11px] font-medium text-[var(--accent)] transition-colors hover:bg-[color:var(--accent)]/15 disabled:cursor-default disabled:opacity-45 ${usesFluentUI ? "rounded-[8px]" : "rounded-full"}`}
         >
-          设为当前激活
+          {draftId === activeProfileId ? "当前生图" : "设为生图"}
         </button>
-      ) : null}
+        <button
+          type="button"
+          onClick={() => void onHandleSetAI()}
+          disabled={!draftId || draftAPIMode !== "responses" || draftId === aiProfileId}
+          title={draftAPIMode === "responses" ? "用于 AI 优化与图片反推" : "AI 渠道必须使用 Responses API"}
+          className={`platform-action-btn inline-flex min-w-0 items-center justify-center border border-emerald-500/30 bg-emerald-500/10 px-2 py-1.5 text-[11px] font-medium text-emerald-700 transition-colors hover:bg-emerald-500/15 disabled:cursor-default disabled:opacity-45 dark:text-emerald-300 ${usesFluentUI ? "rounded-[8px]" : "rounded-full"}`}
+        >
+          {draftId === aiProfileId ? "当前 AI" : "设为 AI"}
+        </button>
+      </div>
     </aside>
   );
 }

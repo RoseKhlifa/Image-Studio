@@ -1028,6 +1028,32 @@ test("optimizePromptRemote extracts output_text", async () => {
   });
 });
 
+test("optimizePromptRemote sends canvas bytes for prompt inference", async () => {
+  let capturedBody = null;
+  await withPatchedGlobals(async () => {
+    globalThis.fetch = async (_url, init) => {
+      capturedBody = JSON.parse(init.body);
+      return new Response('{"output_text":"一只橘猫，窗边逆光"}', {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    };
+  }, async () => {
+    const kernel = await loadRemoteKernel();
+    const text = await kernel.optimizePromptRemote({
+      apiKey: "key",
+      prompt: "",
+      mode: "describe",
+      baseURL: "https://upstream.example",
+      textModelID: "gpt-5.5",
+      sourceImages: [{ name: "canvas.png", imageB64: "YWJj" }],
+    }, new AbortController().signal);
+    assert.equal(text, "一只橘猫，窗边逆光");
+    assert.equal(capturedBody.input[0].content[1].image_url, "data:image/png;base64,YWJj");
+    assert.match(capturedBody.instructions, /attached image/);
+  });
+});
+
 test("Android shell remote kernel can use native HTTP bridge to bypass browser fetch", async () => {
   const partials = [];
   const progressEvents = [];

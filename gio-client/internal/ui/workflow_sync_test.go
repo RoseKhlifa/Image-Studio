@@ -84,6 +84,15 @@ func TestDeleteWorkflowWorkspaceStateDropsDraftRevision(t *testing.T) {
 
 func TestWorkflowRuntimeReflectsDisconnectedPorts(t *testing.T) {
 	graph := defaultWorkflowGraph()
+	prompt, _ := graph.node("prompt")
+	prompt.Properties[workflowPropertyPrompt] = "a complete prompt"
+	graph = setWorkflowNodeProperties(graph, prompt.ID, prompt.Properties)
+	source, _ := graph.node("source")
+	source.Properties[workflowPropertySourcePaths] = "/tmp/source.png"
+	graph = setWorkflowNodeProperties(graph, source.ID, source.Properties)
+	generate, _ := graph.node("generate")
+	generate.Properties[workflowPropertyMode] = "edit"
+	graph = setWorkflowNodeProperties(graph, generate.ID, generate.Properties)
 	for _, edge := range []workflowEdgeModel{
 		{FromNode: "prompt", FromPort: "text", ToNode: "generate", ToPort: "prompt"},
 		{FromNode: "source", FromPort: "image", ToNode: "generate", ToPort: "source"},
@@ -102,9 +111,6 @@ func TestWorkflowRuntimeReflectsDisconnectedPorts(t *testing.T) {
 		workflowSelectedNodes: map[string]string{"ws-one": "generate"},
 		mode:                  "edit",
 	}
-	app.promptInput.SetText("a complete prompt")
-	app.sourcePathsInput.SetText("/tmp/source.png")
-
 	runtime := app.workflowCanvasData(snapshot{}, "ws-one").Runtime
 	for _, nodeID := range []string{"prompt", "source", "generate", "preview", "export"} {
 		if runtime[nodeID].Phase != workflowNodePhaseWarning {
@@ -136,8 +142,8 @@ func TestInactiveWorkflowRuntimeReflectsItsPublishedGraph(t *testing.T) {
 			t.Fatalf("inactive node %s phase=%s detail=%q want warning", nodeID, runtime[nodeID].Phase, runtime[nodeID].Detail)
 		}
 	}
-	if runtime["preview"].Phase != workflowNodePhaseSuccess {
-		t.Fatalf("connected preview phase=%s want success", runtime["preview"].Phase)
+	if runtime["preview"].Phase != workflowNodePhaseIdle {
+		t.Fatalf("unselected preview branch phase=%s want idle", runtime["preview"].Phase)
 	}
 }
 

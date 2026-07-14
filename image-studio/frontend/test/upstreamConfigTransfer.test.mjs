@@ -18,10 +18,11 @@ test("buildUpstreamConfigExportFile includes profile metadata and api keys", asy
       createdAt: 1,
       lastUsedAt: 2,
     },
-  ], "p-1", { "p-1": "sk-live" });
+  ], "p-1", { "p-1": "sk-live" }, "p-1");
 
   assert.equal(payload.version, 1);
   assert.equal(payload.activeProfileId, "p-1");
+  assert.equal(payload.aiProfileId, "p-1");
   assert.equal(payload.profiles[0].apiKey, "sk-live");
 });
 
@@ -30,6 +31,7 @@ test("parseUpstreamConfigImportFile normalizes profiles and preserves embedded a
   const parsed = mod.parseUpstreamConfigImportFile(JSON.stringify({
     version: 1,
     activeProfileId: "p-2",
+    aiProfileId: "p-2",
     profiles: [
       {
         id: "p-2",
@@ -53,6 +55,7 @@ test("parseUpstreamConfigImportFile normalizes profiles and preserves embedded a
 
   assert.deepEqual(parsed, {
     activeProfileId: "p-2",
+    aiProfileId: "p-2",
     profiles: [
       {
         id: "p-2",
@@ -169,11 +172,13 @@ test("applyParsedUpstreamConfigImport re-links fallback ids and active profile",
   const store = {
     profiles: [],
     activeProfileId: "",
+    aiProfileId: "",
   };
   let nextId = 1;
 
   const result = await mod.applyParsedUpstreamConfigImport({
     activeProfileId: "b",
+    aiProfileId: "b",
     profiles: [
       {
         id: "a",
@@ -234,11 +239,17 @@ test("applyParsedUpstreamConfigImport re-links fallback ids and active profile",
     setActiveProfile: async (id) => {
       store.activeProfileId = id;
     },
+    setAIProfile: async (id) => {
+      store.aiProfileId = id;
+      return true;
+    },
   });
 
   assert.equal(result.importedCount, 2);
   assert.equal(store.activeProfileId, "p-2");
+  assert.equal(store.aiProfileId, "p-2");
   assert.equal(result.activeProfileId, "p-2");
+  assert.equal(result.aiProfileId, "p-2");
   assert.deepEqual(
     store.profiles.map((item) => ({ id: item.id, name: item.name, fallbackProfileId: item.fallbackProfileId })),
     [

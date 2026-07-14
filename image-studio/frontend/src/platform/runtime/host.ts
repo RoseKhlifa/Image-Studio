@@ -317,7 +317,8 @@ export function OptimizePrompt(options: PromptOptimizeOptionsLike): Promise<stri
     return Promise.reject(new Error("当前宿主不支持强制本地内核"));
   }
   if (getHostCapabilities().promptOptimization) {
-    return invokeService<string>(unsupportedMessage, "OptimizePrompt", options);
+    const { sourceImages: _sourceImages, ...nativeOptions } = options;
+    return invokeService<string>(unsupportedMessage, "OptimizePrompt", nativeOptions);
   }
   const controller = new AbortController();
   return optimizePromptRemote({
@@ -330,6 +331,7 @@ export function OptimizePrompt(options: PromptOptimizeOptionsLike): Promise<stri
     proxyURL: options.proxyURL,
     imagePaths: options.imagePaths,
     imagePath: options.imagePath,
+    sourceImages: options.sourceImages,
   }, controller.signal);
 }
 

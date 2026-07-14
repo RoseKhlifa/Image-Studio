@@ -4,7 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"strconv"
 	"strings"
+
+	"image-studio/gio-client/internal/kernel"
+
+	"github.com/yuanhua/image-gptcodex/pkg/client"
 )
 
 type workflowNodeKind string
@@ -33,14 +38,18 @@ type workflowPortModel struct {
 }
 
 type workflowNodeModel struct {
-	ID       string
-	Kind     workflowNodeKind
-	Title    string
-	Subtitle string
-	Position image.Point
-	Enabled  bool
-	Inputs   []workflowPortModel
-	Outputs  []workflowPortModel
+	ID          string
+	TypeID      string
+	TypeVersion string
+	Category    string
+	Kind        workflowNodeKind
+	Title       string
+	Subtitle    string
+	Position    image.Point
+	Enabled     bool
+	Inputs      []workflowPortModel
+	Outputs     []workflowPortModel
+	Properties  map[string]string
 }
 
 type workflowEdgeModel struct {
@@ -74,76 +83,167 @@ func defaultWorkflowGraph() workflowGraphModel {
 func workflowNodeCatalog() []workflowNodeModel {
 	return []workflowNodeModel{
 		{
-			ID:       "prompt",
-			Kind:     workflowNodePrompt,
-			Title:    "提示词",
-			Subtitle: "构造生成意图与约束",
-			Position: image.Pt(72, 92),
-			Enabled:  true,
-			Outputs:  []workflowPortModel{{ID: "text", Name: "文本", Kind: workflowPortText}},
+			ID:          "prompt",
+			TypeID:      "prompt",
+			TypeVersion: "1.0.0",
+			Category:    "输入",
+			Kind:        workflowNodePrompt,
+			Title:       "提示词",
+			Subtitle:    "构造生成意图与约束",
+			Position:    image.Pt(72, 92),
+			Enabled:     true,
+			Outputs:     []workflowPortModel{{ID: "text", Name: "文本", Kind: workflowPortText}},
+			Properties: map[string]string{
+				workflowPropertyPrompt:   "",
+				workflowPropertyNegative: "",
+				workflowPropertyStyleTag: "",
+			},
 		},
 		{
-			ID:       "source",
-			Kind:     workflowNodeSource,
-			Title:    "参考图",
-			Subtitle: "可选的图像输入队列",
-			Position: image.Pt(72, 326),
-			Enabled:  true,
-			Outputs:  []workflowPortModel{{ID: "image", Name: "图像", Kind: workflowPortImage}},
+			ID:          "source",
+			TypeID:      "source",
+			TypeVersion: "1.0.0",
+			Category:    "输入",
+			Kind:        workflowNodeSource,
+			Title:       "参考图",
+			Subtitle:    "可选的图像输入队列",
+			Position:    image.Pt(72, 326),
+			Enabled:     true,
+			Outputs:     []workflowPortModel{{ID: "image", Name: "图像", Kind: workflowPortImage}},
+			Properties: map[string]string{
+				workflowPropertySourcePaths: "",
+			},
 		},
 		{
-			ID:       "generate",
-			Kind:     workflowNodeGenerate,
-			Title:    "图像生成",
-			Subtitle: "调用当前上游与模型",
-			Position: image.Pt(416, 190),
-			Enabled:  true,
+			ID:          "generate",
+			TypeID:      "generate",
+			TypeVersion: "1.0.0",
+			Category:    "处理",
+			Kind:        workflowNodeGenerate,
+			Title:       "图像生成",
+			Subtitle:    "调用当前上游与模型",
+			Position:    image.Pt(416, 190),
+			Enabled:     true,
 			Inputs: []workflowPortModel{
 				{ID: "prompt", Name: "提示词", Kind: workflowPortText},
 				{ID: "source", Name: "参考图", Kind: workflowPortImage, Multi: true},
 			},
-			Outputs: []workflowPortModel{{ID: "job", Name: "任务", Kind: workflowPortJob}},
+			Outputs: []workflowPortModel{
+				{ID: "job", Name: "预览任务", Kind: workflowPortJob},
+				{ID: "image", Name: "最终图像", Kind: workflowPortImage},
+			},
+			Properties: map[string]string{
+				workflowPropertyMode:       string(client.ModeGenerate),
+				workflowPropertyQuality:    client.DefaultQuality,
+				workflowPropertySize:       client.DefaultSize,
+				workflowPropertyImageModel: client.ImageModel,
+				workflowPropertyBatchCount: "1",
+			},
 		},
 		{
-			ID:       "preview",
-			Kind:     workflowNodePreview,
-			Title:    "实时预览",
-			Subtitle: "跟踪流式进度与结果",
-			Position: image.Pt(752, 190),
-			Enabled:  true,
-			Inputs:   []workflowPortModel{{ID: "job", Name: "任务", Kind: workflowPortJob}},
-			Outputs:  []workflowPortModel{{ID: "image", Name: "图像", Kind: workflowPortImage}},
+			ID:          "preview",
+			TypeID:      "preview",
+			TypeVersion: "1.0.0",
+			Category:    "处理",
+			Kind:        workflowNodePreview,
+			Title:       "实时预览",
+			Subtitle:    "跟踪流式进度与结果",
+			Position:    image.Pt(752, 190),
+			Enabled:     true,
+			Inputs:      []workflowPortModel{{ID: "job", Name: "任务", Kind: workflowPortJob}},
+			Outputs:     []workflowPortModel{{ID: "image", Name: "图像", Kind: workflowPortImage}},
+			Properties: map[string]string{
+				workflowPropertyPartialImages: "0",
+			},
 		},
 		{
-			ID:       "export",
-			Kind:     workflowNodeExport,
-			Title:    "导出",
-			Subtitle: "保存产物与历史记录",
-			Position: image.Pt(1088, 190),
-			Enabled:  true,
-			Inputs:   []workflowPortModel{{ID: "image", Name: "图像", Kind: workflowPortImage}},
+			ID:          "export",
+			TypeID:      "export",
+			TypeVersion: "1.0.0",
+			Category:    "输出",
+			Kind:        workflowNodeExport,
+			Title:       "导出",
+			Subtitle:    "保存产物与历史记录",
+			Position:    image.Pt(1088, 190),
+			Enabled:     true,
+			Inputs:      []workflowPortModel{{ID: "image", Name: "图像", Kind: workflowPortImage}},
+			Properties: map[string]string{
+				workflowPropertyOutputFormat: client.OutputFormat,
+				workflowPropertyOutputDir:    kernel.DefaultOutputDir(),
+			},
 		},
 	}
 }
 
-func workflowNodeTemplate(nodeID string) (workflowNodeModel, bool) {
-	nodeID = strings.TrimSpace(nodeID)
-	for _, node := range workflowNodeCatalog() {
-		if node.ID == nodeID {
+func workflowNodeTypeID(node workflowNodeModel) string {
+	if typeID := strings.TrimSpace(node.TypeID); typeID != "" {
+		return typeID
+	}
+	return string(node.Kind)
+}
+
+func workflowNodeTemplateFromCatalog(catalog []workflowNodeModel, typeID string) (workflowNodeModel, bool) {
+	typeID = strings.TrimSpace(typeID)
+	for _, node := range catalog {
+		if workflowNodeTypeID(node) == typeID {
 			return node, true
 		}
 	}
 	return workflowNodeModel{}, false
 }
 
-func workflowAvailableNodes(graph workflowGraphModel) []workflowNodeModel {
-	available := make([]workflowNodeModel, 0)
+func workflowNodeTemplate(nodeID string) (workflowNodeModel, bool) {
+	return workflowNodeTemplateFromCatalog(workflowNodeCatalog(), nodeID)
+}
+
+func workflowNodeTemplateByKind(kind workflowNodeKind) (workflowNodeModel, bool) {
 	for _, node := range workflowNodeCatalog() {
-		if _, exists := graph.node(node.ID); !exists {
-			available = append(available, node)
+		if node.Kind == kind {
+			return node, true
 		}
 	}
-	return available
+	return workflowNodeModel{}, false
+}
+
+func workflowNodeTemplateForInstance(nodeID string, kind string) (workflowNodeModel, bool) {
+	return workflowNodeTemplateForDescriptor(nodeID, "", "", "", "", kind)
+}
+
+func workflowNodeTemplateForDescriptor(nodeID string, typeID string, typeVersion string, category string, subtitle string, kind string) (workflowNodeModel, bool) {
+	nodeID = strings.TrimSpace(nodeID)
+	if nodeID == "" {
+		return workflowNodeModel{}, false
+	}
+	if normalizedKind := workflowNodeKind(strings.TrimSpace(kind)); normalizedKind != "" {
+		node, ok := workflowNodeTemplateByKind(normalizedKind)
+		if !ok {
+			return workflowNodeModel{}, false
+		}
+		node.ID = nodeID
+		if typeID = strings.TrimSpace(typeID); typeID != "" {
+			node.TypeID = typeID
+		}
+		if typeVersion = strings.TrimSpace(typeVersion); typeVersion != "" {
+			node.TypeVersion = typeVersion
+		}
+		if category = strings.TrimSpace(category); category != "" {
+			node.Category = category
+		}
+		if subtitle = strings.TrimSpace(subtitle); subtitle != "" {
+			node.Subtitle = subtitle
+		}
+		return node, true
+	}
+	node, ok := workflowNodeTemplate(nodeID)
+	return node, ok
+}
+
+func workflowAvailableNodes(graph workflowGraphModel) []workflowNodeModel {
+	return workflowNodeCatalog()
+}
+
+func workflowAvailableNodesFromCatalog(graph workflowGraphModel, catalog []workflowNodeModel) []workflowNodeModel {
+	return append([]workflowNodeModel(nil), catalog...)
 }
 
 func cloneWorkflowGraph(graph workflowGraphModel) workflowGraphModel {
@@ -155,9 +255,38 @@ func cloneWorkflowGraph(graph workflowGraphModel) workflowGraphModel {
 	for idx, node := range graph.Nodes {
 		node.Inputs = append([]workflowPortModel(nil), node.Inputs...)
 		node.Outputs = append([]workflowPortModel(nil), node.Outputs...)
+		node.Properties = cloneWorkflowProperties(node.Properties)
 		clone.Nodes[idx] = node
 	}
 	return clone
+}
+
+func cloneWorkflowProperties(properties map[string]string) map[string]string {
+	if len(properties) == 0 {
+		return nil
+	}
+	clone := make(map[string]string, len(properties))
+	for key, value := range properties {
+		key = strings.TrimSpace(key)
+		if key != "" {
+			clone[key] = value
+		}
+	}
+	return clone
+}
+
+func mergeWorkflowProperties(defaults map[string]string, overrides map[string]string) map[string]string {
+	merged := cloneWorkflowProperties(defaults)
+	if merged == nil {
+		merged = map[string]string{}
+	}
+	for key, value := range overrides {
+		key = strings.TrimSpace(key)
+		if key != "" {
+			merged[key] = value
+		}
+	}
+	return merged
 }
 
 func normalizeWorkflowGraph(graph workflowGraphModel) workflowGraphModel {
@@ -196,17 +325,65 @@ func normalizeWorkflowGraph(graph workflowGraphModel) workflowGraphModel {
 }
 
 func addWorkflowNode(graph workflowGraphModel, nodeID string) (workflowGraphModel, error) {
-	node, ok := workflowNodeTemplate(nodeID)
+	next, _, err := addWorkflowNodeInstance(graph, nodeID)
+	return next, err
+}
+
+func addWorkflowNodeInstance(graph workflowGraphModel, templateID string) (workflowGraphModel, string, error) {
+	return addWorkflowNodeInstanceFromCatalog(graph, templateID, workflowNodeCatalog())
+}
+
+func addWorkflowNodeInstanceFromCatalog(graph workflowGraphModel, templateID string, catalog []workflowNodeModel) (workflowGraphModel, string, error) {
+	node, ok := workflowNodeTemplateFromCatalog(catalog, templateID)
 	if !ok {
-		return graph, fmt.Errorf("workflow node %q is not available", nodeID)
+		return graph, "", fmt.Errorf("workflow node %q is not available", templateID)
 	}
-	if _, exists := graph.node(node.ID); exists {
-		return graph, fmt.Errorf("workflow node %q already exists", node.ID)
+	baseID := workflowNodeTypeID(node)
+	node.ID = baseID
+	ordinal := 1
+	if _, exists := graph.node(baseID); exists {
+		for ordinal = 2; ; ordinal++ {
+			candidate := baseID + "-" + strconv.Itoa(ordinal)
+			if _, duplicate := graph.node(candidate); !duplicate {
+				node.ID = candidate
+				break
+			}
+		}
+	}
+	if ordinal > 1 {
+		node.Title = fmt.Sprintf("%s %d", node.Title, ordinal)
+		node.Position = node.Position.Add(image.Pt((ordinal-1)*36, (ordinal-1)*28))
 	}
 	next := cloneWorkflowGraph(graph)
 	next.Nodes = append(next.Nodes, node)
 	next.Revision = max(graph.Revision+1, 1)
-	return next, nil
+	return next, node.ID, nil
+}
+
+func duplicateWorkflowNode(graph workflowGraphModel, nodeID string) (workflowGraphModel, string, error) {
+	source, ok := graph.node(strings.TrimSpace(nodeID))
+	if !ok {
+		return graph, "", fmt.Errorf("workflow node %q does not exist", nodeID)
+	}
+	baseID := workflowNodeTypeID(source)
+	duplicatedID := baseID
+	for ordinal := 2; ; ordinal++ {
+		if _, exists := graph.node(duplicatedID); !exists {
+			break
+		}
+		duplicatedID = baseID + "-" + strconv.Itoa(ordinal)
+	}
+	duplicate := source
+	duplicate.ID = duplicatedID
+	duplicate.Title = source.Title + " 副本"
+	duplicate.Position = source.Position.Add(image.Pt(44, 36))
+	duplicate.Inputs = append([]workflowPortModel(nil), source.Inputs...)
+	duplicate.Outputs = append([]workflowPortModel(nil), source.Outputs...)
+	duplicate.Properties = cloneWorkflowProperties(source.Properties)
+	next := cloneWorkflowGraph(graph)
+	next.Nodes = append(next.Nodes, duplicate)
+	next.Revision = max(graph.Revision+1, 1)
+	return next, duplicatedID, nil
 }
 
 func removeWorkflowNode(graph workflowGraphModel, nodeID string) workflowGraphModel {
@@ -244,6 +421,79 @@ func setWorkflowNodeEnabled(graph workflowGraphModel, nodeID string, enabled boo
 		return next
 	}
 	return graph
+}
+
+func setWorkflowNodeTitle(graph workflowGraphModel, nodeID string, title string) workflowGraphModel {
+	nodeID = strings.TrimSpace(nodeID)
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return graph
+	}
+	next := cloneWorkflowGraph(graph)
+	for index := range next.Nodes {
+		if next.Nodes[index].ID != nodeID || next.Nodes[index].Title == title {
+			continue
+		}
+		next.Nodes[index].Title = title
+		next.Revision = max(graph.Revision+1, 1)
+		return next
+	}
+	return graph
+}
+
+func setWorkflowNodeProperties(graph workflowGraphModel, nodeID string, properties map[string]string) workflowGraphModel {
+	nodeID = strings.TrimSpace(nodeID)
+	normalized := cloneWorkflowProperties(properties)
+	next := cloneWorkflowGraph(graph)
+	for index := range next.Nodes {
+		if next.Nodes[index].ID != nodeID {
+			continue
+		}
+		if workflowPropertiesEqual(next.Nodes[index].Properties, normalized) {
+			return graph
+		}
+		next.Nodes[index].Properties = normalized
+		next.Revision = max(graph.Revision+1, 1)
+		return next
+	}
+	return graph
+}
+
+func configureWorkflowNode(graph workflowGraphModel, nodeID string, title string, properties map[string]string) workflowGraphModel {
+	nodeID = strings.TrimSpace(nodeID)
+	title = strings.TrimSpace(title)
+	normalized := cloneWorkflowProperties(properties)
+	next := cloneWorkflowGraph(graph)
+	for index := range next.Nodes {
+		if next.Nodes[index].ID != nodeID {
+			continue
+		}
+		if title == "" {
+			title = next.Nodes[index].Title
+		}
+		if next.Nodes[index].Title == title && workflowPropertiesEqual(next.Nodes[index].Properties, normalized) {
+			return graph
+		}
+		next.Nodes[index].Title = title
+		next.Nodes[index].Properties = normalized
+		next.Revision = max(graph.Revision+1, 1)
+		return next
+	}
+	return graph
+}
+
+func workflowPropertiesEqual(left map[string]string, right map[string]string) bool {
+	left = cloneWorkflowProperties(left)
+	right = cloneWorkflowProperties(right)
+	if len(left) != len(right) {
+		return false
+	}
+	for key, value := range left {
+		if right[key] != value {
+			return false
+		}
+	}
+	return true
 }
 
 func workflowEdgeID(edge workflowEdgeModel) string {
@@ -518,36 +768,6 @@ func rewireWorkflowConnection(graph workflowGraphModel, previous *workflowEdgeMo
 	next.Edges = append(next.Edges, edge)
 	next.Revision = graph.Revision + 1
 	return next, nil
-}
-
-func validateWorkflowForRun(graph workflowGraphModel, requireSource bool) error {
-	graph = normalizeWorkflowGraph(graph)
-	requiredNodes := []string{"prompt", "generate", "preview", "export"}
-	if requireSource {
-		requiredNodes = append(requiredNodes, "source")
-	}
-	for _, nodeID := range requiredNodes {
-		node, ok := graph.node(nodeID)
-		if !ok || !node.Enabled {
-			return fmt.Errorf("节点 %s 不可用", nodeID)
-		}
-	}
-	requiredEdges := []workflowEdgeModel{
-		{FromNode: "prompt", FromPort: "text", ToNode: "generate", ToPort: "prompt"},
-		{FromNode: "generate", FromPort: "job", ToNode: "preview", ToPort: "job"},
-		{FromNode: "preview", FromPort: "image", ToNode: "export", ToPort: "image"},
-	}
-	if requireSource {
-		requiredEdges = append(requiredEdges, workflowEdgeModel{FromNode: "source", FromPort: "image", ToNode: "generate", ToPort: "source"})
-	}
-	for _, edge := range requiredEdges {
-		if !workflowEdgeConnected(graph, edge) {
-			from, _ := graph.node(edge.FromNode)
-			to, _ := graph.node(edge.ToNode)
-			return fmt.Errorf("缺少 %s 到 %s 的连接", from.Title, to.Title)
-		}
-	}
-	return nil
 }
 
 func moveWorkflowNode(graph workflowGraphModel, nodeID string, position image.Point) workflowGraphModel {

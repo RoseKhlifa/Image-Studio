@@ -12,6 +12,8 @@ import {
   nextDefaultProfileName,
   normalizeResponsesTransport,
   pickActiveProfile,
+  pickAIProfile,
+  persistAIProfileId,
 } from "../lib/profiles";
 import { cleanBaseURL } from "../lib/security";
 import { normalizeConcurrencyLimit } from "./workspaceRuntime";
@@ -63,7 +65,11 @@ export function createProfileActions(store: StateAdapter) {
       }
       const next = [...list, profile];
       persistProfiles(next);
-      store.setState({ profiles: next });
+      const aiProfile = pickAIProfile(next, store.getState().aiProfileId, store.getState().activeProfileId);
+      if (aiProfile?.id && aiProfile.id !== store.getState().aiProfileId) {
+        persistAIProfileId(aiProfile.id);
+      }
+      store.setState({ profiles: next, aiProfileId: aiProfile?.id ?? "" });
       if (input.setActive ?? true) {
         await this.setActiveProfile(id);
       }
@@ -95,7 +101,11 @@ export function createProfileActions(store: StateAdapter) {
       };
       const nextList = list.map((profile, idx) => (idx === index ? next : profile));
       persistProfiles(nextList);
-      store.setState({ profiles: nextList });
+      const aiProfile = pickAIProfile(nextList, store.getState().aiProfileId, store.getState().activeProfileId);
+      if ((aiProfile?.id ?? "") !== store.getState().aiProfileId) {
+        persistAIProfileId(aiProfile?.id ?? "");
+      }
+      store.setState({ profiles: nextList, aiProfileId: aiProfile?.id ?? "" });
       if (patch.apiKey !== undefined) {
         try { await SetStoredAPIKey(keyringUserFor(id), patch.apiKey); }
         catch (e: any) {
@@ -129,7 +139,9 @@ export function createProfileActions(store: StateAdapter) {
       catch (e: any) {
         if (typeof console !== "undefined") console.warn("删 keyring 项失败(继续)", e);
       }
-      store.setState({ profiles: nextList });
+      const aiProfile = pickAIProfile(nextList, store.getState().aiProfileId === id ? "" : store.getState().aiProfileId, store.getState().activeProfileId);
+      persistAIProfileId(aiProfile?.id ?? "");
+      store.setState({ profiles: nextList, aiProfileId: aiProfile?.id ?? "" });
       if (store.getState().activeProfileId === id) {
         const fallback = pickActiveProfile(nextList, "");
         if (fallback) {
@@ -193,6 +205,14 @@ export function createProfileActions(store: StateAdapter) {
         reasoningEffort: profile.reasoningEffort,
         apiKey,
       });
+    },
+
+    async setAIProfile(id: string) {
+      const profile = store.getState().profiles.find((item) => item.id === id);
+      if (!profile || profile.apiMode !== "responses") return false;
+      persistAIProfileId(id);
+      store.setState({ aiProfileId: id });
+      return true;
     },
   };
 }

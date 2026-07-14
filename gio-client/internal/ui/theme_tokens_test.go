@@ -42,8 +42,8 @@ func TestDesktopThemeSpecCanonicalTokens(t *testing.T) {
 		wantText    color.NRGBA
 		wantSurface string
 	}{
-		{name: "macos light", style: desktopStyleMacOS, mode: desktopColorModeLight, wantAccent: rgb(0x007aff), wantBG: rgb(0xeef1f6), wantText: rgb(0x111111), wantSurface: desktopSurfaceLiquidGlass},
-		{name: "macos dark", style: desktopStyleMacOS, mode: desktopColorModeDark, wantAccent: rgb(0x0a84ff), wantBG: rgb(0x0d0f14), wantText: rgb(0xf5f5f7), wantSurface: desktopSurfaceLiquidGlass},
+		{name: "macos light", style: desktopStyleMacOS, mode: desktopColorModeLight, wantAccent: rgb(0x007aff), wantBG: rgb(0xf5f5f7), wantText: rgb(0x1d1d1f), wantSurface: desktopSurfaceSolid},
+		{name: "macos dark", style: desktopStyleMacOS, mode: desktopColorModeDark, wantAccent: rgb(0x0a84ff), wantBG: rgb(0x1c1c1e), wantText: rgb(0xf5f5f7), wantSurface: desktopSurfaceSolid},
 		{name: "windows light", style: desktopStyleWindows, mode: desktopColorModeLight, wantAccent: rgb(0x005fb8), wantBG: rgb(0xf3f3f3), wantText: rgb(0x1f1f1f), wantSurface: desktopSurfaceSolid},
 		{name: "windows dark", style: desktopStyleWindows, mode: desktopColorModeDark, wantAccent: rgb(0x60cdff), wantBG: rgb(0x202020), wantText: rgb(0xf3f3f3), wantSurface: desktopSurfaceSolid},
 	}
@@ -69,12 +69,12 @@ func TestDesktopThemeSpecReturnsIndependentValues(t *testing.T) {
 	if fresh.Colors.accent != rgb(0x007aff) {
 		t.Fatalf("canonical accent mutated to %v", fresh.Colors.accent)
 	}
-	if fresh.Metrics.ControlRadius != unit.Dp(17) {
+	if fresh.Metrics.ControlRadius != unit.Dp(7) {
 		t.Fatalf("canonical control radius mutated to %v", fresh.Metrics.ControlRadius)
 	}
 }
 
-func TestMacOSThemePaletteMatchesReactAppleFrontend(t *testing.T) {
+func TestMacOSThemePaletteMatchesHIGSemanticRoles(t *testing.T) {
 	tests := []struct {
 		name string
 		mode string
@@ -85,29 +85,29 @@ func TestMacOSThemePaletteMatchesReactAppleFrontend(t *testing.T) {
 			mode: desktopColorModeLight,
 			want: map[string]color.NRGBA{
 				"accent":          rgb(0x007aff),
-				"accent2":         rgb(0x409cff),
+				"accent2":         rgb(0x006ee6),
 				"accentSoft":      rgba(0x007aff, 0x1a),
-				"bg":              rgb(0xeef1f6),
-				"bg2":             rgb(0xe5e9f1),
-				"panel":           rgba(0xffffff, 0x94),
-				"panel2":          rgba(0xffffff, 0x75),
-				"surface":         rgba(0xffffff, 0x80),
-				"surface2":        rgba(0xffffff, 0xa8),
-				"surfaceElevated": rgba(0xffffff, 0xd1),
-				"sidebar":         rgba(0xffffff, 0x6b),
-				"inspector":       rgba(0xffffff, 0x61),
-				"toolbar":         rgba(0xffffff, 0x5c),
-				"border":          rgba(0x3c3c43, 0x21),
-				"border2":         rgba(0x3c3c43, 0x33),
-				"text":            rgb(0x111111),
-				"textMuted":       rgba(0x3c3c43, 0xb8),
-				"textDim":         rgba(0x3c3c43, 0x7a),
-				"cardShadow":      rgba(0x161c2d, 0x1f),
-				"cardGlow":        rgba(0xffffff, 0x5c),
-				"bgGlow":          rgba(0x5ac8fa, 0x38),
-				"canvasBg":        rgb(0xeef1f6),
-				"canvasTile":      rgb(0xdce4ef),
-				"windowOutline":   rgba(0xffffff, 0x5c),
+				"bg":              rgb(0xf5f5f7),
+				"bg2":             rgb(0xececef),
+				"panel":           rgb(0xf5f5f7),
+				"panel2":          rgb(0xffffff),
+				"surface":         rgb(0xf0f0f2),
+				"surface2":        rgb(0xe7e7ea),
+				"surfaceElevated": rgb(0xffffff),
+				"sidebar":         rgb(0xf0f0f2),
+				"inspector":       rgb(0xf6f6f8),
+				"toolbar":         rgb(0xf6f6f8),
+				"border":          rgba(0x3c3c43, 0x4a),
+				"border2":         rgba(0x3c3c43, 0x66),
+				"text":            rgb(0x1d1d1f),
+				"textMuted":       rgb(0x5f5f63),
+				"textDim":         rgb(0x77777c),
+				"cardShadow":      rgba(0x000000, 0x00),
+				"cardGlow":        rgba(0xffffff, 0x00),
+				"bgGlow":          rgba(0x007aff, 0x00),
+				"canvasBg":        rgb(0xd8d8da),
+				"canvasTile":      rgb(0xe4e4e6),
+				"windowOutline":   rgba(0xffffff, 0x00),
 			},
 		},
 		{
@@ -115,29 +115,29 @@ func TestMacOSThemePaletteMatchesReactAppleFrontend(t *testing.T) {
 			mode: desktopColorModeDark,
 			want: map[string]color.NRGBA{
 				"accent":          rgb(0x0a84ff),
-				"accent2":         rgb(0x5eb0ff),
-				"accentSoft":      rgba(0x0a84ff, 0x2e),
-				"bg":              rgb(0x0d0f14),
-				"bg2":             rgb(0x11141b),
-				"panel":           rgba(0x1e2026, 0x94),
-				"panel2":          rgba(0xffffff, 0x1a),
-				"surface":         rgba(0xffffff, 0x1c),
-				"surface2":        rgba(0xffffff, 0x29),
-				"surfaceElevated": rgba(0x1e212a, 0xe6),
-				"sidebar":         rgba(0x14171f, 0xb8),
-				"inspector":       rgba(0x14171f, 0xad),
-				"toolbar":         rgba(0x151821, 0xa3),
-				"border":          rgba(0xffffff, 0x24),
-				"border2":         rgba(0xffffff, 0x38),
+				"accent2":         rgb(0x409cff),
+				"accentSoft":      rgba(0x0a84ff, 0x24),
+				"bg":              rgb(0x1c1c1e),
+				"bg2":             rgb(0x161618),
+				"panel":           rgb(0x1c1c1e),
+				"panel2":          rgb(0x202022),
+				"surface":         rgb(0x2c2c2e),
+				"surface2":        rgb(0x3a3a3c),
+				"surfaceElevated": rgb(0x2c2c2e),
+				"sidebar":         rgb(0x242426),
+				"inspector":       rgb(0x242426),
+				"toolbar":         rgb(0x2c2c2e),
+				"border":          rgba(0x545458, 0x99),
+				"border2":         rgba(0x8e8e93, 0x80),
 				"text":            rgb(0xf5f5f7),
-				"textMuted":       rgba(0xebebf5, 0xc7),
-				"textDim":         rgba(0xebebf5, 0x8a),
-				"cardShadow":      rgba(0x000000, 0x52),
-				"cardGlow":        rgba(0xffffff, 0x1a),
-				"bgGlow":          rgba(0x0a84ff, 0x33),
-				"canvasBg":        rgb(0x141821),
-				"canvasTile":      rgb(0x252b37),
-				"windowOutline":   rgba(0xffffff, 0x1a),
+				"textMuted":       rgb(0xb3b3b8),
+				"textDim":         rgb(0x8e8e93),
+				"cardShadow":      rgba(0x000000, 0x00),
+				"cardGlow":        rgba(0xffffff, 0x00),
+				"bgGlow":          rgba(0x0a84ff, 0x00),
+				"canvasBg":        rgb(0x1b1b1d),
+				"canvasTile":      rgb(0x262628),
+				"windowOutline":   rgba(0xffffff, 0x00),
 			},
 		},
 	}
@@ -355,24 +355,15 @@ func TestDesktopReadableTextUsesRelativeLuminance(t *testing.T) {
 	}
 }
 
-func TestMacOSThemeUsesLiquidGlassSurfaces(t *testing.T) {
+func TestMacOSThemeUsesSolidSemanticSurfaces(t *testing.T) {
 	for _, mode := range []string{desktopColorModeLight, desktopColorModeDark} {
 		spec := desktopThemeSpec(desktopStyleMacOS, mode)
-		if spec.SurfaceTreatment != desktopSurfaceLiquidGlass {
-			t.Fatalf("mode=%s surface treatment=%q want %q", mode, spec.SurfaceTreatment, desktopSurfaceLiquidGlass)
+		if spec.SurfaceTreatment != desktopSurfaceSolid {
+			t.Fatalf("mode=%s surface treatment=%q want %q", mode, spec.SurfaceTreatment, desktopSurfaceSolid)
 		}
-		opaque := []color.NRGBA{
+		surfaces := []color.NRGBA{
 			spec.Colors.bg,
 			spec.Colors.bg2,
-			spec.Colors.canvasBg,
-			spec.Colors.canvasTile,
-		}
-		for index, value := range opaque {
-			if value.A != 0xff {
-				t.Fatalf("mode=%s opaque[%d] alpha=%d want 255", mode, index, value.A)
-			}
-		}
-		glass := []color.NRGBA{
 			spec.Colors.panel,
 			spec.Colors.panel2,
 			spec.Colors.surface,
@@ -381,14 +372,16 @@ func TestMacOSThemeUsesLiquidGlassSurfaces(t *testing.T) {
 			spec.Colors.sidebar,
 			spec.Colors.inspector,
 			spec.Colors.toolbar,
+			spec.Colors.canvasBg,
+			spec.Colors.canvasTile,
 		}
-		for index, value := range glass {
-			if value.A == 0 || value.A >= 0xff {
-				t.Fatalf("mode=%s glass[%d] alpha=%d want 1..254", mode, index, value.A)
+		for index, value := range surfaces {
+			if value.A != 0xff {
+				t.Fatalf("mode=%s surface[%d] alpha=%d want 255", mode, index, value.A)
 			}
 		}
-		if spec.Colors.cardShadow.A == 0 || spec.Colors.cardGlow.A == 0 || spec.Colors.windowOutline.A == 0 {
-			t.Fatalf("mode=%s static glass effects must remain visible: shadow=%v glow=%v outline=%v", mode, spec.Colors.cardShadow, spec.Colors.cardGlow, spec.Colors.windowOutline)
+		if spec.Colors.cardShadow.A != 0 || spec.Colors.cardGlow.A != 0 || spec.Colors.windowOutline.A != 0 {
+			t.Fatalf("mode=%s custom glass effects must remain disabled: shadow=%v glow=%v outline=%v", mode, spec.Colors.cardShadow, spec.Colors.cardGlow, spec.Colors.windowOutline)
 		}
 	}
 }
@@ -424,24 +417,24 @@ func TestWindowsThemeKeepsSolidSurfaces(t *testing.T) {
 func TestDesktopThemeMetrics(t *testing.T) {
 	mac := desktopThemeSpec(desktopStyleMacOS, desktopColorModeLight).Metrics
 	wantMac := desktopThemeMetrics{
-		HeaderHeight:       68,
-		WorkspaceBarHeight: 40,
-		CommandBarHeight:   50,
-		StatusBarHeight:    28,
-		ControlHeight:      34,
-		InputHeight:        34,
-		IconTargetSize:     32,
+		HeaderHeight:       52,
+		WorkspaceBarHeight: 36,
+		CommandBarHeight:   42,
+		StatusBarHeight:    26,
+		ControlHeight:      30,
+		InputHeight:        30,
+		IconTargetSize:     30,
 		RowHeight:          34,
-		LeftPaneWidth:      408,
-		RightPaneWidth:     352,
+		LeftPaneWidth:      312,
+		RightPaneWidth:     320,
 		ConsoleHeight:      220,
 		NodeWidth:          248,
-		ControlRadius:      17,
-		CardRadius:         22,
-		BadgeRadius:        17,
-		ModalRadius:        22,
-		InputRadius:        14,
-		NodeRadius:         14,
+		ControlRadius:      7,
+		CardRadius:         8,
+		BadgeRadius:        9,
+		ModalRadius:        12,
+		InputRadius:        7,
+		NodeRadius:         8,
 	}
 	if mac != wantMac {
 		t.Fatalf("unexpected macOS metrics: %+v", mac)

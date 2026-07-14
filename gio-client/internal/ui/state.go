@@ -645,6 +645,8 @@ func (a *App) readSnapshot() snapshot {
 		Fullscreen:                a.fullscreen,
 		LastErrorMessage:          a.lastErrorMessage,
 		LastRunAvailable:          a.lastRunValid,
+		LastRunWorkflowWorkspace:  a.lastRunWorkflowWorkspace,
+		LastRunWorkflowOutput:     a.lastRunWorkflowOutput,
 		LastLowFPSSnapshotPath:    a.lastLowFPSDiagnosticsPath,
 		RawResponseModalPath:      a.rawResponseModalPath,
 		RawResponseModalText:      a.rawResponseModalText,
