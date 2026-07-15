@@ -291,22 +291,32 @@ func (a *App) workflowCommandStatus(gtx layout.Context, snap snapshot, spec desk
 }
 
 func (a *App) layoutWorkflowBody(gtx layout.Context, snap snapshot, spec desktopThemeTokens) layout.Dimensions {
-	panes := resolveWorkflowPaneWidths(gtx.Metric.PxToDp(gtx.Constraints.Max.X), spec)
-	return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+	showLeft := true
+	showRight := true
+	if spec.Style == desktopStyleMacOS {
+		showLeft = !a.macSidebarHidden
+		showRight = !a.macInspectorHidden
+	}
+	panes := resolveVisibleWorkflowPaneWidths(gtx.Metric.PxToDp(gtx.Constraints.Max.X), spec, showLeft, showRight)
+	children := make([]layout.FlexChild, 0, 3)
+	if showLeft {
+		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return fixedWidth(gtx, panes.Left, func(gtx layout.Context) layout.Dimensions {
 				return a.layoutWorkflowLibrary(gtx, snap, spec)
 			})
-		}),
-		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			return a.layoutWorkflowCenter(gtx, snap, spec)
-		}),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+		}))
+	}
+	children = append(children, layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+		return a.layoutWorkflowCenter(gtx, snap, spec)
+	}))
+	if showRight {
+		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return fixedWidth(gtx, panes.Right, func(gtx layout.Context) layout.Dimensions {
 				return a.layoutWorkflowInspector(gtx, snap, spec)
 			})
-		}),
-	)
+		}))
+	}
+	return layout.Flex{Axis: layout.Horizontal}.Layout(gtx, children...)
 }
 
 type workflowPaneWidths struct {
@@ -316,28 +326,38 @@ type workflowPaneWidths struct {
 }
 
 func resolveWorkflowPaneWidths(available unit.Dp, spec desktopThemeTokens) workflowPaneWidths {
+	return resolveVisibleWorkflowPaneWidths(available, spec, true, true)
+}
+
+func resolveVisibleWorkflowPaneWidths(available unit.Dp, spec desktopThemeTokens, showLeft bool, showRight bool) workflowPaneWidths {
 	if available < 0 {
 		available = 0
 	}
 	left := spec.Metrics.LeftPaneWidth
 	right := spec.Metrics.RightPaneWidth
 	if spec.Style == desktopStyleMacOS {
-		left = unit.Dp(408)
-		right = unit.Dp(352)
+		left = unit.Dp(280)
+		right = unit.Dp(320)
 		const (
-			centerMinimum = unit.Dp(400)
-			leftMinimum   = unit.Dp(304)
-			rightMinimum  = unit.Dp(320)
+			centerMinimum = unit.Dp(440)
+			leftMinimum   = unit.Dp(240)
+			rightMinimum  = unit.Dp(280)
 		)
+		if !showLeft {
+			left = 0
+		}
+		if !showRight {
+			right = 0
+		}
 		overflow := left + right + centerMinimum - available
 		if overflow > 0 {
-			reduction := min(overflow, left-leftMinimum)
-			left -= reduction
+			reduction := min(overflow, max(right-rightMinimum, 0))
+			right -= reduction
 			overflow -= reduction
 		}
 		if overflow > 0 {
-			reduction := min(overflow, right-rightMinimum)
-			right -= reduction
+			reduction := min(overflow, max(left-leftMinimum, 0))
+			left -= reduction
 		}
 	} else if available < unit.Dp(1260) {
 		left = unit.Dp(224)

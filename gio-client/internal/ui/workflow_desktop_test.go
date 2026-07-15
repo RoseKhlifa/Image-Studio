@@ -64,19 +64,35 @@ func TestWorkflowCanvasHeadlessLayoutUsesStableViewport(t *testing.T) {
 func TestMacWorkflowPaneWidthsMatchAppleContract(t *testing.T) {
 	spec := desktopThemeSpec(desktopStyleMacOS, desktopColorModeLight)
 	wide := resolveWorkflowPaneWidths(unit.Dp(1440), spec)
-	if wide.Left != unit.Dp(408) || wide.Right != unit.Dp(352) || wide.Center != unit.Dp(680) {
-		t.Fatalf("wide panes=%+v want 408/680/352", wide)
+	if wide.Left != unit.Dp(280) || wide.Right != unit.Dp(320) || wide.Center != unit.Dp(840) {
+		t.Fatalf("wide panes=%+v want 280/840/320", wide)
 	}
 
 	minimum := resolveWorkflowPaneWidths(unit.Dp(1040), spec)
-	if minimum.Center < unit.Dp(400) {
-		t.Fatalf("minimum-window center=%v want >=400", minimum.Center)
+	if minimum.Center < unit.Dp(440) {
+		t.Fatalf("minimum-window center=%v want >=440", minimum.Center)
 	}
-	if minimum.Left < unit.Dp(304) || minimum.Right < unit.Dp(320) {
+	if minimum.Left < unit.Dp(240) || minimum.Right < unit.Dp(280) {
 		t.Fatalf("minimum-window side panes=%+v below readable bounds", minimum)
 	}
 	if minimum.Left+minimum.Center+minimum.Right != unit.Dp(1040) {
 		t.Fatalf("minimum-window panes=%+v do not consume available width", minimum)
+	}
+}
+
+func TestMacWorkflowPaneVisibilityPreservesCanvasPriority(t *testing.T) {
+	spec := desktopThemeSpec(desktopStyleMacOS, desktopColorModeLight)
+	if got := resolveVisibleWorkflowPaneWidths(unit.Dp(1440), spec, true, true); got != (workflowPaneWidths{Left: 280, Center: 840, Right: 320}) {
+		t.Fatalf("visible workflow panes=%+v", got)
+	}
+	if got := resolveVisibleWorkflowPaneWidths(unit.Dp(1440), spec, true, false); got != (workflowPaneWidths{Left: 280, Center: 1160}) {
+		t.Fatalf("library-only workflow panes=%+v", got)
+	}
+	if got := resolveVisibleWorkflowPaneWidths(unit.Dp(1440), spec, false, true); got != (workflowPaneWidths{Center: 1120, Right: 320}) {
+		t.Fatalf("inspector-only workflow panes=%+v", got)
+	}
+	if got := resolveVisibleWorkflowPaneWidths(unit.Dp(1440), spec, false, false); got != (workflowPaneWidths{Center: 1440}) {
+		t.Fatalf("canvas-only workflow panes=%+v", got)
 	}
 }
 
@@ -98,8 +114,8 @@ func TestMacWorkflowPresentationMetrics(t *testing.T) {
 	if prompt.Height != unit.Dp(176) || prompt.Radius != unit.Dp(18) {
 		t.Fatalf("mac prompt metrics=%+v want 176dp/r18", prompt)
 	}
-	if got := workflowSectionRadius(mac); got != unit.Dp(22) {
-		t.Fatalf("mac section radius=%v want 22", got)
+	if got := workflowSectionRadius(mac); got != mac.Metrics.CardRadius {
+		t.Fatalf("mac section radius=%v want %v", got, mac.Metrics.CardRadius)
 	}
 
 	windows := desktopThemeSpec(desktopStyleWindows, desktopColorModeLight)

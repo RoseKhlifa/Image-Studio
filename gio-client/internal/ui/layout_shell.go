@@ -339,10 +339,7 @@ func (a *App) layoutAppleHeader(gtx layout.Context) layout.Dimensions {
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 					return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							label := "隐藏生成设置"
-							if a.macSidebarHidden {
-								label = "显示生成设置"
-							}
+							label := macSidebarToggleLabel(a.experienceMode, a.macSidebarHidden)
 							return a.headerIconButtonIcon(gtx, &a.macToggleSidebarButton, uiIconList, !a.macSidebarHidden, label)
 						}),
 						layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
@@ -358,10 +355,7 @@ func (a *App) layoutAppleHeader(gtx layout.Context) layout.Dimensions {
 				}),
 				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					label := "隐藏历史记录"
-					if a.macInspectorHidden {
-						label = "显示历史记录"
-					}
+					label := macInspectorToggleLabel(a.experienceMode, a.macInspectorHidden)
 					return a.headerIconButtonIcon(gtx, &a.macToggleInspectorButton, uiIconHistory, !a.macInspectorHidden, label)
 				}),
 				layout.Rigid(layout.Spacer{Width: unit.Dp(4)}.Layout),
@@ -371,6 +365,22 @@ func (a *App) layoutAppleHeader(gtx layout.Context) layout.Dimensions {
 			)
 		})
 	})
+}
+
+func macSidebarToggleLabel(experienceMode string, hidden bool) string {
+	surface := "生成设置"
+	if normalizeExperienceMode(experienceMode) == experienceModeWorkflow {
+		surface = "工作流资源"
+	}
+	return chooseString(hidden, "显示"+surface, "隐藏"+surface)
+}
+
+func macInspectorToggleLabel(experienceMode string, hidden bool) string {
+	surface := "历史记录"
+	if normalizeExperienceMode(experienceMode) == experienceModeWorkflow {
+		surface = "节点检查器"
+	}
+	return chooseString(hidden, "显示"+surface, "隐藏"+surface)
 }
 
 func (a *App) layoutHeaderAddWorkspaceButton(gtx layout.Context) layout.Dimensions {

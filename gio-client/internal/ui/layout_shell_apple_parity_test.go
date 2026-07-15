@@ -85,6 +85,25 @@ func TestAppleHeaderSemanticsHideCommunityActions(t *testing.T) {
 	}
 }
 
+func TestAppleHeaderLabelsMatchActiveExperience(t *testing.T) {
+	for _, test := range []struct {
+		mode                    string
+		hidden                  bool
+		wantSidebar, wantDetail string
+	}{
+		{mode: experienceModeSimple, wantSidebar: "隐藏生成设置", wantDetail: "隐藏历史记录"},
+		{mode: experienceModeWorkflow, wantSidebar: "隐藏工作流资源", wantDetail: "隐藏节点检查器"},
+		{mode: experienceModeWorkflow, hidden: true, wantSidebar: "显示工作流资源", wantDetail: "显示节点检查器"},
+	} {
+		if got := macSidebarToggleLabel(test.mode, test.hidden); got != test.wantSidebar {
+			t.Errorf("sidebar label mode=%q hidden=%t got %q want %q", test.mode, test.hidden, got, test.wantSidebar)
+		}
+		if got := macInspectorToggleLabel(test.mode, test.hidden); got != test.wantDetail {
+			t.Errorf("inspector label mode=%q hidden=%t got %q want %q", test.mode, test.hidden, got, test.wantDetail)
+		}
+	}
+}
+
 func TestWindowsHeaderSemanticsKeepCommunityActions(t *testing.T) {
 	previous := installedDesktopTheme
 	defer installDesktopThemeSpec(previous.Style, previous.ColorMode)
