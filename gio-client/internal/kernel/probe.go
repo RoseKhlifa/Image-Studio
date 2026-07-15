@@ -35,7 +35,7 @@ func ProbeUpstream(ctx context.Context, cfg Config) (ProbeResult, error) {
 	if apiKey == "" {
 		return ProbeResult{}, fmt.Errorf("API Key 不能为空")
 	}
-	baseURL, err := client.ValidateBaseURL(cfg.BaseURL)
+	baseURL, err := client.ValidateBaseURLWithSecurity(cfg.BaseURL, cfg.AllowInsecureConnection)
 	if err != nil {
 		return ProbeResult{}, err
 	}
@@ -54,7 +54,7 @@ func ProbeUpstream(ctx context.Context, cfg Config) (ProbeResult, error) {
 	if err != nil {
 		return ProbeResult{}, err
 	}
-	transport, err := client.NewHTTPTransport(proxyConfig)
+	transport, err := client.NewHTTPTransportWithSecurity(proxyConfig, cfg.AllowInsecureConnection)
 	if err != nil {
 		return ProbeResult{}, err
 	}
@@ -115,10 +115,11 @@ func ProbeUpstream(ctx context.Context, cfg Config) (ProbeResult, error) {
 		client.NormalizeProxyTransportValue(strings.TrimSpace(string(cfg.ResponsesTransport))) == string(client.ResponsesTransportWebSocket) {
 		result.ResponsesTransport = string(client.ResponsesTransportWebSocket)
 		if wsErr := client.ProbeResponsesWebSocket(ctx, client.ProbeResponsesWebSocketOptions{
-			BaseURL: baseURL,
-			APIKey:  apiKey,
-			Proxy:   proxyConfig,
-			Model:   client.NormalizeTextModel(cfg.TextModelID),
+			BaseURL:                 baseURL,
+			APIKey:                  apiKey,
+			Proxy:                   proxyConfig,
+			Model:                   client.NormalizeTextModel(cfg.TextModelID),
+			AllowInsecureConnection: cfg.AllowInsecureConnection,
 		}); wsErr != nil {
 			result.ResponsesTransportOK = false
 			result.ResponsesTransportError = wsErr.Error()

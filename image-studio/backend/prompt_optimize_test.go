@@ -92,13 +92,13 @@ func TestExtractResponseErrorMessage(t *testing.T) {
 }
 
 func TestOptimizePromptRejectsEmptyPrompt(t *testing.T) {
-	if _, err := optimizePromptWithLLM(t.Context(), "https://example.com", "sk-test", "", "generate", "   ", nil, client.ProxyConfig{}); err == nil || !strings.Contains(err.Error(), "提示词") {
+	if _, err := optimizePromptWithLLM(t.Context(), "https://example.com", "sk-test", "", "generate", "   ", nil, client.ProxyConfig{}, false); err == nil || !strings.Contains(err.Error(), "提示词") {
 		t.Fatalf("expected prompt error, got %v", err)
 	}
 }
 
 func TestDescribePromptRequiresCanvasImage(t *testing.T) {
-	if _, err := optimizePromptWithLLM(t.Context(), "https://example.com", "sk-test", "", "describe", "", nil, client.ProxyConfig{}); err == nil || !strings.Contains(err.Error(), "画布图片") {
+	if _, err := optimizePromptWithLLM(t.Context(), "https://example.com", "sk-test", "", "describe", "", nil, client.ProxyConfig{}, false); err == nil || !strings.Contains(err.Error(), "画布图片") {
 		t.Fatalf("expected canvas image error, got %v", err)
 	}
 }

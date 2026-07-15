@@ -285,7 +285,11 @@ export async function requestResponsesOnce(
               buildWebSocketCreatePayload(body),
               callbacks.signal,
               consumeNativePayload,
-              { proxyMode, proxyURL: request.payload.proxyURL || "" },
+              {
+                proxyMode,
+                proxyURL: request.payload.proxyURL || "",
+                allowInsecureConnection: request.payload.allowInsecureConnection === true,
+              },
             )
           : await nativeHttpRequestText(
               url,
@@ -298,7 +302,12 @@ export async function requestResponsesOnce(
               body,
               callbacks.signal,
               consumeNativePayload,
-              { proxyMode, proxyURL: request.payload.proxyURL || "", keepAlive: true },
+              {
+                proxyMode,
+                proxyURL: request.payload.proxyURL || "",
+                keepAlive: true,
+                allowInsecureConnection: request.payload.allowInsecureConnection === true,
+              },
             );
       };
       let response: Awaited<ReturnType<typeof requestOnce>>;
@@ -318,7 +327,12 @@ export async function requestResponsesOnce(
             body,
             callbacks.signal,
             consumeNativePayload,
-            { proxyMode, proxyURL: request.payload.proxyURL || "", keepAlive: true },
+            {
+              proxyMode,
+              proxyURL: request.payload.proxyURL || "",
+              keepAlive: true,
+              allowInsecureConnection: request.payload.allowInsecureConnection === true,
+            },
           );
         } else if (responsesTransport === "websocket" && !runState.hasFinalImage) {
           callbacks.onLog?.("WebSocket 连接中断，正在重新连接并重放本次生成...");

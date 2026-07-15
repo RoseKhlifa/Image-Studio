@@ -72,20 +72,21 @@ type CompletionNotificationSettings struct {
 }
 
 type UpstreamProfile struct {
-	ID                 string `json:"id"`
-	Name               string `json:"name"`
-	APIMode            string `json:"apiMode"`
-	ResponsesTransport string `json:"responsesTransport,omitempty"`
-	RequestPolicy      string `json:"requestPolicy"`
-	ImagesNewAPICompat bool   `json:"imagesNewAPICompat,omitempty"`
-	BaseURL            string `json:"baseURL"`
-	TextModelID        string `json:"textModelID"`
-	ImageModelID       string `json:"imageModelID"`
-	ReasoningEffort    string `json:"reasoningEffort"`
-	ConcurrencyLimit   int    `json:"concurrencyLimit"`
-	FallbackProfileID  string `json:"fallbackProfileId,omitempty"`
-	CreatedAt          int64  `json:"createdAt"`
-	LastUsedAt         int64  `json:"lastUsedAt,omitempty"`
+	ID                      string `json:"id"`
+	Name                    string `json:"name"`
+	APIMode                 string `json:"apiMode"`
+	ResponsesTransport      string `json:"responsesTransport,omitempty"`
+	RequestPolicy           string `json:"requestPolicy"`
+	ImagesNewAPICompat      bool   `json:"imagesNewAPICompat,omitempty"`
+	AllowInsecureConnection bool   `json:"allowInsecureConnection,omitempty"`
+	BaseURL                 string `json:"baseURL"`
+	TextModelID             string `json:"textModelID"`
+	ImageModelID            string `json:"imageModelID"`
+	ReasoningEffort         string `json:"reasoningEffort"`
+	ConcurrencyLimit        int    `json:"concurrencyLimit"`
+	FallbackProfileID       string `json:"fallbackProfileId,omitempty"`
+	CreatedAt               int64  `json:"createdAt"`
+	LastUsedAt              int64  `json:"lastUsedAt,omitempty"`
 }
 
 type Preset struct {

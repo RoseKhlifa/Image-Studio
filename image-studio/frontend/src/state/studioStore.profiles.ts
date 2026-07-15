@@ -33,6 +33,7 @@ export function createProfileActions(store: StateAdapter) {
       baseURL?: string;
       requestPolicy?: RequestPolicy;
       imagesNewAPICompat?: boolean;
+      allowInsecureConnection?: boolean;
       textModelID?: string;
       imageModelID?: string;
       reasoningEffort?: ReasoningEffortValue;
@@ -49,6 +50,7 @@ export function createProfileActions(store: StateAdapter) {
         responsesTransport: normalizeResponsesTransport(input.apiMode === "responses" ? input.responsesTransport : "sse"),
         requestPolicy: input.requestPolicy ?? "openai",
         imagesNewAPICompat: input.imagesNewAPICompat === true,
+        allowInsecureConnection: input.allowInsecureConnection === true,
         baseURL: cleanBaseURL(input.baseURL ?? ""),
         textModelID: (input.textModelID ?? "").trim(),
         imageModelID: (input.imageModelID ?? "").trim(),
@@ -90,6 +92,7 @@ export function createProfileActions(store: StateAdapter) {
           : normalizeResponsesTransport(current.responsesTransport),
         requestPolicy: patch.requestPolicy ?? current.requestPolicy,
         imagesNewAPICompat: patch.imagesNewAPICompat ?? current.imagesNewAPICompat ?? false,
+        allowInsecureConnection: patch.allowInsecureConnection ?? current.allowInsecureConnection ?? false,
         baseURL: patch.baseURL !== undefined ? cleanBaseURL(patch.baseURL) : current.baseURL,
         textModelID: patch.textModelID !== undefined ? patch.textModelID.trim() : current.textModelID,
         imageModelID: patch.imageModelID !== undefined ? patch.imageModelID.trim() : current.imageModelID,

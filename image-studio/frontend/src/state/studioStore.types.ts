@@ -54,6 +54,7 @@ export interface PromptOptimizeRequest {
   textModelID: string;
   proxyMode: ProxyMode;
   proxyURL: string;
+  allowInsecureConnection?: boolean;
   imagePaths: string[];
   imagePath: string;
   sourceImages?: Array<{
@@ -179,6 +180,7 @@ export interface StudioState {
     baseURL?: string;
     requestPolicy?: RequestPolicy;
     imagesNewAPICompat?: boolean;
+    allowInsecureConnection?: boolean;
     textModelID?: string;
     imageModelID?: string;
     reasoningEffort?: import("../types/domain").ReasoningEffortValue;

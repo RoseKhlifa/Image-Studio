@@ -258,6 +258,7 @@ export function UpstreamConfigModal({
           responsesTransport: draft.responsesTransport ?? "sse",
           requestPolicy: draft.requestPolicy,
           imagesNewAPICompat: draft.imagesNewAPICompat === true,
+          allowInsecureConnection: draft.allowInsecureConnection === true,
           baseURL: draft.baseURL,
           textModelID: draft.textModelID,
           imageModelID: draft.imageModelID,
@@ -324,6 +325,7 @@ export function UpstreamConfigModal({
         runtimeState.proxyURL,
         draft.apiMode,
         draft.responsesTransport ?? "sse",
+        draft.allowInsecureConnection === true,
       );
       const catalog = buildUpstreamModelCatalog(result.models ?? []);
       setModelCatalog(catalog);

@@ -17,21 +17,22 @@ import (
 )
 
 type upstreamConfigExportProfile struct {
-	ID                 string `json:"id"`
-	Name               string `json:"name"`
-	APIMode            string `json:"apiMode"`
-	ResponsesTransport string `json:"responsesTransport"`
-	RequestPolicy      string `json:"requestPolicy"`
-	ImagesNewAPICompat bool   `json:"imagesNewAPICompat"`
-	BaseURL            string `json:"baseURL"`
-	TextModelID        string `json:"textModelID"`
-	ImageModelID       string `json:"imageModelID"`
-	ReasoningEffort    string `json:"reasoningEffort"`
-	ConcurrencyLimit   int    `json:"concurrencyLimit"`
-	FallbackProfileID  string `json:"fallbackProfileId,omitempty"`
-	CreatedAt          int64  `json:"createdAt"`
-	LastUsedAt         int64  `json:"lastUsedAt,omitempty"`
-	APIKey             string `json:"apiKey,omitempty"`
+	ID                      string `json:"id"`
+	Name                    string `json:"name"`
+	APIMode                 string `json:"apiMode"`
+	ResponsesTransport      string `json:"responsesTransport"`
+	RequestPolicy           string `json:"requestPolicy"`
+	ImagesNewAPICompat      bool   `json:"imagesNewAPICompat"`
+	AllowInsecureConnection bool   `json:"allowInsecureConnection"`
+	BaseURL                 string `json:"baseURL"`
+	TextModelID             string `json:"textModelID"`
+	ImageModelID            string `json:"imageModelID"`
+	ReasoningEffort         string `json:"reasoningEffort"`
+	ConcurrencyLimit        int    `json:"concurrencyLimit"`
+	FallbackProfileID       string `json:"fallbackProfileId,omitempty"`
+	CreatedAt               int64  `json:"createdAt"`
+	LastUsedAt              int64  `json:"lastUsedAt,omitempty"`
+	APIKey                  string `json:"apiKey,omitempty"`
 }
 
 type upstreamConfigExportFile struct {
@@ -75,21 +76,22 @@ func buildUpstreamConfigExportFile(state sharedCompat.State) (upstreamConfigExpo
 			return upstreamConfigExportFile{}, err
 		}
 		profiles = append(profiles, upstreamConfigExportProfile{
-			ID:                 profile.ID,
-			Name:               strings.TrimSpace(profile.Name),
-			APIMode:            normalizeProfileAPIMode(profile.APIMode),
-			ResponsesTransport: normalizeProfileResponsesTransport(profile.ResponsesTransport),
-			RequestPolicy:      normalizeProfilePolicy(profile.RequestPolicy),
-			ImagesNewAPICompat: profile.ImagesNewAPICompat,
-			BaseURL:            strings.TrimSpace(profile.BaseURL),
-			TextModelID:        strings.TrimSpace(profile.TextModelID),
-			ImageModelID:       strings.TrimSpace(profile.ImageModelID),
-			ReasoningEffort:    normalizeReasoningEffort(profile.ReasoningEffort),
-			ConcurrencyLimit:   profile.ConcurrencyLimit,
-			FallbackProfileID:  strings.TrimSpace(profile.FallbackProfileID),
-			CreatedAt:          profile.CreatedAt,
-			LastUsedAt:         profile.LastUsedAt,
-			APIKey:             strings.TrimSpace(apiKey),
+			ID:                      profile.ID,
+			Name:                    strings.TrimSpace(profile.Name),
+			APIMode:                 normalizeProfileAPIMode(profile.APIMode),
+			ResponsesTransport:      normalizeProfileResponsesTransport(profile.ResponsesTransport),
+			RequestPolicy:           normalizeProfilePolicy(profile.RequestPolicy),
+			ImagesNewAPICompat:      profile.ImagesNewAPICompat,
+			AllowInsecureConnection: profile.AllowInsecureConnection,
+			BaseURL:                 strings.TrimSpace(profile.BaseURL),
+			TextModelID:             strings.TrimSpace(profile.TextModelID),
+			ImageModelID:            strings.TrimSpace(profile.ImageModelID),
+			ReasoningEffort:         normalizeReasoningEffort(profile.ReasoningEffort),
+			ConcurrencyLimit:        profile.ConcurrencyLimit,
+			FallbackProfileID:       strings.TrimSpace(profile.FallbackProfileID),
+			CreatedAt:               profile.CreatedAt,
+			LastUsedAt:              profile.LastUsedAt,
+			APIKey:                  strings.TrimSpace(apiKey),
 		})
 	}
 	return upstreamConfigExportFile{
@@ -177,21 +179,22 @@ func parseExportProfile(raw any) (upstreamConfigExportProfile, bool) {
 	}
 	apiKey, _ := source["apiKey"].(string)
 	return upstreamConfigExportProfile{
-		ID:                 strings.TrimSpace(id),
-		Name:               strings.TrimSpace(name),
-		APIMode:            normalizeProfileAPIMode(stringValue(source["apiMode"])),
-		ResponsesTransport: normalizeProfileResponsesTransport(stringValue(source["responsesTransport"])),
-		RequestPolicy:      normalizeProfilePolicy(stringValue(source["requestPolicy"])),
-		ImagesNewAPICompat: boolValue(source["imagesNewAPICompat"]),
-		BaseURL:            normalizeImportedBaseURL(stringValue(source["baseURL"])),
-		TextModelID:        strings.TrimSpace(stringValue(source["textModelID"])),
-		ImageModelID:       strings.TrimSpace(stringValue(source["imageModelID"])),
-		ReasoningEffort:    normalizeReasoningEffort(stringValue(source["reasoningEffort"])),
-		ConcurrencyLimit:   concurrencyLimit,
-		FallbackProfileID:  strings.TrimSpace(stringValue(source["fallbackProfileId"])),
-		CreatedAt:          createdAt,
-		LastUsedAt:         lastUsedAt,
-		APIKey:             strings.TrimSpace(apiKey),
+		ID:                      strings.TrimSpace(id),
+		Name:                    strings.TrimSpace(name),
+		APIMode:                 normalizeProfileAPIMode(stringValue(source["apiMode"])),
+		ResponsesTransport:      normalizeProfileResponsesTransport(stringValue(source["responsesTransport"])),
+		RequestPolicy:           normalizeProfilePolicy(stringValue(source["requestPolicy"])),
+		ImagesNewAPICompat:      boolValue(source["imagesNewAPICompat"]),
+		AllowInsecureConnection: boolValue(source["allowInsecureConnection"]),
+		BaseURL:                 normalizeImportedBaseURL(stringValue(source["baseURL"])),
+		TextModelID:             strings.TrimSpace(stringValue(source["textModelID"])),
+		ImageModelID:            strings.TrimSpace(stringValue(source["imageModelID"])),
+		ReasoningEffort:         normalizeReasoningEffort(stringValue(source["reasoningEffort"])),
+		ConcurrencyLimit:        concurrencyLimit,
+		FallbackProfileID:       strings.TrimSpace(stringValue(source["fallbackProfileId"])),
+		CreatedAt:               createdAt,
+		LastUsedAt:              lastUsedAt,
+		APIKey:                  strings.TrimSpace(apiKey),
 	}, true
 }
 
@@ -387,6 +390,7 @@ func (a *App) applyParsedUpstreamConfigImport(parsed parsedUpstreamConfigImport)
 				profile.ResponsesTransport = normalizeProfileResponsesTransport(incoming.ResponsesTransport)
 				profile.RequestPolicy = normalizeProfilePolicy(incoming.RequestPolicy)
 				profile.ImagesNewAPICompat = incoming.ImagesNewAPICompat
+				profile.AllowInsecureConnection = incoming.AllowInsecureConnection
 				profile.BaseURL = normalizeImportedBaseURL(incoming.BaseURL)
 				profile.TextModelID = strings.TrimSpace(incoming.TextModelID)
 				profile.ImageModelID = strings.TrimSpace(incoming.ImageModelID)
@@ -405,19 +409,20 @@ func (a *App) applyParsedUpstreamConfigImport(parsed parsedUpstreamConfigImport)
 
 			actualID := fmt.Sprintf("gio-import-%d-%d", now, idx+1)
 			profile := sharedCompat.UpstreamProfile{
-				ID:                 actualID,
-				Name:               strings.TrimSpace(incoming.Name),
-				APIMode:            normalizeProfileAPIMode(incoming.APIMode),
-				ResponsesTransport: normalizeProfileResponsesTransport(incoming.ResponsesTransport),
-				RequestPolicy:      normalizeProfilePolicy(incoming.RequestPolicy),
-				ImagesNewAPICompat: incoming.ImagesNewAPICompat,
-				BaseURL:            normalizeImportedBaseURL(incoming.BaseURL),
-				TextModelID:        strings.TrimSpace(incoming.TextModelID),
-				ImageModelID:       strings.TrimSpace(incoming.ImageModelID),
-				ReasoningEffort:    normalizeReasoningEffort(incoming.ReasoningEffort),
-				ConcurrencyLimit:   incoming.ConcurrencyLimit,
-				CreatedAt:          now,
-				LastUsedAt:         incoming.LastUsedAt,
+				ID:                      actualID,
+				Name:                    strings.TrimSpace(incoming.Name),
+				APIMode:                 normalizeProfileAPIMode(incoming.APIMode),
+				ResponsesTransport:      normalizeProfileResponsesTransport(incoming.ResponsesTransport),
+				RequestPolicy:           normalizeProfilePolicy(incoming.RequestPolicy),
+				ImagesNewAPICompat:      incoming.ImagesNewAPICompat,
+				AllowInsecureConnection: incoming.AllowInsecureConnection,
+				BaseURL:                 normalizeImportedBaseURL(incoming.BaseURL),
+				TextModelID:             strings.TrimSpace(incoming.TextModelID),
+				ImageModelID:            strings.TrimSpace(incoming.ImageModelID),
+				ReasoningEffort:         normalizeReasoningEffort(incoming.ReasoningEffort),
+				ConcurrencyLimit:        incoming.ConcurrencyLimit,
+				CreatedAt:               now,
+				LastUsedAt:              incoming.LastUsedAt,
 			}
 			state.Profiles = append(state.Profiles, profile)
 			if strings.TrimSpace(incoming.APIKey) != "" {

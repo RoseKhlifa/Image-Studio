@@ -24,6 +24,9 @@ export interface UpstreamProfile {
   responsesTransport?: ResponsesTransport;
   requestPolicy: RequestPolicy;
   imagesNewAPICompat?: boolean;
+  // 显式允许远程 HTTP，以及忽略 HTTPS/WSS 证书校验错误。
+  // 默认关闭；只应用到当前 profile 发出的上游请求。
+  allowInsecureConnection?: boolean;
   baseURL: string;
   textModelID: string;
   imageModelID: string;

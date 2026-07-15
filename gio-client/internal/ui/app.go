@@ -279,6 +279,7 @@ type App struct {
 	macSidebarHidden         bool
 	macInspectorHidden       bool
 	imagesNewAPICompat       bool
+	allowInsecureConnection  bool
 	batchCount               int
 
 	modeButtons                              []widget.Clickable
@@ -399,6 +400,7 @@ type App struct {
 	settingsTestUpstreamButton               widget.Clickable
 	loadUpstreamModelsButton                 widget.Clickable
 	settingsImagesCompatButton               widget.Clickable
+	settingsAllowInsecureButton              widget.Clickable
 	syncCodexConfigButton                    widget.Clickable
 	exportUpstreamConfigsButton              widget.Clickable
 	importUpstreamConfigsButton              widget.Clickable
@@ -943,6 +945,7 @@ func New() *App {
 		fontScale:                               fontScale,
 		reducedEffects:                          compatState.Settings.ReducedEffects,
 		imagesNewAPICompat:                      cfg.ImagesNewAPICompat,
+		allowInsecureConnection:                 cfg.AllowInsecureConnection,
 		kernelRuntimeMode:                       normalizeKernelRuntimeMode(compatState.Settings.KernelRuntimeMode),
 		completionSound:                         normaliseCompletionSoundSettings(compatState.Settings.CompletionSound),
 		completionNotification:                  normaliseCompletionNotificationSettings(compatState.Settings.CompletionNotification),
@@ -1251,6 +1254,7 @@ func (a *App) applyRuntimeConfig(cfg kernel.Config) {
 	a.outputCompressionInput.SetText(strconv.Itoa(cfg.OutputCompression))
 	a.userIdentifierInput.SetText(cfg.UserIdentifier)
 	a.imagesNewAPICompat = cfg.ImagesNewAPICompat
+	a.allowInsecureConnection = cfg.AllowInsecureConnection
 	if strings.TrimSpace(cfg.OutputFormat) != "" {
 		a.format = cfg.OutputFormat
 	}

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -63,6 +64,79 @@ func TestRequestImagesAPIWithPartialStreamsPreviews(t *testing.T) {
 	}
 	if len(partials) != 1 || partials[0].ImageB64 != partialB64 || partials[0].PartialImageIndex != 0 {
 		t.Fatalf("unexpected partials: %+v", partials)
+	}
+}
+
+func TestRequestImagesAPINewAPICompatSkipsEmptyJSONKeepAlives(t *testing.T) {
+	finalB64 := base64.StdEncoding.EncodeToString([]byte("final"))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		flusher, _ := w.(http.Flusher)
+		_, _ = io.WriteString(w, "{}\n")
+		flusher.Flush()
+		_, _ = io.WriteString(w, "[]\n\"\"\nnull\n")
+		flusher.Flush()
+		_, _ = io.WriteString(w, "{\"data\":[]}\n")
+		flusher.Flush()
+		fmt.Fprintf(w, "{\"data\":[{\"b64_json\":%q,\"revised_prompt\":\"kept alive\"}]}\n", finalB64)
+	}))
+	defer srv.Close()
+
+	res, err := RequestImagesAPIWithPartial(context.Background(), Options{
+		APIKey:             "sk-test",
+		Prompt:             "cat",
+		BaseURL:            srv.URL,
+		APIMode:            APIModeImages,
+		ImagesNewAPICompat: true,
+	}, &bytes.Buffer{}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.ImageB64 != finalB64 || res.RevisedPrompt != "kept alive" {
+		t.Fatalf("unexpected result: %+v", res)
+	}
+}
+
+func TestRequestImagesAPINewAPICompatRejectsOnlyEmptyKeepAlives(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, "{}\n[]\n\"\"\nnull\n{\"data\":[]}\n")
+	}))
+	defer srv.Close()
+
+	_, err := RequestImagesAPIWithPartial(context.Background(), Options{
+		APIKey:             "sk-test",
+		Prompt:             "cat",
+		BaseURL:            srv.URL,
+		APIMode:            APIModeImages,
+		ImagesNewAPICompat: true,
+	}, &bytes.Buffer{}, nil, nil)
+	if !errors.Is(err, ErrNoImageInResponse) {
+		t.Fatalf("err = %v, want ErrNoImageInResponse", err)
+	}
+}
+
+func TestRequestImagesAPINewAPICompatSkipsEmptySSEKeepAlives(t *testing.T) {
+	finalB64 := base64.StdEncoding.EncodeToString([]byte("final"))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data:\n\ndata:{}\n\ndata: {\"data\":[]}\n\n")
+		fmt.Fprintf(w, "data:{\"data\":[{\"b64_json\":%q}]}\n\n", finalB64)
+	}))
+	defer srv.Close()
+
+	res, err := RequestImagesAPIWithPartial(context.Background(), Options{
+		APIKey:             "sk-test",
+		Prompt:             "cat",
+		BaseURL:            srv.URL,
+		APIMode:            APIModeImages,
+		ImagesNewAPICompat: true,
+	}, &bytes.Buffer{}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.ImageB64 != finalB64 {
+		t.Fatalf("unexpected result: %+v", res)
 	}
 }
 

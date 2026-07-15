@@ -903,6 +903,9 @@ func (a *App) layoutSettingsModal(gtx layout.Context, snap snapshot) layout.Dime
 	for a.settingsImagesCompatButton.Clicked(gtx) {
 		a.imagesNewAPICompat = !a.imagesNewAPICompat
 	}
+	for a.settingsAllowInsecureButton.Clicked(gtx) {
+		a.allowInsecureConnection = !a.allowInsecureConnection
+	}
 	for a.loadUpstreamModelsButton.Clicked(gtx) {
 		if !a.settingsDraftReady() {
 			continue
@@ -2897,6 +2900,43 @@ func (a *App) layoutSettingsEditorPane(gtx layout.Context, snap snapshot) layout
 			}),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				return a.label(gtx, "中转站只填根地址；Google 官方 Images 配置填写 https://generativelanguage.googleapis.com/v1beta/openai。", unit.Sp(10), fluent.textDim, font.Normal)
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				active := a.allowInsecureConnection
+				return a.elevatedSurfaceButton(
+					gtx,
+					&a.settingsAllowInsecureButton,
+					chooseColor(active, dangerAlpha(0x12), fluent.surfaceElevated),
+					chooseColor(active, dangerAlpha(0x18), fluent.surface2),
+					chooseColor(active, dangerAlpha(0x35), fluent.border),
+					unit.Dp(8),
+					image.Pt(0, 1),
+					layout.Inset{Top: 10, Bottom: 10, Left: 12, Right: 12},
+					func(gtx layout.Context) layout.Dimensions {
+						return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+							layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+								return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(unit.Dp(3))}.Layout(gtx,
+									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+										return a.label(gtx, "允许不安全连接", unit.Sp(12), chooseColor(active, fluent.danger, fluent.text), font.SemiBold)
+									}),
+									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+										return a.label(gtx, "允许远程 HTTP，并忽略 HTTPS / WSS 的自签名、过期或域名不匹配证书。", unit.Sp(10), fluent.textDim, font.Normal)
+									}),
+								)
+							}),
+							layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								if active {
+									return a.badge(gtx, "已开启", dangerAlpha(0x18), fluent.danger)
+								}
+								return a.badge(gtx, "已关闭", withAlpha(fluent.textDim, 0x24), fluent.textDim)
+							}),
+						)
+					},
+				)
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return a.label(gtx, "仅在可信网络中使用。开启后 API Key、提示词和图片可能被窃听或篡改。", unit.Sp(10), chooseColor(a.allowInsecureConnection, fluent.danger, fluent.textDim), font.Normal)
 			}),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				return a.layoutSettingsAPIKeyField(gtx)

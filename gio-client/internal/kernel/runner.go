@@ -24,58 +24,60 @@ import (
 )
 
 type Config struct {
-	APIKey               string
-	BaseURL              string
-	TextModelID          string
-	ImageModelID         string
-	Prompt               string
-	Mode                 client.Mode
-	APIMode              client.APIMode
-	RequestPolicy        client.RequestPolicy
-	ResponsesTransport   client.ResponsesTransport
-	ImagesNewAPICompat   bool
-	Size                 string
-	Quality              string
-	OutputFormat         string
-	Background           string
-	OutputCompression    int
-	InputFidelity        string
-	ImageStyle           string
-	Moderation           string
-	UserIdentifier       string
-	ProxyMode            string
-	ProxyURL             string
-	ReasoningEffort      string
-	ProtectStreamPreview bool
-	AutoRetryEnabled     bool
-	AutoRetryCount       int
-	CompletionSound      sharedCompat.CompletionSoundSettings
-	SourcePaths          []string
-	SourceImageDataURLs  []string
-	ParentID             string
-	OutputDir            string
-	Seed                 int64
-	NegativePrompt       string
-	MaskB64              string
-	PartialImages        int
-	StyleTag             string
-	BatchIndex           int
-	PreviewSlotIndex     int
-	FallbackProfileID    string
-	FallbackProfile      *FallbackProfileConfig
-	PreviewOnlyResult    bool
+	APIKey                  string
+	BaseURL                 string
+	TextModelID             string
+	ImageModelID            string
+	Prompt                  string
+	Mode                    client.Mode
+	APIMode                 client.APIMode
+	RequestPolicy           client.RequestPolicy
+	ResponsesTransport      client.ResponsesTransport
+	ImagesNewAPICompat      bool
+	AllowInsecureConnection bool
+	Size                    string
+	Quality                 string
+	OutputFormat            string
+	Background              string
+	OutputCompression       int
+	InputFidelity           string
+	ImageStyle              string
+	Moderation              string
+	UserIdentifier          string
+	ProxyMode               string
+	ProxyURL                string
+	ReasoningEffort         string
+	ProtectStreamPreview    bool
+	AutoRetryEnabled        bool
+	AutoRetryCount          int
+	CompletionSound         sharedCompat.CompletionSoundSettings
+	SourcePaths             []string
+	SourceImageDataURLs     []string
+	ParentID                string
+	OutputDir               string
+	Seed                    int64
+	NegativePrompt          string
+	MaskB64                 string
+	PartialImages           int
+	StyleTag                string
+	BatchIndex              int
+	PreviewSlotIndex        int
+	FallbackProfileID       string
+	FallbackProfile         *FallbackProfileConfig
+	PreviewOnlyResult       bool
 }
 
 type FallbackProfileConfig struct {
-	APIKey             string
-	BaseURL            string
-	TextModelID        string
-	ImageModelID       string
-	APIMode            client.APIMode
-	ResponsesTransport client.ResponsesTransport
-	RequestPolicy      client.RequestPolicy
-	ImagesNewAPICompat bool
-	ReasoningEffort    string
+	APIKey                  string
+	BaseURL                 string
+	TextModelID             string
+	ImageModelID            string
+	APIMode                 client.APIMode
+	ResponsesTransport      client.ResponsesTransport
+	RequestPolicy           client.RequestPolicy
+	ImagesNewAPICompat      bool
+	AllowInsecureConnection bool
+	ReasoningEffort         string
 }
 
 type Callbacks struct {
@@ -208,6 +210,7 @@ func (Runner) Run(ctx context.Context, cfg Config, cb Callbacks) (Result, error)
 		fallbackCfg.ResponsesTransport = fallback.ResponsesTransport
 		fallbackCfg.RequestPolicy = fallback.RequestPolicy
 		fallbackCfg.ImagesNewAPICompat = fallback.ImagesNewAPICompat
+		fallbackCfg.AllowInsecureConnection = fallback.AllowInsecureConnection
 		fallbackCfg.ReasoningEffort = fallback.ReasoningEffort
 		fallbackCfg.FallbackProfile = nil
 		variants = append(variants, fallbackCfg)
@@ -370,40 +373,41 @@ func runSingleConfig(ctx context.Context, cfg Config, cb Callbacks, imagesDir st
 	if err != nil {
 		return Result{}, err
 	}
-	transport, err := client.PickTransportWithProxy(proxy)
+	transport, err := client.PickTransportWithProxyAndSecurity(proxy, cfg.AllowInsecureConnection)
 	if err != nil {
 		return Result{}, err
 	}
 
 	opts := client.Options{
-		APIKey:             cfg.APIKey,
-		BaseURL:            cfg.BaseURL,
-		TextModelID:        cfg.TextModelID,
-		ImageModelID:       cfg.ImageModelID,
-		Prompt:             cfg.Prompt,
-		Mode:               cfg.Mode,
-		APIMode:            cfg.APIMode,
-		ResponsesTransport: cfg.ResponsesTransport,
-		RequestPolicy:      cfg.RequestPolicy,
-		ImagesNewAPICompat: cfg.ImagesNewAPICompat,
-		Size:               cfg.Size,
-		Quality:            cfg.Quality,
-		OutputFormat:       cfg.OutputFormat,
-		Background:         cfg.Background,
-		OutputCompression:  cfg.OutputCompression,
-		InputFidelity:      cfg.InputFidelity,
-		ImageStyle:         cfg.ImageStyle,
-		Moderation:         cfg.Moderation,
-		UserIdentifier:     cfg.UserIdentifier,
-		Proxy:              proxy,
-		ReasoningEffort:    cfg.ReasoningEffort,
-		AutoRetryEnabled:   func() *bool { v := cfg.AutoRetryEnabled; return &v }(),
-		AutoRetryCount:     cfg.AutoRetryCount,
-		Seed:               cfg.Seed,
-		NegativePrompt:     cfg.NegativePrompt,
-		MaskB64:            cfg.MaskB64,
-		PartialImages:      cfg.PartialImages,
-		DisablePreview:     cfg.PartialImages == 0,
+		APIKey:                  cfg.APIKey,
+		BaseURL:                 cfg.BaseURL,
+		TextModelID:             cfg.TextModelID,
+		ImageModelID:            cfg.ImageModelID,
+		Prompt:                  cfg.Prompt,
+		Mode:                    cfg.Mode,
+		APIMode:                 cfg.APIMode,
+		ResponsesTransport:      cfg.ResponsesTransport,
+		RequestPolicy:           cfg.RequestPolicy,
+		ImagesNewAPICompat:      cfg.ImagesNewAPICompat,
+		AllowInsecureConnection: cfg.AllowInsecureConnection,
+		Size:                    cfg.Size,
+		Quality:                 cfg.Quality,
+		OutputFormat:            cfg.OutputFormat,
+		Background:              cfg.Background,
+		OutputCompression:       cfg.OutputCompression,
+		InputFidelity:           cfg.InputFidelity,
+		ImageStyle:              cfg.ImageStyle,
+		Moderation:              cfg.Moderation,
+		UserIdentifier:          cfg.UserIdentifier,
+		Proxy:                   proxy,
+		ReasoningEffort:         cfg.ReasoningEffort,
+		AutoRetryEnabled:        func() *bool { v := cfg.AutoRetryEnabled; return &v }(),
+		AutoRetryCount:          cfg.AutoRetryCount,
+		Seed:                    cfg.Seed,
+		NegativePrompt:          cfg.NegativePrompt,
+		MaskB64:                 cfg.MaskB64,
+		PartialImages:           cfg.PartialImages,
+		DisablePreview:          cfg.PartialImages == 0,
 	}
 	if cfg.Mode == client.ModeEdit {
 		if err := attachSourceImages(&opts, cfg.SourcePaths, cfg.SourceImageDataURLs); err != nil {

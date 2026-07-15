@@ -9,6 +9,7 @@ export type UpstreamConfigExportProfile = {
   responsesTransport: ResponsesTransport;
   requestPolicy: RequestPolicy;
   imagesNewAPICompat: boolean;
+  allowInsecureConnection: boolean;
   baseURL: string;
   textModelID: string;
   imageModelID: string;
@@ -43,6 +44,7 @@ export type UpstreamConfigImportActions = {
     baseURL?: string;
     requestPolicy?: RequestPolicy;
     imagesNewAPICompat?: boolean;
+    allowInsecureConnection?: boolean;
     textModelID?: string;
     imageModelID?: string;
     reasoningEffort?: ReasoningEffortValue;
@@ -73,6 +75,7 @@ function toProfileSnapshot(input: UpstreamConfigExportProfile, actualId: string)
     responsesTransport: input.responsesTransport ?? "sse",
     requestPolicy: input.requestPolicy,
     imagesNewAPICompat: input.imagesNewAPICompat,
+    allowInsecureConnection: input.allowInsecureConnection,
     baseURL: input.baseURL,
     textModelID: input.textModelID,
     imageModelID: input.imageModelID,
@@ -156,6 +159,7 @@ function parseExportProfile(raw: unknown): UpstreamConfigExportProfile | null {
     responsesTransport: normalizeResponsesTransport(source.responsesTransport),
     requestPolicy: normalizeRequestPolicy(source.requestPolicy),
     imagesNewAPICompat: source.imagesNewAPICompat === true,
+    allowInsecureConnection: source.allowInsecureConnection === true,
     baseURL: normalizeImportedBaseURL(source.baseURL),
     textModelID: typeof source.textModelID === "string" ? source.textModelID.trim() : "",
     imageModelID: typeof source.imageModelID === "string" ? source.imageModelID.trim() : "",
@@ -186,6 +190,7 @@ function parseNewAPIChannelConnTemplate(raw: Record<string, unknown>): ParsedUps
         responsesTransport: "sse",
         requestPolicy: "openai",
         imagesNewAPICompat: false,
+        allowInsecureConnection: false,
         baseURL,
         textModelID: "",
         imageModelID: "",
@@ -253,6 +258,7 @@ function parseOpenCodeProviderTemplate(raw: Record<string, unknown>): ParsedUpst
       responsesTransport: "sse",
       requestPolicy: "openai",
       imagesNewAPICompat: false,
+      allowInsecureConnection: false,
       baseURL,
       textModelID,
       imageModelID,
@@ -288,6 +294,7 @@ export function buildUpstreamConfigExportFile(
       ...profile,
       responsesTransport: profile.responsesTransport === "websocket" ? "websocket" : "sse",
       imagesNewAPICompat: profile.imagesNewAPICompat === true,
+      allowInsecureConnection: profile.allowInsecureConnection === true,
       apiKey: (apiKeysById[profile.id] ?? "").trim(),
     })),
   };
@@ -325,6 +332,7 @@ function buildProfilePatch(
     responsesTransport: incoming.responsesTransport ?? "sse",
     requestPolicy: incoming.requestPolicy,
     imagesNewAPICompat: incoming.imagesNewAPICompat,
+    allowInsecureConnection: incoming.allowInsecureConnection,
     baseURL: incoming.baseURL,
     textModelID: incoming.textModelID,
     imageModelID: incoming.imageModelID,
@@ -362,6 +370,7 @@ export async function applyParsedUpstreamConfigImport(
       responsesTransport: incoming.responsesTransport ?? "sse",
       requestPolicy: incoming.requestPolicy,
       imagesNewAPICompat: incoming.imagesNewAPICompat,
+      allowInsecureConnection: incoming.allowInsecureConnection,
       baseURL: incoming.baseURL,
       textModelID: incoming.textModelID,
       imageModelID: incoming.imageModelID,

@@ -234,7 +234,7 @@ func (s *Service) OptimizePrompt(opts PromptOptimizeOptions) (string, error) {
 	if operation == "describe" && len(opts.collectPaths()) == 0 {
 		return "", errors.New("图片反推必须提供画布图片")
 	}
-	baseURL, err := client.ValidateBaseURL(opts.BaseURL)
+	baseURL, err := client.ValidateBaseURLWithSecurity(opts.BaseURL, opts.AllowInsecureConnection)
 	if err != nil {
 		return "", err
 	}
@@ -251,7 +251,7 @@ func (s *Service) OptimizePrompt(opts PromptOptimizeOptions) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return optimizePromptWithLLM(s.ctx, baseURL, opts.APIKey, modelID, opts.Mode, opts.Prompt, refPaths, proxyConfig)
+	return optimizePromptWithLLM(s.ctx, baseURL, opts.APIKey, modelID, opts.Mode, opts.Prompt, refPaths, proxyConfig, opts.AllowInsecureConnection)
 }
 
 // Cancel terminates a running job. Safe to call with unknown IDs.
@@ -359,35 +359,36 @@ func (s *Service) runJob(ctx context.Context, jobID string, opts GenerateOptions
 	}
 
 	clientOpts := client.Options{
-		APIKey:             opts.APIKey,
-		Prompt:             opts.Prompt,
-		Mode:               mode,
-		Size:               opts.Size,
-		Quality:            opts.Quality,
-		OutputFormat:       opts.OutputFormat,
-		MaskB64:            opts.MaskB64,
-		Seed:               opts.Seed,
-		NegativePrompt:     opts.NegativePrompt,
-		Background:         opts.Background,
-		OutputCompression:  opts.OutputCompression,
-		InputFidelity:      opts.InputFidelity,
-		ImageStyle:         opts.ImageStyle,
-		Moderation:         opts.Moderation,
-		UserIdentifier:     opts.UserIdentifier,
-		BaseURL:            opts.BaseURL,
-		TextModelID:        opts.TextModelID,
-		ImageModelID:       opts.ImageModelID,
-		ReasoningEffort:    opts.ReasoningEffort,
-		Proxy:              client.ProxyConfig{Mode: opts.ProxyMode, URL: opts.ProxyURL},
-		APIMode:            apiMode,
-		ResponsesTransport: client.ResponsesTransport(strings.TrimSpace(opts.ResponsesTransport)),
-		RequestPolicy:      client.RequestPolicy(strings.TrimSpace(opts.RequestPolicy)),
-		ImagesNewAPICompat: opts.ImagesNewAPICompat,
-		NoPromptRevision:   opts.NoPromptRevision,
-		DisablePreview:     opts.DisablePreview,
-		AutoRetryEnabled:   &opts.AutoRetryEnabled,
-		AutoRetryCount:     opts.AutoRetryCount,
-		PartialImages:      client.DefaultPartialImages,
+		APIKey:                  opts.APIKey,
+		Prompt:                  opts.Prompt,
+		Mode:                    mode,
+		Size:                    opts.Size,
+		Quality:                 opts.Quality,
+		OutputFormat:            opts.OutputFormat,
+		MaskB64:                 opts.MaskB64,
+		Seed:                    opts.Seed,
+		NegativePrompt:          opts.NegativePrompt,
+		Background:              opts.Background,
+		OutputCompression:       opts.OutputCompression,
+		InputFidelity:           opts.InputFidelity,
+		ImageStyle:              opts.ImageStyle,
+		Moderation:              opts.Moderation,
+		UserIdentifier:          opts.UserIdentifier,
+		BaseURL:                 opts.BaseURL,
+		TextModelID:             opts.TextModelID,
+		ImageModelID:            opts.ImageModelID,
+		ReasoningEffort:         opts.ReasoningEffort,
+		Proxy:                   client.ProxyConfig{Mode: opts.ProxyMode, URL: opts.ProxyURL},
+		APIMode:                 apiMode,
+		ResponsesTransport:      client.ResponsesTransport(strings.TrimSpace(opts.ResponsesTransport)),
+		RequestPolicy:           client.RequestPolicy(strings.TrimSpace(opts.RequestPolicy)),
+		ImagesNewAPICompat:      opts.ImagesNewAPICompat,
+		AllowInsecureConnection: opts.AllowInsecureConnection,
+		NoPromptRevision:        opts.NoPromptRevision,
+		DisablePreview:          opts.DisablePreview,
+		AutoRetryEnabled:        &opts.AutoRetryEnabled,
+		AutoRetryCount:          opts.AutoRetryCount,
+		PartialImages:           client.DefaultPartialImages,
 	}
 	if opts.PartialImages > 0 {
 		clientOpts.PartialImages = opts.PartialImages
@@ -398,35 +399,36 @@ func (s *Service) runJob(ctx context.Context, jobID string, opts GenerateOptions
 		strings.TrimSpace(opts.FallbackProfile.APIKey) != "" &&
 		strings.TrimSpace(opts.FallbackProfile.BaseURL) != "" {
 		fallbackClientOpts = &client.Options{
-			APIKey:             strings.TrimSpace(opts.FallbackProfile.APIKey),
-			Prompt:             opts.Prompt,
-			Mode:               mode,
-			Size:               opts.Size,
-			Quality:            opts.Quality,
-			OutputFormat:       opts.OutputFormat,
-			MaskB64:            opts.MaskB64,
-			Seed:               opts.Seed,
-			NegativePrompt:     opts.NegativePrompt,
-			Background:         opts.Background,
-			OutputCompression:  opts.OutputCompression,
-			InputFidelity:      opts.InputFidelity,
-			ImageStyle:         opts.ImageStyle,
-			Moderation:         opts.Moderation,
-			UserIdentifier:     opts.UserIdentifier,
-			BaseURL:            strings.TrimSpace(opts.FallbackProfile.BaseURL),
-			TextModelID:        strings.TrimSpace(opts.FallbackProfile.TextModelID),
-			ImageModelID:       strings.TrimSpace(opts.FallbackProfile.ImageModelID),
-			ReasoningEffort:    strings.TrimSpace(opts.FallbackProfile.ReasoningEffort),
-			Proxy:              client.ProxyConfig{Mode: opts.ProxyMode, URL: opts.ProxyURL},
-			APIMode:            fallbackAPIMode,
-			ResponsesTransport: client.ResponsesTransport(strings.TrimSpace(opts.FallbackProfile.ResponsesTransport)),
-			RequestPolicy:      client.RequestPolicy(strings.TrimSpace(opts.FallbackProfile.RequestPolicy)),
-			ImagesNewAPICompat: opts.FallbackProfile.ImagesNewAPICompat,
-			NoPromptRevision:   opts.NoPromptRevision,
-			DisablePreview:     opts.DisablePreview,
-			AutoRetryEnabled:   &opts.AutoRetryEnabled,
-			AutoRetryCount:     opts.AutoRetryCount,
-			PartialImages:      clientOpts.PartialImages,
+			APIKey:                  strings.TrimSpace(opts.FallbackProfile.APIKey),
+			Prompt:                  opts.Prompt,
+			Mode:                    mode,
+			Size:                    opts.Size,
+			Quality:                 opts.Quality,
+			OutputFormat:            opts.OutputFormat,
+			MaskB64:                 opts.MaskB64,
+			Seed:                    opts.Seed,
+			NegativePrompt:          opts.NegativePrompt,
+			Background:              opts.Background,
+			OutputCompression:       opts.OutputCompression,
+			InputFidelity:           opts.InputFidelity,
+			ImageStyle:              opts.ImageStyle,
+			Moderation:              opts.Moderation,
+			UserIdentifier:          opts.UserIdentifier,
+			BaseURL:                 strings.TrimSpace(opts.FallbackProfile.BaseURL),
+			TextModelID:             strings.TrimSpace(opts.FallbackProfile.TextModelID),
+			ImageModelID:            strings.TrimSpace(opts.FallbackProfile.ImageModelID),
+			ReasoningEffort:         strings.TrimSpace(opts.FallbackProfile.ReasoningEffort),
+			Proxy:                   client.ProxyConfig{Mode: opts.ProxyMode, URL: opts.ProxyURL},
+			APIMode:                 fallbackAPIMode,
+			ResponsesTransport:      client.ResponsesTransport(strings.TrimSpace(opts.FallbackProfile.ResponsesTransport)),
+			RequestPolicy:           client.RequestPolicy(strings.TrimSpace(opts.FallbackProfile.RequestPolicy)),
+			ImagesNewAPICompat:      opts.FallbackProfile.ImagesNewAPICompat,
+			AllowInsecureConnection: opts.FallbackProfile.AllowInsecureConnection,
+			NoPromptRevision:        opts.NoPromptRevision,
+			DisablePreview:          opts.DisablePreview,
+			AutoRetryEnabled:        &opts.AutoRetryEnabled,
+			AutoRetryCount:          opts.AutoRetryCount,
+			PartialImages:           clientOpts.PartialImages,
 		}
 	}
 	if mode == client.ModeEdit {
@@ -459,7 +461,7 @@ func (s *Service) runJob(ctx context.Context, jobID string, opts GenerateOptions
 		}
 	}
 
-	transport, err := client.PickTransportWithProxy(clientOpts.Proxy)
+	transport, err := client.PickTransportWithProxyAndSecurity(clientOpts.Proxy, clientOpts.AllowInsecureConnection)
 	if err != nil {
 		s.emitError(jobID, err)
 		return
@@ -553,8 +555,13 @@ func (s *Service) runJob(ctx context.Context, jobID string, opts GenerateOptions
 	if err != nil && fallbackClientOpts != nil && shouldRouteFallbackAttempt(err, rawPath) {
 		logFn("主上游自动重试失败，切换到备用上游再试一次...")
 		fallbackTimestamp := timestamp + "-fallback"
+		fallbackTransport, transportErr := client.PickTransportWithProxyAndSecurity(fallbackClientOpts.Proxy, fallbackClientOpts.AllowInsecureConnection)
+		if transportErr != nil {
+			s.emitError(jobID, transportErr)
+			return
+		}
 		result, rawPath, err = client.RequestAndExtractWithRetriesAndPartial(
-			ctx, transport, *fallbackClientOpts, logDir, fallbackTimestamp, logFn, progressFn, previewFn,
+			ctx, fallbackTransport, *fallbackClientOpts, logDir, fallbackTimestamp, logFn, progressFn, previewFn,
 		)
 	}
 	if err != nil {

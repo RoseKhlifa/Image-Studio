@@ -41,6 +41,18 @@ func TestValidateBaseURL(t *testing.T) {
 	}
 }
 
+func TestValidateBaseURLWithSecurityAllowsRemoteHTTP(t *testing.T) {
+	t.Parallel()
+
+	got, err := ValidateBaseURLWithSecurity("http://relay.example.com/v1", true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "http://relay.example.com" {
+		t.Fatalf("got %q", got)
+	}
+}
+
 func TestOpenAIAPIEndpointKeepsVersionedOpenAICompatibilityBase(t *testing.T) {
 	t.Parallel()
 

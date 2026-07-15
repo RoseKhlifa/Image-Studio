@@ -42,6 +42,28 @@ export function normalizeBaseURL(raw: string): string {
   return normalizeSharedBaseURL(raw);
 }
 
+export function validateRemoteBaseURL(raw: string, allowInsecureConnection: boolean): string {
+  const normalized = normalizeBaseURL(raw);
+  let parsed: URL;
+  try {
+    parsed = new URL(normalized);
+  } catch {
+    throw new Error("BASE_URL 必须包含协议和主机，例如 https://example.com");
+  }
+  if (parsed.protocol === "https:") return normalized;
+  if (parsed.protocol !== "http:") {
+    throw new Error("BASE_URL 仅支持 http:// 或 https://");
+  }
+  const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  const loopback = host === "localhost"
+    || host.endsWith(".localhost")
+    || host === "127.0.0.1"
+    || host === "::1"
+    || host === "0:0:0:0:0:0:0:1";
+  if (loopback || allowInsecureConnection) return normalized;
+  throw new Error(`拒绝使用非 TLS 上游: ${normalized}。请在渠道中开启“允许不安全连接”`);
+}
+
 export function normalizeAPIMode(apiMode: string): "responses" | "images" {
   return normalizeSharedAPIMode(apiMode);
 }

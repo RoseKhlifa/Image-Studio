@@ -11,6 +11,12 @@ import (
 // HTTPS is required for non-loopback hosts because prompts, images, and API
 // keys are all sent over this connection.
 func ValidateBaseURL(raw string) (string, error) {
+	return ValidateBaseURLWithSecurity(raw, false)
+}
+
+// ValidateBaseURLWithSecurity permits remote plain HTTP only when the caller
+// explicitly opted this single upstream into insecure connections.
+func ValidateBaseURLWithSecurity(raw string, allowInsecureConnection bool) (string, error) {
 	cleaned := strings.TrimRight(strings.TrimSpace(raw), "/")
 	if cleaned == "" {
 		return "", fmt.Errorf("未配置上游 BASE_URL")
@@ -31,7 +37,7 @@ func ValidateBaseURL(raw string) (string, error) {
 	case "https":
 		return cleaned, nil
 	case "http":
-		if isLoopbackHost(u.Hostname()) {
+		if allowInsecureConnection || isLoopbackHost(u.Hostname()) {
 			return cleaned, nil
 		}
 		return "", fmt.Errorf("拒绝使用非 TLS 上游: %s。只有 localhost / 127.0.0.1 / ::1 允许 http://", cleaned)

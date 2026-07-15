@@ -61,6 +61,7 @@ export function tryParseProfile(raw: unknown): UpstreamProfile | null {
   const responsesTransport = normalizeResponsesTransport(o.responsesTransport);
   const requestPolicy = o.requestPolicy === "compat" ? "compat" : "openai";
   const imagesNewAPICompat = o.imagesNewAPICompat === true;
+  const allowInsecureConnection = o.allowInsecureConnection === true;
   const baseURL = typeof o.baseURL === "string" ? o.baseURL : "";
   const textModelID = typeof o.textModelID === "string" ? o.textModelID : "";
   const imageModelID = typeof o.imageModelID === "string" ? o.imageModelID : "";
@@ -78,6 +79,7 @@ export function tryParseProfile(raw: unknown): UpstreamProfile | null {
     responsesTransport,
     requestPolicy,
     imagesNewAPICompat,
+    allowInsecureConnection,
     baseURL,
     textModelID,
     imageModelID,
@@ -147,6 +149,7 @@ export function makeBlankProfile(apiMode: APIMode = "responses", profiles: Upstr
     responsesTransport: "sse",
     requestPolicy: "openai",
     imagesNewAPICompat: false,
+    allowInsecureConnection: false,
     baseURL: "",
     textModelID: "",
     imageModelID: "",

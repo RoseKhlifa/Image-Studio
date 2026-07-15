@@ -1453,6 +1453,7 @@ func (a *App) applySettingsProfileDraft(state sharedCompat.State, profile shared
 	a.reasoningEffort = normalizeReasoningEffort(profile.ReasoningEffort)
 	a.fallbackProfileID = strings.TrimSpace(profile.FallbackProfileID)
 	a.imagesNewAPICompat = profile.ImagesNewAPICompat
+	a.allowInsecureConnection = profile.AllowInsecureConnection
 	a.baseURLInput.SetText(strings.TrimSpace(profile.BaseURL))
 	a.textModelInput.SetText(strings.TrimSpace(profile.TextModelID))
 	a.imageModelInput.SetText(strings.TrimSpace(profile.ImageModelID))
@@ -1683,6 +1684,7 @@ func (a *App) saveSettingsSelection() error {
 			state.Profiles[i].ReasoningEffort = normalizeReasoningEffort(a.reasoningEffort)
 			state.Profiles[i].FallbackProfileID = strings.TrimSpace(a.fallbackProfileID)
 			state.Profiles[i].ImagesNewAPICompat = a.imagesNewAPICompat
+			state.Profiles[i].AllowInsecureConnection = a.allowInsecureConnection
 			state.Profiles[i].BaseURL = strings.TrimSpace(a.baseURLInput.Text())
 			state.Profiles[i].TextModelID = strings.TrimSpace(a.textModelInput.Text())
 			state.Profiles[i].ImageModelID = strings.TrimSpace(a.imageModelInput.Text())

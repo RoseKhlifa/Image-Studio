@@ -127,6 +127,7 @@ func optimizePromptWithLLM(
 	baseURL, apiKey, textModelID, mode, prompt string,
 	sourcePaths []string,
 	proxyConfig client.ProxyConfig,
+	allowInsecureConnection bool,
 ) (string, error) {
 	operation := strings.TrimSpace(mode)
 	isDescribe := operation == "describe"
@@ -202,7 +203,7 @@ func optimizePromptWithLLM(
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("User-Agent", client.UserAgent())
 
-	transport, err := client.NewHTTPTransport(proxyConfig)
+	transport, err := client.NewHTTPTransportWithSecurity(proxyConfig, allowInsecureConnection)
 	if err != nil {
 		return "", err
 	}

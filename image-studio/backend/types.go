@@ -46,9 +46,10 @@ type GenerateOptions struct {
 	RequestPolicy      string `json:"requestPolicy"` // "openai" (default) | "compat"
 	// ImagesNewAPICompat 开启后仅影响 Images API 请求:
 	// 强制使用 b64_json,并关闭 stream/partial_images,用于兼容部分 NewAPI 中转。
-	ImagesNewAPICompat bool   `json:"imagesNewAPICompat,omitempty"`
-	ProxyMode          string `json:"proxyMode"` // "none" | "system" (default) | "custom"
-	ProxyURL           string `json:"proxyURL"`  // http(s) proxy URL when ProxyMode == "custom"
+	ImagesNewAPICompat      bool   `json:"imagesNewAPICompat,omitempty"`
+	AllowInsecureConnection bool   `json:"allowInsecureConnection,omitempty"`
+	ProxyMode               string `json:"proxyMode"` // "none" | "system" (default) | "custom"
+	ProxyURL                string `json:"proxyURL"`  // http(s) proxy URL when ProxyMode == "custom"
 	// NoPromptRevision is kept for backward compatibility; Responses API
 	// requests now always ask the text model to keep the prompt verbatim.
 	NoPromptRevision bool `json:"noPromptRevision"`
@@ -71,40 +72,43 @@ type GenerateOptions struct {
 }
 
 type FallbackProfileOptions struct {
-	BaseURL            string `json:"baseURL"`
-	APIKey             string `json:"apiKey"`
-	TextModelID        string `json:"textModelID"`
-	ImageModelID       string `json:"imageModelID"`
-	ReasoningEffort    string `json:"reasoningEffort"`
-	APIMode            string `json:"apiMode"`
-	ResponsesTransport string `json:"responsesTransport,omitempty"`
-	RequestPolicy      string `json:"requestPolicy"`
-	ImagesNewAPICompat bool   `json:"imagesNewAPICompat,omitempty"`
+	BaseURL                 string `json:"baseURL"`
+	APIKey                  string `json:"apiKey"`
+	TextModelID             string `json:"textModelID"`
+	ImageModelID            string `json:"imageModelID"`
+	ReasoningEffort         string `json:"reasoningEffort"`
+	APIMode                 string `json:"apiMode"`
+	ResponsesTransport      string `json:"responsesTransport,omitempty"`
+	RequestPolicy           string `json:"requestPolicy"`
+	ImagesNewAPICompat      bool   `json:"imagesNewAPICompat,omitempty"`
+	AllowInsecureConnection bool   `json:"allowInsecureConnection,omitempty"`
 }
 
 // PromptOptimizeOptions is the request shape for one-click prompt revision.
 type PromptOptimizeOptions struct {
-	APIKey      string   `json:"apiKey"`
-	Prompt      string   `json:"prompt"`
-	Mode        string   `json:"mode"`
-	BaseURL     string   `json:"baseURL"`
-	TextModelID string   `json:"textModelID"`
-	ProxyMode   string   `json:"proxyMode"`
-	ProxyURL    string   `json:"proxyURL"`
-	ImagePaths  []string `json:"imagePaths"`
-	ImagePath   string   `json:"imagePath"`
+	APIKey                  string   `json:"apiKey"`
+	Prompt                  string   `json:"prompt"`
+	Mode                    string   `json:"mode"`
+	BaseURL                 string   `json:"baseURL"`
+	TextModelID             string   `json:"textModelID"`
+	ProxyMode               string   `json:"proxyMode"`
+	ProxyURL                string   `json:"proxyURL"`
+	AllowInsecureConnection bool     `json:"allowInsecureConnection,omitempty"`
+	ImagePaths              []string `json:"imagePaths"`
+	ImagePath               string   `json:"imagePath"`
 }
 
 // ProbeUpstreamOptions is used by the UI's connection-test button. Validation
 // and the actual /v1/models request are intentionally host-side so browser and
 // WebView quirks do not decide whether a channel is alive.
 type ProbeUpstreamOptions struct {
-	APIKey             string `json:"apiKey"`
-	BaseURL            string `json:"baseURL"`
-	ProxyMode          string `json:"proxyMode"`
-	ProxyURL           string `json:"proxyURL"`
-	APIMode            string `json:"apiMode,omitempty"`
-	ResponsesTransport string `json:"responsesTransport,omitempty"`
+	APIKey                  string `json:"apiKey"`
+	BaseURL                 string `json:"baseURL"`
+	ProxyMode               string `json:"proxyMode"`
+	ProxyURL                string `json:"proxyURL"`
+	APIMode                 string `json:"apiMode,omitempty"`
+	ResponsesTransport      string `json:"responsesTransport,omitempty"`
+	AllowInsecureConnection bool   `json:"allowInsecureConnection,omitempty"`
 }
 
 type ProbeUpstreamResult struct {
