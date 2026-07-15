@@ -24,6 +24,7 @@ test("buildUpstreamConfigExportFile includes profile metadata and api keys", asy
   assert.equal(payload.activeProfileId, "p-1");
   assert.equal(payload.aiProfileId, "p-1");
   assert.equal(payload.profiles[0].apiKey, "sk-live");
+  assert.equal(payload.profiles[0].allowInsecureConnection, false);
 });
 
 test("parseUpstreamConfigImportFile normalizes profiles and preserves embedded api keys", async () => {
@@ -40,6 +41,7 @@ test("parseUpstreamConfigImportFile normalizes profiles and preserves embedded a
         responsesTransport: "sse",
         requestPolicy: "compat",
         imagesNewAPICompat: true,
+        allowInsecureConnection: true,
         baseURL: " https://img.example.com/ ",
         textModelID: "ignored",
         imageModelID: "gpt-image-2",
@@ -64,6 +66,7 @@ test("parseUpstreamConfigImportFile normalizes profiles and preserves embedded a
         responsesTransport: "sse",
         requestPolicy: "compat",
         imagesNewAPICompat: true,
+        allowInsecureConnection: true,
         baseURL: "https://img.example.com",
         textModelID: "ignored",
         imageModelID: "gpt-image-2",
@@ -103,6 +106,7 @@ test("parseUpstreamConfigImportFile adapts newapi_channel_conn template", async 
       responsesTransport: "sse",
       requestPolicy: "openai",
       imagesNewAPICompat: false,
+      allowInsecureConnection: false,
       baseURL: "https://api.linzefeng.top",
       textModelID: "",
       imageModelID: "",
@@ -156,6 +160,7 @@ test("parseUpstreamConfigImportFile adapts opencode provider template", async ()
       responsesTransport: "sse",
       requestPolicy: "openai",
       imagesNewAPICompat: false,
+      allowInsecureConnection: false,
       baseURL: "https://gptcodex.top",
       textModelID: "gpt-5.5",
       imageModelID: "",

@@ -111,6 +111,7 @@ func ConfigFromState(cfg kernel.Config, state shared.State) kernel.Config {
 	cfg.FallbackProfileID = strings.TrimSpace(profile.FallbackProfileID)
 	cfg.RequestPolicy = normalisePolicy(profile.RequestPolicy)
 	cfg.ImagesNewAPICompat = profile.ImagesNewAPICompat
+	cfg.AllowInsecureConnection = profile.AllowInsecureConnection
 	cfg.ReasoningEffort = normalizeReasoningEffort(profile.ReasoningEffort)
 	if strings.TrimSpace(state.Settings.Background) != "" {
 		cfg.Background = state.Settings.Background
@@ -231,19 +232,20 @@ func UpsertConfig(state shared.State, cfg kernel.Config) shared.State {
 		profileID = "gio-" + randomID()
 	}
 	profile := shared.UpstreamProfile{
-		ID:                 profileID,
-		Name:               nextDefaultProfileName(state.Profiles),
-		APIMode:            string(normaliseAPIMode(string(cfg.APIMode))),
-		ResponsesTransport: normalizeProfileResponsesTransport(string(cfg.ResponsesTransport)),
-		RequestPolicy:      string(normalisePolicy(string(cfg.RequestPolicy))),
-		ImagesNewAPICompat: cfg.ImagesNewAPICompat,
-		BaseURL:            strings.TrimSpace(cfg.BaseURL),
-		TextModelID:        strings.TrimSpace(cfg.TextModelID),
-		ImageModelID:       strings.TrimSpace(cfg.ImageModelID),
-		ReasoningEffort:    normalizeReasoningEffort(cfg.ReasoningEffort),
-		ConcurrencyLimit:   0,
-		CreatedAt:          now,
-		LastUsedAt:         now,
+		ID:                      profileID,
+		Name:                    nextDefaultProfileName(state.Profiles),
+		APIMode:                 string(normaliseAPIMode(string(cfg.APIMode))),
+		ResponsesTransport:      normalizeProfileResponsesTransport(string(cfg.ResponsesTransport)),
+		RequestPolicy:           string(normalisePolicy(string(cfg.RequestPolicy))),
+		ImagesNewAPICompat:      cfg.ImagesNewAPICompat,
+		AllowInsecureConnection: cfg.AllowInsecureConnection,
+		BaseURL:                 strings.TrimSpace(cfg.BaseURL),
+		TextModelID:             strings.TrimSpace(cfg.TextModelID),
+		ImageModelID:            strings.TrimSpace(cfg.ImageModelID),
+		ReasoningEffort:         normalizeReasoningEffort(cfg.ReasoningEffort),
+		ConcurrencyLimit:        0,
+		CreatedAt:               now,
+		LastUsedAt:              now,
 	}
 	if profileIndex >= 0 {
 		profile.Name = state.Profiles[profileIndex].Name

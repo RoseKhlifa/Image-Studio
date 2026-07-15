@@ -36,6 +36,7 @@ export type RemoteGeneratePayload = {
   responsesTransport?: string;
   requestPolicy: RequestPolicy;
   imagesNewAPICompat?: boolean;
+  allowInsecureConnection?: boolean;
   noPromptRevision: boolean;
   concurrencyLimit?: number;
   partialImages?: number;
@@ -50,6 +51,7 @@ export type RemoteGeneratePayload = {
     responsesTransport?: string;
     requestPolicy: RequestPolicy;
     imagesNewAPICompat?: boolean;
+    allowInsecureConnection?: boolean;
   };
   autoRetryEnabled?: boolean;
   autoRetryCount?: number;
@@ -92,6 +94,7 @@ export type RemotePromptOptimizeInput = {
   textModelID: string;
   proxyMode?: string;
   proxyURL?: string;
+  allowInsecureConnection?: boolean;
   imagePaths?: string[];
   imagePath?: string;
   sourceImages?: KernelImageSource[];

@@ -11,6 +11,7 @@ export type NativeHTTPProxyConfig = {
   keepAlive?: boolean;
   responseBase64?: boolean;
   maxResponseBytes?: number;
+  allowInsecureConnection?: boolean;
 };
 
 const nativeHttpProgressHandlers = new Map<string, (payload: unknown) => void>();
@@ -106,6 +107,7 @@ export async function nativeHttpRequestText(
       keepAlive: Boolean(proxyConfig?.keepAlive),
       responseBase64: Boolean(proxyConfig?.responseBase64),
       maxResponseBytes: proxyConfig?.maxResponseBytes || 0,
+      allowInsecureConnection: proxyConfig?.allowInsecureConnection === true,
     });
     if (aborted) throw new DOMException("Aborted", "AbortError");
     return response;

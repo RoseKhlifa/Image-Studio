@@ -39,7 +39,7 @@ func probeUpstream(parent context.Context, opts ProbeUpstreamOptions) (ProbeUpst
 	if apiKey == "" {
 		return ProbeUpstreamResult{}, fmt.Errorf("API Key 不能为空")
 	}
-	baseURL, err := client.ValidateBaseURL(opts.BaseURL)
+	baseURL, err := client.ValidateBaseURLWithSecurity(opts.BaseURL, opts.AllowInsecureConnection)
 	if err != nil {
 		return ProbeUpstreamResult{}, err
 	}
@@ -54,7 +54,7 @@ func probeUpstream(parent context.Context, opts ProbeUpstreamOptions) (ProbeUpst
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", client.UserAgent())
 
-	transport, err := client.NewHTTPTransport(client.ProxyConfig{Mode: opts.ProxyMode, URL: opts.ProxyURL})
+	transport, err := client.NewHTTPTransportWithSecurity(client.ProxyConfig{Mode: opts.ProxyMode, URL: opts.ProxyURL}, opts.AllowInsecureConnection)
 	if err != nil {
 		return ProbeUpstreamResult{}, err
 	}
@@ -108,10 +108,11 @@ func probeUpstream(parent context.Context, opts ProbeUpstreamOptions) (ProbeUpst
 		client.NormalizeProxyTransportValue(strings.TrimSpace(opts.ResponsesTransport)) == string(client.ResponsesTransportWebSocket) {
 		result.ResponsesTransport = string(client.ResponsesTransportWebSocket)
 		if wsErr := client.ProbeResponsesWebSocket(ctx, client.ProbeResponsesWebSocketOptions{
-			BaseURL: baseURL,
-			APIKey:  apiKey,
-			Proxy:   client.ProxyConfig{Mode: opts.ProxyMode, URL: opts.ProxyURL},
-			Model:   client.TextModel,
+			BaseURL:                 baseURL,
+			APIKey:                  apiKey,
+			Proxy:                   client.ProxyConfig{Mode: opts.ProxyMode, URL: opts.ProxyURL},
+			Model:                   client.TextModel,
+			AllowInsecureConnection: opts.AllowInsecureConnection,
 		}); wsErr != nil {
 			result.ResponsesTransportOK = false
 			result.ResponsesTransportError = wsErr.Error()

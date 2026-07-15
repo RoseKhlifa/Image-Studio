@@ -23,6 +23,10 @@ func OptimizePrompt(ctx context.Context, cfg Config) (string, error) {
 	if baseURL == "" {
 		return "", errors.New("未配置上游 BASE_URL")
 	}
+	baseURL, err := client.ValidateBaseURLWithSecurity(baseURL, cfg.AllowInsecureConnection)
+	if err != nil {
+		return "", err
+	}
 	apiKey := strings.TrimSpace(cfg.APIKey)
 	if apiKey == "" {
 		return "", errors.New("API Key 不能为空")
@@ -94,7 +98,7 @@ func OptimizePrompt(ctx context.Context, cfg Config) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	transport, err := client.NewHTTPTransport(proxyConfig)
+	transport, err := client.NewHTTPTransportWithSecurity(proxyConfig, cfg.AllowInsecureConnection)
 	if err != nil {
 		return "", err
 	}

@@ -137,10 +137,10 @@ func (e *imageStreamExtractor) consume(line string) bool {
 	if stripped == "" {
 		return false
 	}
-	if !strings.HasPrefix(stripped, "data: ") {
+	if !strings.HasPrefix(stripped, "data:") {
 		return false
 	}
-	payload := strings.TrimSpace(stripped[6:])
+	payload := strings.TrimSpace(stripped[len("data:"):])
 	if payload == "" || payload == "[DONE]" {
 		return true
 	}
@@ -179,6 +179,13 @@ func (e *imageStreamExtractor) consume(line string) bool {
 				e.hasFinal = true
 				return true
 			}
+		}
+	}
+	if b, err := json.Marshal(ev); err == nil {
+		if result, err := parseImagesAPIResponseBytes(b, http.StatusOK); err == nil {
+			e.final = result
+			e.hasFinal = true
+			return true
 		}
 	}
 	return true
@@ -221,7 +228,7 @@ func RequestImagesAPIWithPartial(
 	if baseURL == "" {
 		return ImageResult{}, errors.New("未配置上游 BASE_URL,请在「设置 → 上游 BASE_URL」中填入兼容 OpenAI Images API 的中转站地址")
 	}
-	baseURL, err := ValidateBaseURL(baseURL)
+	baseURL, err := ValidateBaseURLWithSecurity(baseURL, opts.AllowInsecureConnection)
 	if err != nil {
 		return ImageResult{}, err
 	}
@@ -352,7 +359,7 @@ func RequestImagesAPIWithPartial(
 	}
 	req.Header.Set("User-Agent", UserAgent())
 
-	transport, err := NewHTTPTransport(opts.Proxy)
+	transport, err := NewHTTPTransportWithSecurity(opts.Proxy, opts.AllowInsecureConnection)
 	if err != nil {
 		return ImageResult{}, err
 	}
@@ -429,45 +436,62 @@ func RequestImagesAPIWithPartial(
 	preview := newCappedPreviewBuffer(4096)
 	teeReader := io.TeeReader(resp.Body, io.MultiWriter(rawSink, preview))
 
-	var parsed imagesAPIResponse
 	dec := json.NewDecoder(teeReader)
-	if err := dec.Decode(&parsed); err != nil {
-		_, _ = io.Copy(io.MultiWriter(rawSink, preview), resp.Body)
-		bodyPreview := preview.String()
-		if len(bodyPreview) > 400 {
-			bodyPreview = bodyPreview[:400] + "..."
+	for {
+		var parsed imagesAPIResponse
+		if err := dec.Decode(&parsed); err != nil {
+			if errors.Is(err, io.EOF) {
+				if resp.StatusCode/100 != 2 {
+					bodyPreview := preview.String()
+					if len(bodyPreview) > 400 {
+						bodyPreview = bodyPreview[:400] + "..."
+					}
+					return ImageResult{}, fmt.Errorf("上游返回 HTTP %d: %s", resp.StatusCode, bodyPreview)
+				}
+				return ImageResult{}, ErrNoImageInResponse
+			}
+			var typeErr *json.UnmarshalTypeError
+			if useNewAPICompat && errors.As(err, &typeErr) && (typeErr.Value == "array" || typeErr.Value == "string") {
+				continue
+			}
+			_, _ = io.Copy(io.MultiWriter(rawSink, preview), resp.Body)
+			bodyPreview := preview.String()
+			if len(bodyPreview) > 400 {
+				bodyPreview = bodyPreview[:400] + "..."
+			}
+			if resp.StatusCode/100 != 2 {
+				return ImageResult{}, fmt.Errorf("上游返回 HTTP %d: %s", resp.StatusCode, bodyPreview)
+			}
+			return ImageResult{}, fmt.Errorf("解析 Images API 响应失败:%w", err)
 		}
+
+		// Non-2xx with JSON body — decode has already captured the structured error.
 		if resp.StatusCode/100 != 2 {
+			if parsed.Error != nil {
+				return ImageResult{}, fmt.Errorf("上游返回 %d:%s", resp.StatusCode, parsed.Error.Message)
+			}
+			bodyPreview := preview.String()
+			if len(bodyPreview) > 400 {
+				bodyPreview = bodyPreview[:400] + "..."
+			}
 			return ImageResult{}, fmt.Errorf("上游返回 HTTP %d: %s", resp.StatusCode, bodyPreview)
 		}
-		return ImageResult{}, fmt.Errorf("解析 Images API 响应失败:%w", err)
-	}
-
-	// Non-2xx with JSON body — decode has already captured the structured error.
-	if resp.StatusCode/100 != 2 {
 		if parsed.Error != nil {
-			return ImageResult{}, fmt.Errorf("上游返回 %d:%s", resp.StatusCode, parsed.Error.Message)
+			return ImageResult{}, fmt.Errorf("上游返回错误:%s", parsed.Error.Message)
 		}
-		bodyPreview := preview.String()
-		if len(bodyPreview) > 400 {
-			bodyPreview = bodyPreview[:400] + "..."
+		if len(parsed.Data) > 0 {
+			d := parsed.Data[0]
+			if d.B64JSON != "" {
+				return imageResultFromImagesDatum(d), nil
+			}
+			if d.URL != "" {
+				return downloadImagesAPIURL(ctx, httpClient, d.URL, d.RevisedPrompt, onProgress, startedAt)
+			}
 		}
-		return ImageResult{}, fmt.Errorf("上游返回 HTTP %d: %s", resp.StatusCode, bodyPreview)
+		if !useNewAPICompat {
+			return ImageResult{}, ErrNoImageInResponse
+		}
 	}
-	if parsed.Error != nil {
-		return ImageResult{}, fmt.Errorf("上游返回错误:%s", parsed.Error.Message)
-	}
-	if len(parsed.Data) == 0 {
-		return ImageResult{}, ErrNoImageInResponse
-	}
-	d := parsed.Data[0]
-	if d.B64JSON != "" {
-		return imageResultFromImagesDatum(d), nil
-	}
-	if d.URL != "" {
-		return downloadImagesAPIURL(ctx, httpClient, d.URL, d.RevisedPrompt, onProgress, startedAt)
-	}
-	return ImageResult{}, ErrNoImageInResponse
 }
 
 func readGoogleInteractionResponse(

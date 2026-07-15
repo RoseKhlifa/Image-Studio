@@ -29,6 +29,7 @@ export namespace backend {
 	    responsesTransport: string;
 	    requestPolicy: string;
 	    imagesNewAPICompat: boolean;
+	    allowInsecureConnection: boolean;
 	    noPromptRevision: boolean;
 		    concurrencyLimit: number;
 		    partialImages: number;
@@ -70,6 +71,7 @@ export namespace backend {
 	        this.responsesTransport = source["responsesTransport"];
 	        this.requestPolicy = source["requestPolicy"];
 	        this.imagesNewAPICompat = source["imagesNewAPICompat"];
+	        this.allowInsecureConnection = source["allowInsecureConnection"];
 	        this.noPromptRevision = source["noPromptRevision"];
 		        this.concurrencyLimit = source["concurrencyLimit"];
 		        this.partialImages = source["partialImages"];
@@ -186,6 +188,7 @@ export namespace backend {
 	    textModelID: string;
 	    proxyMode: string;
 	    proxyURL: string;
+	    allowInsecureConnection: boolean;
 	    imagePaths: string[];
 	    imagePath: string;
 
@@ -202,6 +205,7 @@ export namespace backend {
 	        this.textModelID = source["textModelID"];
 	        this.proxyMode = source["proxyMode"];
 	        this.proxyURL = source["proxyURL"];
+	        this.allowInsecureConnection = source["allowInsecureConnection"];
 	        this.imagePaths = source["imagePaths"];
 	        this.imagePath = source["imagePath"];
 	    }
@@ -213,6 +217,7 @@ export namespace backend {
 	    proxyURL: string;
 	    apiMode: string;
 	    responsesTransport: string;
+	    allowInsecureConnection: boolean;
 
 	    static createFrom(source: any = {}) {
 	        return new ProbeUpstreamOptions(source);
@@ -226,6 +231,7 @@ export namespace backend {
 	        this.proxyURL = source["proxyURL"];
 	        this.apiMode = source["apiMode"];
 	        this.responsesTransport = source["responsesTransport"];
+	        this.allowInsecureConnection = source["allowInsecureConnection"];
 	    }
 	}
 	export class ProbeUpstreamResult {

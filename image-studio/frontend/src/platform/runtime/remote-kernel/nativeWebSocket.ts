@@ -33,7 +33,7 @@ export async function nativeWebSocketResponsesRequest(
   payload: string,
   signal?: AbortSignal,
   onStreamPayload?: (payload: unknown) => void,
-  proxyConfig?: { proxyMode?: string; proxyURL?: string },
+  proxyConfig?: { proxyMode?: string; proxyURL?: string; allowInsecureConnection?: boolean },
 ): Promise<NativeTextResponse> {
   if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
   ensureAndroidWSProgressHook();
@@ -52,6 +52,7 @@ export async function nativeWebSocketResponsesRequest(
       payload,
       proxyMode: proxyConfig?.proxyMode || "system",
       proxyURL: proxyConfig?.proxyURL || "",
+      allowInsecureConnection: proxyConfig?.allowInsecureConnection === true,
     });
     if (aborted) throw new DOMException("Aborted", "AbortError");
     return response;

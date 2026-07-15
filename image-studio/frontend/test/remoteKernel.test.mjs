@@ -21,6 +21,22 @@ function installBase64() {
   globalThis.btoa = (value) => Buffer.from(value, "binary").toString("base64");
 }
 
+test("remote kernel keeps remote HTTP behind the insecure-channel opt-in", async () => {
+  const common = await import(`../src/platform/runtime/remote-kernel/common.ts?remote-security=${Date.now()}-${Math.random()}`);
+  assert.throws(
+    () => common.validateRemoteBaseURL("http://relay.example.com", false),
+    /拒绝使用非 TLS 上游/,
+  );
+  assert.equal(
+    common.validateRemoteBaseURL("http://relay.example.com/v1", true),
+    "http://relay.example.com",
+  );
+  assert.equal(
+    common.validateRemoteBaseURL("http://127.0.0.1:8787", false),
+    "http://127.0.0.1:8787",
+  );
+});
+
 function installURLStubs() {
   const NativeURL = URL;
   class FakeURL extends NativeURL {}
@@ -749,6 +765,120 @@ test("runRemoteImageJob uses NewAPI images compat mode without stream fields", a
   });
 });
 
+test("runRemoteImageJob skips NewAPI empty JSON keepalives before the final image", async () => {
+  await withPatchedGlobals(async () => {
+    globalThis.fetch = async () => new Response(
+      '{}\n[]\n""\nnull\n{"data":[]}\n{"data":[{"b64_json":"img-data","revised_prompt":"kept alive"}]}\n',
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  }, async () => {
+    const kernel = await loadRemoteKernel();
+    const result = await kernel.runRemoteImageJob(
+      {
+        payload: {
+          apiKey: "key",
+          mode: "generate",
+          prompt: "bird",
+          size: "1024x1024",
+          quality: "medium",
+          outputFormat: "png",
+          imagePaths: [],
+          imagePath: "",
+          maskB64: "",
+          seed: 0,
+          negativePrompt: "",
+          baseURL: "https://upstream.example",
+          textModelID: "",
+          imageModelID: "gpt-image-2",
+          apiMode: "images",
+          requestPolicy: "openai",
+          imagesNewAPICompat: true,
+          noPromptRevision: false,
+        },
+      },
+      { signal: new AbortController().signal },
+    );
+    assert.equal(result.imageB64, "img-data");
+    assert.equal(result.revisedPrompt, "kept alive");
+  });
+});
+
+test("runRemoteImageJob skips NewAPI empty SSE keepalives before the final image", async () => {
+  await withPatchedGlobals(async () => {
+    globalThis.fetch = async () => new Response(
+      'data:\n\ndata:{}\n\ndata:[]\n\ndata:null\n\ndata: {"data":[]}\n\ndata:{"data":[{"b64_json":"img-data"}]}\n\n',
+      { status: 200, headers: { "content-type": "text/event-stream" } },
+    );
+  }, async () => {
+    const kernel = await loadRemoteKernel();
+    const result = await kernel.runRemoteImageJob(
+      {
+        payload: {
+          apiKey: "key",
+          mode: "generate",
+          prompt: "bird",
+          size: "1024x1024",
+          quality: "medium",
+          outputFormat: "png",
+          imagePaths: [],
+          imagePath: "",
+          maskB64: "",
+          seed: 0,
+          negativePrompt: "",
+          baseURL: "https://upstream.example",
+          textModelID: "",
+          imageModelID: "gpt-image-2",
+          apiMode: "images",
+          requestPolicy: "openai",
+          imagesNewAPICompat: true,
+          noPromptRevision: false,
+        },
+      },
+      { signal: new AbortController().signal },
+    );
+    assert.equal(result.imageB64, "img-data");
+  });
+});
+
+test("runRemoteImageJob rejects NewAPI responses containing only empty keepalives", async () => {
+  await withPatchedGlobals(async () => {
+    globalThis.fetch = async () => new Response(
+      '{}\n[]\n""\nnull\n{"data":[]}\n',
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  }, async () => {
+    const kernel = await loadRemoteKernel();
+    await assert.rejects(
+      kernel.runRemoteImageJob(
+        {
+          payload: {
+            apiKey: "key",
+            mode: "generate",
+            prompt: "bird",
+            size: "1024x1024",
+            quality: "medium",
+            outputFormat: "png",
+            imagePaths: [],
+            imagePath: "",
+            maskB64: "",
+            seed: 0,
+            negativePrompt: "",
+            baseURL: "https://upstream.example",
+            textModelID: "",
+            imageModelID: "gpt-image-2",
+            apiMode: "images",
+            requestPolicy: "openai",
+            imagesNewAPICompat: true,
+            noPromptRevision: false,
+          },
+        },
+        { signal: new AbortController().signal },
+      ),
+      /上游没有返回可用图片/,
+    );
+  });
+});
+
 test("runRemoteImageJob sends Responses API mask as input_image_mask data URL", async () => {
   let captured = null;
   await withPatchedGlobals(async () => {
@@ -1212,6 +1342,58 @@ test("Android shell downloads Images API URL results through the native binary h
     assert.equal(calls.length, 2);
     assert.equal(result.imageB64, imageB64);
     assert.equal(result.sourceEvent, "images_api_url");
+  });
+});
+
+test("Android shell keeps parsing NewAPI stream results after an empty keepalive", async () => {
+  await withPatchedGlobals(async () => {
+    globalThis.window.AndroidImageStudio = {
+      invoke(requestId, method) {
+        queueMicrotask(() => {
+          if (method !== "HttpRequestText") {
+            window.__imageStudioNativeReject?.(requestId, `unsupported ${method}`);
+            return;
+          }
+          window.__imageStudioNativeProgress?.(requestId, { line: "data:" });
+          window.__imageStudioNativeResolve?.(requestId, {
+            status: 200,
+            body: 'data:\n\ndata:{"data":[{"b64_json":"img-data"}]}\n',
+            contentType: "text/event-stream",
+          });
+        });
+      },
+    };
+    globalThis.fetch = async () => {
+      throw new Error("Android images branch must use native HTTP");
+    };
+  }, async () => {
+    const kernel = await loadRemoteKernel();
+    const result = await kernel.runRemoteImageJob(
+      {
+        payload: {
+          apiKey: "key",
+          mode: "generate",
+          prompt: "cat",
+          size: "1024x1024",
+          quality: "low",
+          outputFormat: "png",
+          imagePaths: [],
+          imagePath: "",
+          maskB64: "",
+          seed: 0,
+          negativePrompt: "",
+          baseURL: "https://upstream.example",
+          textModelID: "",
+          imageModelID: "relay-image-model",
+          apiMode: "images",
+          requestPolicy: "openai",
+          imagesNewAPICompat: true,
+          noPromptRevision: false,
+        },
+      },
+      { signal: new AbortController().signal },
+    );
+    assert.equal(result.imageB64, "img-data");
   });
 });
 

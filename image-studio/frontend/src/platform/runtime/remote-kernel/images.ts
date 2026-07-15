@@ -18,10 +18,11 @@ import {
 
 const MAX_IMAGE_URL_BYTES = 50 * 1024 * 1024;
 
-function parseSSEEvent(line: string): any | null {
+function parseStreamEvent(line: string, allowRawJSON = false): any | null {
   const stripped = line.trim();
-  if (!stripped.startsWith("data: ")) return null;
-  const payload = stripped.slice(6).trim();
+  const payload = stripped.startsWith("data:")
+    ? stripped.slice("data:".length).trim()
+    : allowRawJSON ? stripped : "";
   if (!payload || payload === "[DONE]") return null;
   try {
     return JSON.parse(payload);
@@ -30,9 +31,9 @@ function parseSSEEvent(line: string): any | null {
   }
 }
 
-function parseNativeProgressPayload(payload: unknown): { line: string; event: any | null } {
+function parseNativeProgressPayload(payload: unknown, allowRawJSON = false): { line: string; event: any | null } {
   if (typeof payload === "string") {
-    return { line: payload, event: parseSSEEvent(payload) };
+    return { line: payload, event: parseStreamEvent(payload, allowRawJSON) };
   }
   if (!payload || typeof payload !== "object") {
     return { line: "", event: null };
@@ -43,7 +44,7 @@ function parseNativeProgressPayload(payload: unknown): { line: string; event: an
   const structured = (payload as { event?: unknown }).event;
   const event = structured && typeof structured === "object"
     ? structured
-    : parseSSEEvent(line);
+    : parseStreamEvent(line, allowRawJSON);
   return { line, event };
 }
 
@@ -73,6 +74,14 @@ function parseImagesStreamEvent(
   }
   if (event?.object === "image.generation.result" || event?.object === "image.edit.result") {
     return parseImagesResponseSync(JSON.stringify(event), 200);
+  }
+  const first = Array.isArray(event?.data) ? event.data[0] : null;
+  if (first?.b64_json) {
+    return {
+      imageB64: first.b64_json,
+      revisedPrompt: first.revised_prompt || "",
+      sourceEvent: "images_api",
+    };
   }
   return null;
 }
@@ -122,6 +131,7 @@ async function imageURLToBase64(
   signal: AbortSignal,
   proxyMode = "system",
   proxyURL = "",
+  allowInsecureConnection = false,
 ): Promise<string> {
   let parsed: URL;
   try {
@@ -145,6 +155,7 @@ async function imageURLToBase64(
         proxyURL,
         responseBase64: true,
         maxResponseBytes: MAX_IMAGE_URL_BYTES,
+        allowInsecureConnection,
       },
     );
     if (native.status < 200 || native.status >= 300) {
@@ -183,6 +194,7 @@ async function parseGoogleInteractionResponse(
   signal: AbortSignal,
   proxyMode: string,
   proxyURL: string,
+  allowInsecureConnection: boolean,
 ): Promise<ExtractedImageResult> {
   let parsed: any;
   try {
@@ -217,7 +229,7 @@ async function parseGoogleInteractionResponse(
     }
     if (typeof image?.uri === "string" && image.uri.trim()) {
       return {
-        imageB64: await imageURLToBase64(image.uri, signal, proxyMode, proxyURL),
+        imageB64: await imageURLToBase64(image.uri, signal, proxyMode, proxyURL, allowInsecureConnection),
         revisedPrompt: "",
         sourceEvent: "google_interactions_url",
       };
@@ -238,35 +250,64 @@ async function parseImagesResponse(
   protocol: ImagesRequestProtocol,
   proxyMode: string,
   proxyURL: string,
+  allowInsecureConnection: boolean,
+  allowEmptyKeepAlive = false,
 ): Promise<ExtractedImageResult> {
   if (protocol === "google-interactions") {
-    return parseGoogleInteractionResponse(raw, status, signal, proxyMode, proxyURL);
+    return parseGoogleInteractionResponse(raw, status, signal, proxyMode, proxyURL, allowInsecureConnection);
   }
-  let parsed: any;
+  let parsedValues: any[];
   try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return parseImagesResponseSync(raw, status);
+    parsedValues = [JSON.parse(raw)];
+  } catch (error) {
+    if (!allowEmptyKeepAlive) return parseImagesResponseSync(raw, status);
+    parsedValues = raw
+      .split(/\r?\n/)
+      .map((line) => parseStreamEvent(line, true))
+      .filter((value) => value !== null);
+    if (parsedValues.length === 0 && raw.trim()) {
+      throw new RemoteKernelError(`解析 Images API 响应失败:${(error as any)?.message || error}`);
+    }
   }
-  const first = Array.isArray(parsed?.data) ? parsed.data[0] : null;
-  if (status < 400 && first?.url && !first.b64_json) {
-    return {
-      imageB64: await imageURLToBase64(first.url, signal, proxyMode, proxyURL),
-      revisedPrompt: first.revised_prompt || "",
-      sourceEvent: "images_api_url",
-    };
+  for (const parsed of parsedValues) {
+    if (status >= 400) {
+      if (parsed?.error?.message) {
+        throw new RemoteKernelError(`上游返回 ${status}:${parsed.error.message}`);
+      }
+      continue;
+    }
+    if (parsed?.error?.message) {
+      throw new RemoteKernelError(`上游返回错误:${parsed.error.message}`);
+    }
+    const first = Array.isArray(parsed?.data) ? parsed.data[0] : null;
+    if (first?.b64_json) {
+      return {
+        imageB64: first.b64_json,
+        revisedPrompt: first.revised_prompt || "",
+        sourceEvent: "images_api",
+      };
+    }
+    if (first?.url) {
+      return {
+        imageB64: await imageURLToBase64(first.url, signal, proxyMode, proxyURL, allowInsecureConnection),
+        revisedPrompt: first.revised_prompt || "",
+        sourceEvent: "images_api_url",
+      };
+    }
   }
-  return parseImagesResponseSync(raw, status);
+  if (status >= 400) throw new RemoteKernelError(`上游返回 HTTP ${status}`);
+  throw new RemoteKernelError("上游没有返回可用图片");
 }
 
 function parseImagesStreamRaw(
   raw: string,
   callbacks: RemoteJobCallbacks,
   emitPartials = false,
+  allowRawJSON = false,
 ): ExtractedImageResult | null {
   const partialCallbacks = emitPartials ? callbacks : { signal: callbacks.signal };
   for (const line of raw.split(/\r?\n/)) {
-    const event = parseSSEEvent(line);
+    const event = parseStreamEvent(line, allowRawJSON);
     if (!event) continue;
     const result = parseImagesStreamEvent(event, partialCallbacks);
     if (result) return result;
@@ -282,6 +323,7 @@ export async function requestImagesOnce(
 ): Promise<RemoteJobResult> {
   const sourceDataURLs = await resolveSourceDataURLs(request.sourceImages, request.payload);
   const built = await buildImagesRequestBody(request, sourceDataURLs);
+  const allowEmptyKeepAlive = request.payload.imagesNewAPICompat === true;
   const startedAt = Date.now();
   const protocolLabel = built.protocol === "google-interactions" ? "Google Interactions" : "Images API";
   callbacks.onLog?.(`[${protocolLabel}] 第 ${attempt}/${maxAttempts} 次请求...`);
@@ -295,10 +337,8 @@ export async function requestImagesOnce(
       let rawFromLines = "";
       let nativeStreamResult: ExtractedImageResult | null = null;
       let nativeBytesReceived = 0;
-      let receivedNativeStreamPayload = false;
       const consumeNativePayload = (payload: unknown) => {
-        receivedNativeStreamPayload = true;
-        const parsedPayload = parseNativeProgressPayload(payload);
+        const parsedPayload = parseNativeProgressPayload(payload, allowEmptyKeepAlive);
         if (parsedPayload.line) {
           rawFromLines += `${parsedPayload.line}\n`;
           nativeBytesReceived += parsedPayload.line.length + 1;
@@ -318,7 +358,12 @@ export async function requestImagesOnce(
         built.body,
         callbacks.signal,
         built.protocol === "openai-images" ? consumeNativePayload : undefined,
-        { proxyMode, proxyURL: request.payload.proxyURL || "", keepAlive: true },
+        {
+          proxyMode,
+          proxyURL: request.payload.proxyURL || "",
+          keepAlive: true,
+          allowInsecureConnection: request.payload.allowInsecureConnection === true,
+        },
       );
       const rawBody = response.body || rawFromLines;
       const rawPath = response.rawPath || registerRawText("images", attempt, rawBody);
@@ -333,8 +378,8 @@ export async function requestImagesOnce(
           mode: request.payload.mode,
         };
       }
-      const result = isStream
-        ? nativeStreamResult ?? (receivedNativeStreamPayload ? null : parseImagesStreamRaw(rawBody, callbacks))
+      let result = isStream
+        ? nativeStreamResult ?? parseImagesStreamRaw(rawBody, callbacks, false, allowEmptyKeepAlive)
         : await parseImagesResponse(
             rawBody,
             response.status,
@@ -342,7 +387,21 @@ export async function requestImagesOnce(
             built.protocol,
             proxyMode,
             request.payload.proxyURL || "",
+            request.payload.allowInsecureConnection === true,
+            allowEmptyKeepAlive,
           );
+      if (!result && isStream && allowEmptyKeepAlive) {
+        result = await parseImagesResponse(
+          rawBody,
+          response.status,
+          callbacks.signal,
+          built.protocol,
+          proxyMode,
+          request.payload.proxyURL || "",
+          request.payload.allowInsecureConnection === true,
+          true,
+        );
+      }
       if (!result) throw new RemoteKernelError("上游没有返回可用图片", rawPath);
       return { ...result, rawPath, prompt: request.payload.prompt, mode: request.payload.mode };
     }
@@ -379,7 +438,7 @@ export async function requestImagesOnce(
           while (newline >= 0) {
             const line = pending.slice(0, newline).replace(/\r$/, "");
             pending = pending.slice(newline + 1);
-            const event = parseSSEEvent(line);
+            const event = parseStreamEvent(line, allowEmptyKeepAlive);
             const parsed = event ? parseImagesStreamEvent(event, callbacks) : null;
             if (parsed) result = parsed;
             callbacks.onProgress?.("已收到 Images API 流式事件", nowSeconds(startedAt), bytesReceived);
@@ -388,12 +447,12 @@ export async function requestImagesOnce(
         }
         raw += decoder.decode();
         if (pending.trim()) {
-          const event = parseSSEEvent(pending);
+          const event = parseStreamEvent(pending, allowEmptyKeepAlive);
           const parsed = event ? parseImagesStreamEvent(event, callbacks) : null;
           if (parsed) result = parsed;
         }
       } catch (error) {
-        const fallback = parseImagesStreamRaw(raw, callbacks);
+        const fallback = parseImagesStreamRaw(raw, callbacks, false, allowEmptyKeepAlive);
         if (fallback?.imageB64) {
           const rawPath = registerRawText("images", attempt, raw);
           return { ...fallback, rawPath, prompt: request.payload.prompt, mode: request.payload.mode };
@@ -404,7 +463,19 @@ export async function requestImagesOnce(
       if (!response.ok) {
         throw new RemoteKernelError(`上游返回 HTTP ${response.status}`, rawPath);
       }
-      result ??= parseImagesStreamRaw(raw, callbacks);
+      result ??= parseImagesStreamRaw(raw, callbacks, false, allowEmptyKeepAlive);
+      if (!result && allowEmptyKeepAlive) {
+        result = await parseImagesResponse(
+          raw,
+          response.status,
+          callbacks.signal,
+          built.protocol,
+          proxyMode,
+          request.payload.proxyURL || "",
+          request.payload.allowInsecureConnection === true,
+          true,
+        );
+      }
       if (!result) throw new RemoteKernelError("上游没有返回可用图片", rawPath);
       return { ...result, rawPath, prompt: request.payload.prompt, mode: request.payload.mode };
     }
@@ -417,6 +488,8 @@ export async function requestImagesOnce(
       built.protocol,
       proxyMode,
       request.payload.proxyURL || "",
+      request.payload.allowInsecureConnection === true,
+      allowEmptyKeepAlive,
     );
     return { ...result, rawPath, prompt: request.payload.prompt, mode: request.payload.mode };
   } catch (error) {

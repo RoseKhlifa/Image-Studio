@@ -50,6 +50,12 @@ import okhttp3.Request
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okhttp3.Response
+import java.security.SecureRandom
+import java.security.cert.X509Certificate
+import javax.net.ssl.HostnameVerifier
+import javax.net.ssl.HttpsURLConnection
+import javax.net.ssl.SSLContext
+import javax.net.ssl.X509TrustManager
 
 internal fun readLimitedBytes(input: InputStream, maxBytes: Int): ByteArray {
     require(maxBytes > 0) { "maxBytes must be positive" }
@@ -86,6 +92,18 @@ class AndroidImageStudioBridge(
     private val httpRequests = ConcurrentHashMap<String, HttpURLConnection>()
     private val webSocketRequests = ConcurrentHashMap<String, WebSocket>()
     @Volatile private var fullscreen = false
+    // These are installed only after the current profile explicitly opts in.
+    private val insecureTrustManager = object : X509TrustManager {
+        override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) = Unit
+        override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) = Unit
+        override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
+    }
+    private val insecureSSLContext by lazy {
+        SSLContext.getInstance("TLS").apply {
+            init(null, arrayOf(insecureTrustManager), SecureRandom())
+        }
+    }
+    private val insecureHostnameVerifier = HostnameVerifier { _, _ -> true }
 
     companion object {
         private const val maxDialogReadBytes: Long = 50L * 1024L * 1024L
@@ -472,6 +490,7 @@ class AndroidImageStudioBridge(
         val streamLines = payload.optBoolean("streamLines", false)
         val proxyMode = payload.optString("proxyMode", "system")
         val proxyUrl = payload.optString("proxyURL", "")
+        val allowInsecureConnection = payload.optBoolean("allowInsecureConnection", false)
         val keepAlive = payload.optBoolean("keepAlive", false)
         val responseBase64 = payload.optBoolean("responseBase64", false)
         val requestedMaxResponseBytes = payload.optLong("maxResponseBytes", 0L)
@@ -482,7 +501,7 @@ class AndroidImageStudioBridge(
         }
         thread(name = "image-studio-http-$requestKey") {
             try {
-                val connection = openHttpConnection(url, proxyMode, proxyUrl).apply {
+                val connection = openHttpConnection(url, proxyMode, proxyUrl, allowInsecureConnection).apply {
                     requestMethod = method
                     instanceFollowRedirects = true
                     connectTimeout = generationConnectTimeoutMs
@@ -571,7 +590,8 @@ class AndroidImageStudioBridge(
     }
 
     private fun runProbeUpstream(requestId: String, payload: JSONObject): Nothing {
-        val baseUrl = validateProbeBaseUrl(payload.optString("baseURL"))
+        val allowInsecureConnection = payload.optBoolean("allowInsecureConnection", false)
+        val baseUrl = validateProbeBaseUrl(payload.optString("baseURL"), allowInsecureConnection)
         val apiKey = payload.optString("apiKey").trim()
         val proxyMode = payload.optString("proxyMode", "system")
         val proxyUrl = payload.optString("proxyURL", "")
@@ -580,7 +600,7 @@ class AndroidImageStudioBridge(
         if (apiKey.isBlank()) throw IllegalArgumentException("API Key 不能为空")
         thread(name = "image-studio-probe-${requestId.take(12)}") {
             try {
-                val connection = openHttpConnection(openAIEndpoint(baseUrl, "models"), proxyMode, proxyUrl).apply {
+                val connection = openHttpConnection(openAIEndpoint(baseUrl, "models"), proxyMode, proxyUrl, allowInsecureConnection).apply {
                     requestMethod = "GET"
                     instanceFollowRedirects = true
                     connectTimeout = 20_000
@@ -638,7 +658,7 @@ class AndroidImageStudioBridge(
                         ))
                         .put("tools", JSONArray())
                     try {
-                        probeResponsesWebSocket(baseUrl, apiKey, probePayload.toString(), proxyMode, proxyUrl)
+                        probeResponsesWebSocket(baseUrl, apiKey, probePayload.toString(), proxyMode, proxyUrl, allowInsecureConnection)
                         result["responsesTransportOK"] = true
                     } catch (wsError: Exception) {
                         result["responsesTransportOK"] = false
@@ -653,14 +673,24 @@ class AndroidImageStudioBridge(
         throw EarlyResolve()
     }
 
-    private fun openHttpConnection(url: String, proxyMode: String, proxyUrl: String): HttpURLConnection {
-        val target = URL(url)
+    private fun openHttpConnection(
+        url: String,
+        proxyMode: String,
+        proxyUrl: String,
+        allowInsecureConnection: Boolean = false,
+    ): HttpURLConnection {
+        val target = URL(validateRequestUrl(url, allowInsecureConnection))
         val connection = when (normalizeProxyMode(proxyMode)) {
             "none" -> target.openConnection(Proxy.NO_PROXY)
             "custom" -> target.openConnection(parseCustomProxy(proxyUrl))
             else -> target.openConnection()
         }
-        return connection as HttpURLConnection
+        val httpConnection = connection as HttpURLConnection
+        if (allowInsecureConnection && httpConnection is HttpsURLConnection) {
+            httpConnection.sslSocketFactory = insecureSSLContext.socketFactory
+            httpConnection.hostnameVerifier = insecureHostnameVerifier
+        }
+        return httpConnection
     }
 
     private fun normalizeProxyMode(raw: String): String {
@@ -705,7 +735,8 @@ class AndroidImageStudioBridge(
 
     private fun runResponsesWebSocketRequest(requestId: String, payload: JSONObject): Nothing {
         val requestKey = payload.optString("requestKey").ifBlank { requestId }
-        val baseUrl = validateProbeBaseUrl(payload.optString("baseURL"))
+        val allowInsecureConnection = payload.optBoolean("allowInsecureConnection", false)
+        val baseUrl = validateProbeBaseUrl(payload.optString("baseURL"), allowInsecureConnection)
         val apiKey = payload.optString("apiKey").trim()
         val proxyMode = payload.optString("proxyMode", "system")
         val proxyUrl = payload.optString("proxyURL", "")
@@ -713,7 +744,7 @@ class AndroidImageStudioBridge(
         if (apiKey.isBlank()) throw IllegalArgumentException("API Key 不能为空")
         if (payloadText.isBlank()) throw IllegalArgumentException("WebSocket payload 不能为空")
         val wsUrl = responsesWebSocketUrl(baseUrl)
-        val client = okHttpClientForWebSocket(proxyMode, proxyUrl)
+        val client = okHttpClientForWebSocket(proxyMode, proxyUrl, allowInsecureConnection)
         val rawLines = mutableListOf<String>()
         val streamResult = arrayOfNulls<NativeHttpStreamResultSnapshot>(1)
         val settled = java.util.concurrent.atomic.AtomicBoolean(false)
@@ -833,7 +864,11 @@ class AndroidImageStudioBridge(
         return URI(scheme, uri.userInfo, uri.host, uri.port, normalizedPath, null, null).toString()
     }
 
-    private fun okHttpClientForWebSocket(proxyMode: String, proxyUrl: String): OkHttpClient {
+    private fun okHttpClientForWebSocket(
+        proxyMode: String,
+        proxyUrl: String,
+        allowInsecureConnection: Boolean = false,
+    ): OkHttpClient {
         val builder = OkHttpClient.Builder()
             .connectTimeout(generationConnectTimeoutMs.toLong(), java.util.concurrent.TimeUnit.MILLISECONDS)
             .readTimeout(0, java.util.concurrent.TimeUnit.MILLISECONDS)
@@ -841,6 +876,10 @@ class AndroidImageStudioBridge(
         when (normalizeProxyMode(proxyMode)) {
             "none" -> builder.proxy(Proxy.NO_PROXY)
             "custom" -> builder.proxy(parseCustomProxy(proxyUrl))
+        }
+        if (allowInsecureConnection) {
+            builder.sslSocketFactory(insecureSSLContext.socketFactory, insecureTrustManager)
+            builder.hostnameVerifier(insecureHostnameVerifier)
         }
         return builder.build()
     }
@@ -851,9 +890,10 @@ class AndroidImageStudioBridge(
         payload: String,
         proxyMode: String,
         proxyUrl: String,
+        allowInsecureConnection: Boolean,
     ) {
         val wsUrl = responsesWebSocketUrl(baseUrl)
-        val client = okHttpClientForWebSocket(proxyMode, proxyUrl)
+        val client = okHttpClientForWebSocket(proxyMode, proxyUrl, allowInsecureConnection)
         val done = CountDownLatch(1)
         val errorRef = AtomicReference<String?>(null)
         val socket = client.newWebSocket(
@@ -902,7 +942,7 @@ class AndroidImageStudioBridge(
         errorRef.get()?.let { throw IllegalStateException(it) }
     }
 
-    private fun validateProbeBaseUrl(raw: String): String {
+    private fun validateProbeBaseUrl(raw: String, allowInsecureConnection: Boolean = false): String {
         val trimmed = raw.trim().trimEnd('/')
         val cleaned = if (trimmed.endsWith("/v1", ignoreCase = true)) trimmed.dropLast(3).trimEnd('/') else trimmed
         if (cleaned.isBlank()) throw IllegalArgumentException("未配置上游 BASE_URL")
@@ -917,11 +957,32 @@ class AndroidImageStudioBridge(
             throw IllegalArgumentException("BASE_URL 必须包含协议和主机,例如 https://example.com")
         }
         if (scheme == "https") return cleaned
-        if (scheme == "http" && isProbeLoopbackHost(host)) return cleaned
+        if (scheme == "http" && (allowInsecureConnection || isProbeLoopbackHost(host))) return cleaned
         if (scheme == "http") {
             throw IllegalArgumentException("拒绝使用非 TLS 上游: $cleaned。只有 localhost / 127.0.0.1 / ::1 允许 http://")
         }
         throw IllegalArgumentException("BASE_URL 仅支持 http:// 或 https://")
+    }
+
+    private fun validateRequestUrl(raw: String, allowInsecureConnection: Boolean): String {
+        val cleaned = raw.trim()
+        if (cleaned.isBlank()) throw IllegalArgumentException("请求 URL 不能为空")
+        val uri = try {
+            URI(cleaned)
+        } catch (error: Exception) {
+            throw IllegalArgumentException("请求 URL 无效: ${error.message ?: error.javaClass.simpleName}")
+        }
+        val scheme = uri.scheme?.lowercase(Locale.US) ?: ""
+        val host = uri.host ?: ""
+        if (scheme.isBlank() || host.isBlank()) {
+            throw IllegalArgumentException("请求 URL 必须包含协议和主机")
+        }
+        if (scheme == "https") return cleaned
+        if (scheme == "http" && (allowInsecureConnection || isProbeLoopbackHost(host))) return cleaned
+        if (scheme == "http") {
+            throw IllegalArgumentException("拒绝使用非 TLS 上游: $cleaned。请在渠道中开启“允许不安全连接”")
+        }
+        throw IllegalArgumentException("请求 URL 仅支持 http:// 或 https://")
     }
 
     private fun openAIEndpoint(baseUrl: String, endpointPath: String): String {

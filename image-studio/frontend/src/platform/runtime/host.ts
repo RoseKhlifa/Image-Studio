@@ -150,6 +150,7 @@ async function startRemoteJob(options: GenerateOptionsLike): Promise<JobStartedL
         ...options,
         requestPolicy: normalizeRequestPolicy(options.requestPolicy),
         imagesNewAPICompat: options.imagesNewAPICompat === true,
+        allowInsecureConnection: options.allowInsecureConnection === true,
       }, sourceImages: options.sourceImages }, {
         signal: controller.signal,
         onLog: (line) => emitLocalEvent(`log:${jobId}`, line),
@@ -329,6 +330,7 @@ export function OptimizePrompt(options: PromptOptimizeOptionsLike): Promise<stri
     textModelID: options.textModelID,
     proxyMode: options.proxyMode,
     proxyURL: options.proxyURL,
+    allowInsecureConnection: options.allowInsecureConnection === true,
     imagePaths: options.imagePaths,
     imagePath: options.imagePath,
     sourceImages: options.sourceImages,
@@ -760,6 +762,7 @@ export async function probeCurrentUpstream(
   proxyURL = "",
   apiMode = "responses",
   responsesTransport = "sse",
+  allowInsecureConnection = false,
   signal?: AbortSignal,
 ): Promise<ProbeUpstreamResultLike> {
   if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
@@ -770,6 +773,7 @@ export async function probeCurrentUpstream(
     proxyURL,
     apiMode,
     responsesTransport,
+    ...(allowInsecureConnection ? { allowInsecureConnection: true } : {}),
   };
   if (hasServiceMethod("ProbeUpstream")) {
     return invokeService<ProbeUpstreamResultLike>(unsupportedMessage, "ProbeUpstream", options);

@@ -46,7 +46,7 @@ func RequestAndExtractWithPartial(
 	if baseURL == "" {
 		return ImageResult{}, errors.New("未配置上游 BASE_URL,请在「设置 → 上游 BASE_URL」中填入兼容 Responses API 的中转站地址")
 	}
-	baseURL, err = ValidateBaseURL(baseURL)
+	baseURL, err = ValidateBaseURLWithSecurity(baseURL, opts.AllowInsecureConnection)
 	if err != nil {
 		return ImageResult{}, err
 	}

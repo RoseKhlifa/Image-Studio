@@ -1185,6 +1185,14 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     }
     const activeProfile = s.profiles.find((p) => p.id === s.activeProfileId);
     const responsesTransport = activeProfile?.responsesTransport ?? s.responsesTransport;
+    if (activeProfile?.allowInsecureConnection && s.kernelRuntimeMode === "remote" && !runtimePlatform.isAndroid) {
+      set({
+        errorMessage: "允许不安全连接需要桌面本地内核；浏览器/远程内核不能绕过 HTTPS 证书校验。",
+        errorCanRetry: false,
+        errorRawPath: null,
+      });
+      return;
+    }
     if (s.apiMode === "responses" && responsesTransport === "websocket" && s.kernelRuntimeMode === "remote" && !runtimePlatform.isAndroid) {
       set({
         errorMessage: "当前远程内核模式暂不支持 Responses WebSocket mode，请切回本地内核或关闭该开关。",
@@ -1357,6 +1365,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       responsesTransport: s.responsesTransport,
       requestPolicy: s.requestPolicy,
       imagesNewAPICompat: s.imagesNewAPICompat,
+      allowInsecureConnection: activeProfile?.allowInsecureConnection === true,
       apiMode: s.apiMode,
       noPromptRevision: true,
       concurrencyLimit,
@@ -1373,6 +1382,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
             responsesTransport: fallbackProfile.responsesTransport ?? "sse",
             requestPolicy: fallbackProfile.requestPolicy,
             imagesNewAPICompat: fallbackProfile.imagesNewAPICompat === true,
+            allowInsecureConnection: fallbackProfile.allowInsecureConnection === true,
           }
         : undefined,
       autoRetryEnabled: batchProcessEnabled ? batchProcess.retryOnFailure : s.autoRetryEnabled,
@@ -2190,6 +2200,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     set({ isTestingKey: true });
     s.pushToast("正在测试连接...", "info", 8000);
     try {
+      const activeProfile = s.profiles.find((profile) => profile.id === s.activeProfileId);
       const result = await probeCurrentUpstream(
         cleanedBaseURL,
         s.apiKey.trim(),
@@ -2197,6 +2208,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         s.proxyURL,
         s.apiMode,
         s.responsesTransport,
+        activeProfile?.allowInsecureConnection === true,
       );
       set({ isTestingKey: false });
       if (result.responsesTransport === "websocket" && result.responsesTransportOK === false) {
@@ -2218,6 +2230,10 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     const aiProfile = pickAIProfile(s.profiles, s.aiProfileId, s.activeProfileId);
     if (!aiProfile) {
       s.pushToast("先在上游配置里指定一个 Responses 配置作为 AI 渠道", "warn", 5000);
+      return;
+    }
+    if (aiProfile.allowInsecureConnection && s.kernelRuntimeMode === "remote" && !readRuntimePlatformState().isAndroid) {
+      s.pushToast("允许不安全连接的 AI 渠道需要桌面本地内核", "warn", 5000);
       return;
     }
     const apiKey = (await GetStoredAPIKey(keyringUserFor(aiProfile.id)).catch(() => "")).trim();
@@ -2250,6 +2266,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         textModelID: aiProfile.textModelID.trim(),
         proxyMode: s.proxyMode,
         proxyURL: s.proxyURL,
+        allowInsecureConnection: aiProfile.allowInsecureConnection === true,
         imagePaths: sourcePaths,
         imagePath: "",
         sourceImages: s.mode === "edit" ? s.sources : undefined,
@@ -2277,6 +2294,10 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     const aiProfile = pickAIProfile(s.profiles, s.aiProfileId, s.activeProfileId);
     if (!aiProfile) {
       s.pushToast("先在上游配置里指定一个 Responses 配置作为 AI 渠道", "warn", 5000);
+      return;
+    }
+    if (aiProfile.allowInsecureConnection && s.kernelRuntimeMode === "remote" && !readRuntimePlatformState().isAndroid) {
+      s.pushToast("允许不安全连接的 AI 渠道需要桌面本地内核", "warn", 5000);
       return;
     }
     const apiKey = (await GetStoredAPIKey(keyringUserFor(aiProfile.id)).catch(() => "")).trim();
@@ -2308,6 +2329,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         textModelID: aiProfile.textModelID.trim(),
         proxyMode: s.proxyMode,
         proxyURL: s.proxyURL,
+        allowInsecureConnection: aiProfile.allowInsecureConnection === true,
         imagePaths: full.savedPath ? [full.savedPath] : [],
         imagePath: "",
         sourceImages: [{

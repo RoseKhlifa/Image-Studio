@@ -172,6 +172,37 @@ export function UpstreamProfileEditor({
         </Hint>
       </Field>
 
+      <Field label="连接安全">
+        <button
+          type="button"
+          role="switch"
+          aria-checked={draft.allowInsecureConnection === true}
+          onClick={() => onPatchDraft({ allowInsecureConnection: !(draft.allowInsecureConnection === true) })}
+          className={`flex w-full items-center justify-between gap-3 border px-3 py-2.5 text-left text-sm transition-colors ${
+            draft.allowInsecureConnection
+              ? "border-red-500/30 bg-red-500/[0.06] text-red-700 dark:text-red-300"
+              : "border-black/[0.08] bg-[var(--surface)] text-zinc-900 hover:border-[color:var(--accent)]/35 dark:border-white/[0.08] dark:text-zinc-100"
+          } ${usesFluentUI ? "rounded-[10px]" : "rounded-[14px]"}`}
+        >
+          <span className="min-w-0">
+            <span className="block font-medium">允许不安全连接</span>
+            <span className="mt-1 block break-words text-[11px] leading-relaxed text-zinc-500 dark:text-zinc-400">
+              允许远程 <code className="font-mono-token">http://</code>，并忽略 HTTPS / WSS 的自签名、过期或域名不匹配证书。
+            </span>
+          </span>
+          <span
+            className={`inline-flex min-h-[26px] min-w-[58px] shrink-0 items-center justify-center border px-2.5 text-[11px] font-semibold ${
+              draft.allowInsecureConnection
+                ? "border-red-500/25 bg-red-500/10 text-red-700 dark:text-red-300"
+                : "border-black/[0.08] bg-black/[0.04] text-zinc-500 dark:border-white/[0.08] dark:bg-white/[0.05] dark:text-zinc-300"
+            } ${usesFluentUI ? "rounded-[8px]" : "rounded-full"}`}
+          >
+            {draft.allowInsecureConnection ? "已开启" : "已关闭"}
+          </span>
+        </button>
+        <Hint>仅在可信网络中使用。开启后 API Key、提示词和图片可能被窃听或篡改。</Hint>
+      </Field>
+
       <Field label={<>API Key <Req /></>}>
         <div className="relative min-w-0">
           <input

@@ -28,6 +28,7 @@ export type GenerateOptionsLike = {
   responsesTransport?: string;
   requestPolicy: string;
   imagesNewAPICompat?: boolean;
+  allowInsecureConnection?: boolean;
   noPromptRevision: boolean;
   concurrencyLimit?: number;
   partialImages?: number;
@@ -41,6 +42,7 @@ export type GenerateOptionsLike = {
     responsesTransport?: string;
     requestPolicy: RequestPolicy;
     imagesNewAPICompat?: boolean;
+    allowInsecureConnection?: boolean;
   };
   autoRetryEnabled?: boolean;
   autoRetryCount?: number;
@@ -63,6 +65,7 @@ export type PromptOptimizeOptionsLike = {
   textModelID: string;
   proxyMode?: string;
   proxyURL?: string;
+  allowInsecureConnection?: boolean;
   imagePaths: string[];
   imagePath: string;
   sourceImages?: Array<{
@@ -81,6 +84,7 @@ export type ProbeUpstreamOptionsLike = {
   proxyURL?: string;
   apiMode?: string;
   responsesTransport?: string;
+  allowInsecureConnection?: boolean;
 };
 
 export type ProbeUpstreamResultLike = {
