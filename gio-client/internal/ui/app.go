@@ -1074,7 +1074,7 @@ func New() *App {
 		workflowGraphs:                          map[string]workflowGraphModel{},
 		workflowGraphHistories:                  map[string]*workflowGraphHistory{},
 		workflowSelectedNodes:                   map[string]string{},
-		workflowConsoleOpen:                     true,
+		workflowConsoleOpen:                     false,
 		workflowBottomTab:                       "console",
 		desktopStore:                            desktopStore,
 		desktopState:                            desktopState,

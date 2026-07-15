@@ -37,26 +37,14 @@ func (a *App) layoutWorkflowInspector(gtx layout.Context, snap snapshot, spec de
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						return a.workflowInspectorHeader(gtx, node, data.Runtime[node.ID], spec)
 					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return workflowDivider(gtx, spec.Colors.border)
+					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return a.layoutWorkflowInspectorContent(gtx, snap, data.Graph, node, spec)
+					}),
 				}
-				if spec.Style == desktopStyleMacOS {
-					children = append(children,
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return a.workflowInspectorSectionCard(gtx, spec, func(gtx layout.Context) layout.Dimensions {
-								return a.layoutWorkflowInspectorContent(gtx, snap, data.Graph, node, spec)
-							})
-						}),
-					)
-				} else {
-					children = append(children,
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return workflowDivider(gtx, spec.Colors.border)
-						}),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return a.layoutWorkflowInspectorContent(gtx, snap, data.Graph, node, spec)
-						}),
-					)
-				}
-				return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(unit.Dp(14))}.Layout(gtx, children...)
+				return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(unit.Dp(12))}.Layout(gtx, children...)
 			})
 		})
 	})
@@ -144,12 +132,6 @@ func (a *App) workflowConnectionButton(workspaceID string, edge workflowEdgeMode
 	button := new(widget.Clickable)
 	a.workflowConnectionButtons[key] = button
 	return button
-}
-
-func (a *App) workflowInspectorSectionCard(gtx layout.Context, spec desktopThemeTokens, body layout.Widget) layout.Dimensions {
-	return a.borderedSurface(gtx, spec.Colors.surfaceElevated, workflowSectionRadius(spec), spec.Colors.border, func(gtx layout.Context) layout.Dimensions {
-		return layout.UniformInset(unit.Dp(14)).Layout(gtx, body)
-	})
 }
 
 func (a *App) handleWorkflowInspectorEvents(gtx layout.Context, node workflowNodeModel) {

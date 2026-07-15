@@ -57,42 +57,19 @@ func (a *App) layoutWorkflowLibrary(gtx layout.Context, snap snapshot, spec desk
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						return a.workflowLibraryHeader(gtx, spec)
 					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return a.workflowWorkspaceSection(gtx, spec)
+					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return workflowDivider(gtx, spec.Colors.border)
+					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return a.workflowNodeLibrarySection(gtx, data, spec)
+					}),
 				}
-				if spec.Style == desktopStyleMacOS {
-					children = append(children,
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return a.workflowLibrarySectionCard(gtx, spec, func(gtx layout.Context) layout.Dimensions {
-								return a.workflowWorkspaceSection(gtx, spec)
-							})
-						}),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return a.workflowLibrarySectionCard(gtx, spec, func(gtx layout.Context) layout.Dimensions {
-								return a.workflowNodeLibrarySection(gtx, data, spec)
-							})
-						}),
-					)
-				} else {
-					children = append(children,
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return a.workflowWorkspaceSection(gtx, spec)
-						}),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return workflowDivider(gtx, spec.Colors.border)
-						}),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return a.workflowNodeLibrarySection(gtx, data, spec)
-						}),
-					)
-				}
-				return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(unit.Dp(14))}.Layout(gtx, children...)
+				return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(unit.Dp(12))}.Layout(gtx, children...)
 			})
 		})
-	})
-}
-
-func (a *App) workflowLibrarySectionCard(gtx layout.Context, spec desktopThemeTokens, body layout.Widget) layout.Dimensions {
-	return a.borderedSurface(gtx, spec.Colors.surfaceElevated, workflowSectionRadius(spec), spec.Colors.border, func(gtx layout.Context) layout.Dimensions {
-		return layout.UniformInset(unit.Dp(14)).Layout(gtx, body)
 	})
 }
 
@@ -213,7 +190,7 @@ func (a *App) workflowNodeLibrarySection(gtx layout.Context, data workflowCanvas
 
 func (a *App) workflowAvailableNodeRow(gtx layout.Context, node workflowNodeModel, spec desktopThemeTokens) layout.Dimensions {
 	button := a.workflowAddNodeButton(workflowNodeTypeID(node))
-	return a.surfaceButton(gtx, button, rgba(0xffffff, 0x00), spec.Colors.surface2, withAlpha(spec.Colors.accent, 0x14), spec.Metrics.ControlRadius, layout.Inset{Top: 8, Bottom: 8, Left: 9, Right: 9}, func(gtx layout.Context) layout.Dimensions {
+	return a.surfaceButton(gtx, button, rgba(0xffffff, 0x00), spec.Colors.surface2, rgba(0xffffff, 0x00), spec.Metrics.ControlRadius, layout.Inset{Top: 8, Bottom: 8, Left: 9, Right: 9}, func(gtx layout.Context) layout.Dimensions {
 		semantic.LabelOp("添加" + node.Title).Add(gtx.Ops)
 		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle, Gap: gtx.Dp(unit.Dp(8))}.Layout(gtx,
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -267,7 +244,7 @@ func (a *App) workflowNodeLibraryRow(gtx layout.Context, node workflowNodeModel,
 	if selected {
 		bg = spec.Colors.surface2
 	}
-	return a.surfaceButton(gtx, button, bg, spec.Colors.surface2, withAlpha(spec.Colors.accent, 0x14), spec.Metrics.ControlRadius, layout.Inset{Top: 8, Bottom: 8, Left: 9, Right: 9}, func(gtx layout.Context) layout.Dimensions {
+	return a.surfaceButton(gtx, button, bg, spec.Colors.surface2, rgba(0xffffff, 0x00), spec.Metrics.ControlRadius, layout.Inset{Top: 8, Bottom: 8, Left: 9, Right: 9}, func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle, Gap: gtx.Dp(unit.Dp(8))}.Layout(gtx,
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				colorValue := workflowNodePhaseColor(spec, runtimeState.Phase)
@@ -307,9 +284,6 @@ func (a *App) workflowSectionTitle(gtx layout.Context, title string, count strin
 }
 
 func workflowSectionRadius(spec desktopThemeTokens) unit.Dp {
-	if spec.Style == desktopStyleMacOS {
-		return unit.Dp(22)
-	}
 	return spec.Metrics.CardRadius
 }
 
