@@ -14,6 +14,9 @@ import (
 	"testing"
 	"time"
 
+	"gioui.org/layout"
+	"gioui.org/op"
+	"gioui.org/unit"
 	sharedCompat "image-studio/shared/compat"
 )
 
@@ -115,6 +118,42 @@ func BenchmarkReadSnapshotLargeHistoryCached(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		_ = app.readSnapshot()
 	}
+}
+
+func benchmarkDesktopFrame(b *testing.B, reducedEffects bool) {
+	b.Helper()
+	b.Setenv("HOME", b.TempDir())
+	app := New()
+	app.mu.Lock()
+	app.reducedEffects = reducedEffects
+	app.history = benchmarkHistoryItems(18)
+	app.historyRev++
+	app.snapshotReady = false
+	app.mu.Unlock()
+
+	var ops op.Ops
+	gtx := layout.Context{
+		Ops:         &ops,
+		Constraints: layout.Exact(image.Pt(1920, 1080)),
+		Metric:      unit.Metric{PxPerDp: 1, PxPerSp: 1},
+		Now:         time.Now(),
+	}
+	app.layout(gtx)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		ops.Reset()
+		gtx.Now = gtx.Now.Add(time.Second / 60)
+		app.layout(gtx)
+	}
+}
+
+func BenchmarkDesktopFrameStandardEffects(b *testing.B) {
+	benchmarkDesktopFrame(b, false)
+}
+
+func BenchmarkDesktopFrameReducedEffects(b *testing.B) {
+	benchmarkDesktopFrame(b, true)
 }
 
 func BenchmarkHistoryPanelDataLargeHistoryCold(b *testing.B) {

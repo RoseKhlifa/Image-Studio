@@ -294,49 +294,47 @@ func (a *App) finishCodexConfigSync(name string, err error) {
 }
 
 func (a *App) applyCodexConfigSync(imported codexAPIConfig) error {
-	state, _, err := gioCompat.LoadState()
-	if err != nil {
-		return err
-	}
-	state = sharedCompat.Normalize(state)
-
 	name := codexProfileName(imported.Provider)
 	now := time.Now().UnixMilli()
 	profileID := ""
-	found := false
-	for i := range state.Profiles {
-		if strings.TrimSpace(state.Profiles[i].Name) != name {
-			continue
+	err := gioCompat.UpdateState(func(state *sharedCompat.State) error {
+		*state = sharedCompat.Normalize(*state)
+		found := false
+		for i := range state.Profiles {
+			if strings.TrimSpace(state.Profiles[i].Name) != name {
+				continue
+			}
+			state.Profiles[i].Name = name
+			state.Profiles[i].APIMode = string(client.APIModeResponses)
+			state.Profiles[i].RequestPolicy = string(client.RequestPolicyOpenAI)
+			state.Profiles[i].ImagesNewAPICompat = false
+			state.Profiles[i].BaseURL = imported.BaseURL
+			state.Profiles[i].LastUsedAt = now
+			profileID = state.Profiles[i].ID
+			found = true
+			break
 		}
-		state.Profiles[i].Name = name
-		state.Profiles[i].APIMode = string(client.APIModeResponses)
-		state.Profiles[i].RequestPolicy = string(client.RequestPolicyOpenAI)
-		state.Profiles[i].ImagesNewAPICompat = false
-		state.Profiles[i].BaseURL = imported.BaseURL
-		state.Profiles[i].LastUsedAt = now
-		profileID = state.Profiles[i].ID
-		found = true
-		break
-	}
-	if !found {
-		profileID = fmt.Sprintf("gio-%d", now)
-		state.Profiles = append(state.Profiles, sharedCompat.UpstreamProfile{
-			ID:                 profileID,
-			Name:               name,
-			APIMode:            string(client.APIModeResponses),
-			RequestPolicy:      string(client.RequestPolicyOpenAI),
-			ImagesNewAPICompat: false,
-			BaseURL:            imported.BaseURL,
-			TextModelID:        client.TextModel,
-			ImageModelID:       client.ImageModel,
-			ReasoningEffort:    "xhigh",
-			CreatedAt:          now,
-			LastUsedAt:         now,
-		})
-	}
-	state.ActiveProfile = profileID
-	state.UpdatedAt = now
-	if err := gioCompat.SaveState(state); err != nil {
+		if !found {
+			profileID = fmt.Sprintf("gio-%d", now)
+			state.Profiles = append(state.Profiles, sharedCompat.UpstreamProfile{
+				ID:                 profileID,
+				Name:               name,
+				APIMode:            string(client.APIModeResponses),
+				RequestPolicy:      string(client.RequestPolicyOpenAI),
+				ImagesNewAPICompat: false,
+				BaseURL:            imported.BaseURL,
+				TextModelID:        client.TextModel,
+				ImageModelID:       client.ImageModel,
+				ReasoningEffort:    "xhigh",
+				CreatedAt:          now,
+				LastUsedAt:         now,
+			})
+		}
+		state.ActiveProfile = profileID
+		state.UpdatedAt = now
+		return nil
+	})
+	if err != nil {
 		return err
 	}
 	if err := gioCompat.WriteAPIKey(profileID, imported.APIKey); err != nil {

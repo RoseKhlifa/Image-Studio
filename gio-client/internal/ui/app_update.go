@@ -121,14 +121,12 @@ func (a *App) openAppUpdateRelease() {
 }
 
 func (a *App) persistIgnoredReleaseTag(value string) error {
-	state, _, err := gioCompat.LoadState()
-	if err != nil {
-		return err
-	}
-	state = sharedCompat.Normalize(state)
-	state.Settings.IgnoredReleaseTag = strings.TrimSpace(value)
-	state.UpdatedAt = time.Now().UnixMilli()
-	return gioCompat.SaveState(state)
+	return gioCompat.UpdateState(func(state *sharedCompat.State) error {
+		*state = sharedCompat.Normalize(*state)
+		state.Settings.IgnoredReleaseTag = strings.TrimSpace(value)
+		state.UpdatedAt = time.Now().UnixMilli()
+		return nil
+	})
 }
 
 func checkForAppUpdate() (appUpdateInfo, error) {

@@ -32,6 +32,30 @@ class AndroidStreamEventParserTest {
     }
 
     @Test
+    fun `skips empty keepalives before standard Images API result`() {
+        assertNull(extractNativeHttpStreamResult(""))
+        assertNull(extractNativeHttpStreamResult("data:"))
+        assertNull(extractNativeHttpStreamResult("data:{}"))
+        assertNull(extractNativeHttpStreamResult("data: {\"data\":[]}"))
+
+        val result = extractNativeHttpStreamResult(
+            """data:{"data":[{"b64_json":"b64-final","revised_prompt":"kept alive"}]}""",
+        )
+        assertNotNull(result)
+        assertEquals("b64-final", result?.imageB64)
+        assertEquals("kept alive", result?.revisedPrompt)
+        assertEquals("images_api", result?.sourceEvent)
+    }
+
+    @Test
+    fun `extracts standard Images API result from raw JSON stream line`() {
+        val result = extractNativeHttpStreamResult(
+            """{"data":[{"b64_json":"b64-final"}]}""",
+        )
+        assertEquals("b64-final", result?.imageB64)
+    }
+
+    @Test
     fun `builds progress payload for Responses partial image`() {
         val payload = buildNativeHttpStreamProgressPayload(
             """data: {"type":"response.image_generation_call.partial_image","partial_image_b64":"b64-preview","revised_prompt":"preview prompt","partial_image_index":2}""",

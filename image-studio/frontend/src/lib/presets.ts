@@ -1,4 +1,5 @@
 import type {
+  AutoAspectResolutionPreset,
   BackgroundValue,
   ImageStyleValue,
   InputFidelityValue,
@@ -23,6 +24,7 @@ export type PresetStateSnapshot = {
   moderation: ModerationValue;
   batchCount: number;
   styleTag: string;
+  editAutoAspectResolution: AutoAspectResolutionPreset;
 };
 
 export function pickPresetStateSnapshot(source: PresetStateSnapshot): PresetStateSnapshot {
@@ -38,6 +40,7 @@ export function pickPresetStateSnapshot(source: PresetStateSnapshot): PresetStat
     moderation: source.moderation,
     batchCount: source.batchCount,
     styleTag: source.styleTag,
+    editAutoAspectResolution: source.editAutoAspectResolution,
   };
 }
 
@@ -62,6 +65,7 @@ export function buildPresetPatch(preset: Preset, current: PresetStateSnapshot): 
     moderation: preset.moderation ?? current.moderation,
     batchCount: preset.batchCount,
     styleTag: preset.styleTag ?? current.styleTag,
+    editAutoAspectResolution: preset.editAutoAspectResolution ?? "",
   };
 }
 
@@ -79,6 +83,7 @@ export function presetMatchesSnapshot(preset: Preset, current: PresetStateSnapsh
     && patch.moderation === current.moderation
     && patch.batchCount === current.batchCount
     && patch.styleTag === current.styleTag
+    && patch.editAutoAspectResolution === current.editAutoAspectResolution
   );
 }
 

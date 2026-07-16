@@ -1,5 +1,7 @@
-import { LoadCompatibilityState, SaveCompatibilityState } from "../platform/runtime/host";
+import { LoadCompatibilityState, SaveCompatibilityState } from "../platform/runtime/host.ts";
+import { targetPlatform } from "../platform/index.ts";
 import type {
+  AutoAspectResolutionPreset,
   BatchProcessConfig,
   BackgroundValue,
   CompletionNotificationConfig,
@@ -17,9 +19,9 @@ import type {
   ProxyMode,
   ThemeMode,
   UpstreamProfile,
-} from "../types/domain";
-import { ACTIVE_PROFILE_LS_KEY, PROFILES_LS_KEY, tryParseProfile } from "./profiles";
-import { normalizeProxyMode, persistProxyConfig } from "./proxy";
+} from "../types/domain.ts";
+import { ACTIVE_PROFILE_LS_KEY, AI_PROFILE_LS_KEY, PROFILES_LS_KEY, tryParseProfile } from "./profiles.ts";
+import { normalizeProxyMode, persistProxyConfig } from "./proxy.ts";
 import {
   normalizeCustomAspectRatios,
   persistCustomAspectRatios,
@@ -29,20 +31,26 @@ import {
   persistHistoryFullImages,
   persistHistoryItems,
   pruneHistoryStorage,
-} from "./storage";
+} from "./storage.ts";
 import {
   normalizeCompletionSoundConfig,
   persistCompletionSoundConfig,
-} from "./completionSound";
+} from "./completionSound.ts";
 import {
   normalizeCompletionNotificationConfig,
   persistCompletionNotificationConfig,
-} from "./completionNotification";
-import { normalizePromptTemplates } from "./promptTemplates";
+} from "./completionNotification.ts";
+import { normalizePromptTemplates } from "./promptTemplates.ts";
 import { normalizeAutoRetryCount } from "../../../../shared/kernel/requestModel.js";
 
 const SCHEMA_VERSION = 1;
 const MARKER_KEY = "gptcodex.compatStateUpdatedAt";
+
+type AdvancedFloatingPanelPrefs = {
+  x?: number;
+  y?: number;
+  groups?: Record<string, boolean>;
+};
 
 export type CompatibilityState = {
   schemaVersion: number;
@@ -77,9 +85,11 @@ export type CompatibilityState = {
     ignoredReleaseTag?: string;
     completionSound?: CompletionSoundConfig;
     completionNotification?: CompletionNotificationConfig;
+    advancedFloatingPanel?: AdvancedFloatingPanelPrefs;
   };
   profiles: UpstreamProfile[];
   activeProfileId: string;
+  aiProfileId?: string;
   history: HistoryItem[];
   historyFull?: Array<{ id: string; imageB64: string }>;
 };
@@ -88,6 +98,7 @@ export type CompatibilityExportInput = {
   history: HistoryItem[];
   profiles: UpstreamProfile[];
   activeProfileId: string;
+  aiProfileId: string;
   proxyMode: ProxyMode;
   proxyURL: string;
   theme: ThemeMode;
@@ -149,6 +160,7 @@ export function compatibilityExportFingerprint(input: CompatibilityExportInput):
   return JSON.stringify({
     profiles: input.profiles,
     activeProfileId: input.activeProfileId,
+    aiProfileId: input.aiProfileId,
     proxyMode: input.proxyMode,
     proxyURL: input.proxyURL,
     theme: input.theme,
@@ -174,6 +186,7 @@ export function compatibilityExportFingerprint(input: CompatibilityExportInput):
     ignoredReleaseTag: input.ignoredReleaseTag,
     completionSound: input.completionSound,
     completionNotification: input.completionNotification,
+    advancedFloatingPanel: readAdvancedFloatingPanelPrefs(),
     outputDir: readLocalStorageString("gptcodex.outputDir"),
     trustedOutputRoots: loadTrustedOutputRoots(),
     savePromptSuppressed: readLocalStorageString("gptcodex.savePromptSuppressed") === "1",
@@ -216,9 +229,11 @@ function buildCompatibilityState(input: CompatibilityExportInput): Compatibility
       ignoredReleaseTag: readLocalStorageString("gptcodex.ignoredReleaseTag"),
       completionSound: normalizeCompletionSoundConfig(input.completionSound),
       completionNotification: normalizeCompletionNotificationConfig(input.completionNotification),
+      advancedFloatingPanel: readAdvancedFloatingPanelPrefs(),
     },
     profiles: normalizeProfiles(input.profiles),
     activeProfileId: input.activeProfileId || "",
+    aiProfileId: input.aiProfileId || "",
     history,
     historyFull: history
       .filter((item) => typeof item.imageB64 === "string" && item.imageB64.trim())
@@ -231,6 +246,8 @@ function applyCompatibilityLocalStorage(state: CompatibilityState): void {
   writeLocalStorageJSON(PROFILES_LS_KEY, profiles);
   if (state.activeProfileId) writeLocalStorageString(ACTIVE_PROFILE_LS_KEY, state.activeProfileId);
   else removeLocalStorage(ACTIVE_PROFILE_LS_KEY);
+  if (state.aiProfileId) writeLocalStorageString(AI_PROFILE_LS_KEY, state.aiProfileId);
+  else removeLocalStorage(AI_PROFILE_LS_KEY);
 
   const settings = state.settings ?? {};
   if (settings.proxyMode) persistProxyConfig(normalizeProxyMode(settings.proxyMode), settings.proxyURL ?? "");
@@ -270,6 +287,9 @@ function applyCompatibilityLocalStorage(state: CompatibilityState): void {
   }
   persistCompletionSoundConfig(normalizeCompletionSoundConfig(settings.completionSound));
   persistCompletionNotificationConfig(normalizeCompletionNotificationConfig(settings.completionNotification));
+  if (settings.advancedFloatingPanel) {
+    writeAdvancedFloatingPanelPrefs(settings.advancedFloatingPanel);
+  }
 }
 
 async function persistCompatibilityHistory(state: CompatibilityState): Promise<void> {
@@ -295,6 +315,7 @@ function normalizeCompatibilityState(raw: unknown): CompatibilityState | null {
     settings: normalizeSettings(source.settings),
     profiles: normalizeProfiles(Array.isArray(source.profiles) ? source.profiles : []),
     activeProfileId: typeof source.activeProfileId === "string" ? source.activeProfileId : "",
+    aiProfileId: typeof source.aiProfileId === "string" ? source.aiProfileId : "",
     history: (Array.isArray(source.history) ? source.history : [])
       .map(toSerializableHistoryItem)
       .filter((item): item is HistoryItem => item !== null),
@@ -338,6 +359,7 @@ function normalizeSettings(raw: unknown): CompatibilityState["settings"] {
     ignoredReleaseTag: typeof source.ignoredReleaseTag === "string" ? source.ignoredReleaseTag.trim() : "",
     completionSound: normalizeCompletionSoundConfig(source.completionSound),
     completionNotification: normalizeCompletionNotificationConfig(source.completionNotification),
+    advancedFloatingPanel: normalizeAdvancedFloatingPanelPrefs(source.advancedFloatingPanel),
   };
 }
 
@@ -357,6 +379,7 @@ function toSerializableHistoryItem(raw: unknown): HistoryItem | null {
     imageId: stringOrUndefined(item.imageId),
     previewUrl: stringOrUndefined(item.previewUrl),
     fullUrl: stringOrUndefined(item.fullUrl),
+    previewPath: stringOrUndefined(item.previewPath),
     thumbPath: stringOrUndefined(item.thumbPath),
     previewWidth: numberOrUndefined(item.previewWidth),
     previewHeight: numberOrUndefined(item.previewHeight),
@@ -383,6 +406,7 @@ function toSerializableHistoryItem(raw: unknown): HistoryItem | null {
     batchIndex: numberOrUndefined(item.batchIndex),
     previewSlotIndex: numberOrUndefined(item.previewSlotIndex),
     elapsedSec: numberOrUndefined(item.elapsedSec),
+    sourcePaths: cleanStringList(item.sourcePaths, 32),
     savedPath: stringOrUndefined(item.savedPath),
     rawPath: stringOrUndefined(item.rawPath),
   };
@@ -393,6 +417,7 @@ function historyFingerprint(item: HistoryItem) {
     id: item.id,
     imageId: item.imageId,
     savedPath: item.savedPath,
+    previewPath: item.previewPath,
     thumbPath: item.thumbPath,
     rawPath: item.rawPath,
     prompt: item.prompt,
@@ -413,6 +438,7 @@ function historyFingerprint(item: HistoryItem) {
     batchIndex: item.batchIndex,
     previewSlotIndex: item.previewSlotIndex,
     elapsedSec: item.elapsedSec,
+    sourcePaths: item.sourcePaths,
     imageB64: item.imageB64,
   };
 }
@@ -422,6 +448,7 @@ function cloneExportInput(input: CompatibilityExportInput): CompatibilityExportI
     history: input.history.map((item) => ({ ...item, imageBlob: null, previewBlob: null })),
     profiles: input.profiles.map((profile) => ({ ...profile })),
     activeProfileId: input.activeProfileId,
+    aiProfileId: input.aiProfileId,
     proxyMode: input.proxyMode,
     proxyURL: input.proxyURL,
     theme: input.theme,
@@ -460,6 +487,48 @@ export function writeIgnoredReleaseTag(value: string): void {
   else removeLocalStorage("gptcodex.ignoredReleaseTag");
 }
 
+function advancedFloatingPanelStorageKey(): string {
+  return `gptcodex.advancedFloatingPanel.${targetPlatform}`;
+}
+
+function normalizeAdvancedFloatingPanelPrefs(raw: unknown): AdvancedFloatingPanelPrefs | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const source = raw as Record<string, any>;
+  const x = typeof source.x === "number" && Number.isFinite(source.x) ? Math.round(source.x) : undefined;
+  const y = typeof source.y === "number" && Number.isFinite(source.y) ? Math.round(source.y) : undefined;
+  const groupsSource = source.groups && typeof source.groups === "object" ? source.groups as Record<string, unknown> : {};
+  const groups = Object.fromEntries(
+    Object.entries(groupsSource)
+      .filter(([key, value]) => typeof key === "string" && key.trim() && typeof value === "boolean")
+      .map(([key, value]) => [key.trim(), value as boolean]),
+  );
+  if (x === undefined && y === undefined && Object.keys(groups).length === 0) return undefined;
+  return {
+    x,
+    y,
+    groups,
+  };
+}
+
+function readAdvancedFloatingPanelPrefs(): AdvancedFloatingPanelPrefs | undefined {
+  const raw = readLocalStorageString(advancedFloatingPanelStorageKey());
+  if (!raw) return undefined;
+  try {
+    return normalizeAdvancedFloatingPanelPrefs(JSON.parse(raw));
+  } catch {
+    return undefined;
+  }
+}
+
+function writeAdvancedFloatingPanelPrefs(value: AdvancedFloatingPanelPrefs): void {
+  const normalized = normalizeAdvancedFloatingPanelPrefs(value);
+  if (!normalized) {
+    removeLocalStorage(advancedFloatingPanelStorageKey());
+    return;
+  }
+  writeLocalStorageJSON(advancedFloatingPanelStorageKey(), normalized);
+}
+
 function normalizePresets(raw: unknown): Preset[] {
   if (!Array.isArray(raw)) return [];
   const out: Preset[] = [];
@@ -482,11 +551,18 @@ function normalizePresets(raw: unknown): Preset[] {
       imageStyle: source.imageStyle === undefined ? undefined : normalizeImageStyle(source.imageStyle),
       moderation: source.moderation === undefined ? undefined : normalizeModeration(source.moderation),
       styleTag: typeof source.styleTag === "string" ? source.styleTag : undefined,
+      editAutoAspectResolution: normalizeAutoAspectResolutionPreset(source.editAutoAspectResolution),
       kernelRuntimeMode: normalizeKernelRuntimeMode(source.kernelRuntimeMode),
       batchCount: normalizeBatchCount(source.batchCount),
     });
   }
   return out;
+}
+
+function normalizeAutoAspectResolutionPreset(value: unknown): AutoAspectResolutionPreset {
+  return value === "256" || value === "512" || value === "1k" || value === "2k" || value === "4k"
+    ? value
+    : "";
 }
 
 function normalizeTheme(value: unknown): ThemeMode {

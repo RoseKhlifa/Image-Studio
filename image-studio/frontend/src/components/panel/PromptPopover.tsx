@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { useStudioStore } from "../../state/studioStore";
 import { usePlatform } from "../../platform/context";
+import { buildPromptHistoryEntries } from "../../lib/promptTemplates";
 
 const PROMPT_TEMPLATES: { label: string; text: string }[] = [
   { label: "写实摄影", text: "photorealistic, professional photography, 35mm, natural lighting, sharp focus, high detail" },
@@ -27,6 +28,7 @@ export function PromptPopover({
   onPick: (text: string) => void;
 }) {
   const history = useStudioStore((s) => s.promptHistory);
+  const historyEntries = buildPromptHistoryEntries(history);
   const promptTemplates = useStudioStore((s) => s.promptTemplates);
   const [tab, setTab] = useState<"templates" | "history">("templates");
   const { isMac, usesFluentUI, usesAppleUI } = usePlatform();
@@ -151,21 +153,35 @@ export function PromptPopover({
           </div>
         )}
         {tab === "history" && (
-          history.length === 0 ? (
+          historyEntries.length === 0 ? (
             <div className={`border border-dashed border-black/[0.08] px-4 py-8 text-center text-[12px] text-zinc-500 dark:border-white/[0.08] dark:text-zinc-300 ${usesFluentUI ? "rounded-[12px]" : "rounded-[18px]"}`}>
               还没有提交过 prompt
             </div>
           ) : (
-            history.map((p, i) => (
-              <button
-                key={i}
-                onClick={() => { onPick(p); onClose(); }}
-                title="点击使用"
-                className={`w-full text-left transition-colors hover:bg-[var(--accent-soft)] ${isMac ? "px-3.5 py-3.5" : "px-3 py-3"} ${usesFluentUI ? "rounded-[10px]" : "rounded-[16px]"}`}
-              >
-                <div className={`${isMac ? "text-[13px] leading-6" : "text-[12px] leading-relaxed"} text-zinc-700 dark:text-zinc-200`}>{p}</div>
-              </button>
-            ))
+            <ol className="list-none border-y border-black/[0.07] dark:border-white/[0.07]">
+              {historyEntries.map((entry) => (
+                <li
+                  key={`${entry.position}:${entry.text}`}
+                  className="border-b border-black/[0.07] last:border-b-0 dark:border-white/[0.07]"
+                >
+                  <button
+                    onClick={() => { onPick(entry.text); onClose(); }}
+                    title={`使用第 ${entry.position} 条历史 prompt`}
+                    className={`prompt-history-entry flex w-full items-start gap-2.5 text-left transition-colors hover:bg-[var(--accent-soft)] ${isMac ? "px-3.5 py-3.5" : "px-3 py-3"}`}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={`mt-0.5 w-7 shrink-0 border-r border-black/[0.08] pr-2 text-right font-mono text-[10px] font-semibold tabular-nums text-zinc-400 dark:border-white/[0.08] dark:text-zinc-500 ${isMac ? "leading-6" : "leading-relaxed"}`}
+                    >
+                      {String(entry.position).padStart(2, "0")}
+                    </span>
+                    <span className={`min-w-0 flex-1 ${isMac ? "text-[13px] leading-6" : "text-[12px] leading-relaxed"} text-zinc-700 dark:text-zinc-200`}>
+                      {entry.text}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ol>
           )
         )}
       </div>

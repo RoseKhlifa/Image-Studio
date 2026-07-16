@@ -1,36 +1,25 @@
 # Issue 关单评论模板
 
-更新时间：2026-06-07
+更新时间：2026-07-10
 
 本文档只覆盖当前 **GitHub 仍 open，但当前仓库代码与本地验证已经覆盖** 的 issue。
 
 适用范围：
 
 - `#24`
-- `#25`
-- `#26`
-- `#27`
-- `#28`
-- `#32`
-- `#35`
-- `#37`
-- `#40`
-- `#42`
+- `#44`
+- `#49`
+- `#50`
+- `#51`
+- `#53`
 
 统一验证基线：
 
-- 2026-06-07 已重新跑通本地平台总链：
-  - `IMAGE_STUDIO_INCLUDE_ISSUE_CLOSE_VERIFY=1 IMAGE_STUDIO_VERIFY_RESULTS_DIR=/private/tmp/verify-results-issue-close-final4 node scripts/verify-local-platform-kernel.mjs`
+- 2026-07-10 已重新跑通本地平台总链：
+  - `npm test; go test ./... (image-studio, go-cli, gio-client, shared/compat-go); npm run build:windows; npm run build:android; npm run build:macos; ./gradlew :app:testDebugUnitTest; git diff --check`
   - `platform-kernel-summary.json`：`status = passed`
   - 结构化结果：
-    - `/private/tmp/verify-results-issue-close-final4/platform-kernel-summary.json`
-    - `/private/tmp/verify-results-issue-close-final4/live-verify.json`
-    - `/private/tmp/verify-results-issue-close-final4/local-smoke.json`
-    - `/private/tmp/verify-results-issue-close-final4/android-shell.json`
-    - `/private/tmp/verify-results-issue-close-final4/macos-release.json`
-    - `/private/tmp/verify-results-issue-close-final4/issue-close-tooling.json`
-    - `/private/tmp/verify-results-issue-close-final4/issue-close-export-bundle/manifest.json`
-- 前端测试当前为 `114/114` 通过。
+- 前端测试当前为 `162/162` 通过。
 
 建议用法：
 
@@ -82,187 +71,143 @@ node scripts/issue-close-helper.mjs apply all --comment-and-close --execute
 Issue: [#24](https://github.com/RoseKhlifa/Image-Studio/issues/24)
 
 ```md
-这个需求当前仓库已经覆盖。
+这个需求当前仓库已经完整覆盖。
 
-- 历史结果列表已支持“全部删除”。
-- 主要落点在 `image-studio/frontend/src/components/history/HistoryRail.tsx`。
-- 当前本地验证链已重新通过，2026-06-07 的 `platform-kernel` 总链状态为 `passed`。
-
-如果你这边没有新的复现条件，这个 issue 可以关闭。
-```
-
-## `#25` 上游配置升级后的同步问题
-
-Issue: [#25](https://github.com/RoseKhlifa/Image-Studio/issues/25)
-
-```md
-这个问题当前仓库已经做了两层处理：
-
-- 已支持上游配置导入 / 导出。
-- 兼容状态会落到宿主侧共享路径，减轻更新后重新录入配置的问题。
+- 历史栏与 Windows 主历史栏都有“全部删除”入口和二次确认。
+- 删除会在同一个 IndexedDB 事务中清空 `history` 与 `historyFull`，并清理旧 keyval 历史，未加载分页也不会残留。
+- 画布、对比、结果详情、待保存队列和全部 workspace 引用会同步清理；正在加载分页时会先等待既有请求，避免旧记录回写。
 
 主要落点：
 
-- `image-studio/frontend/src/lib/upstreamConfigTransfer.ts`
-- `image-studio/backend/compatibility.go`
+- `image-studio/frontend/src/lib/storage.ts`
+- `image-studio/frontend/src/state/historyCleanup.ts`
+- `image-studio/frontend/src/components/history/HistoryRail.tsx`
+- `image-studio/frontend/src/components/history/WindowsHistoryRail.tsx`
 
-本地验证链已在 2026-06-07 重新通过。如果你这边没有新的“升级后配置丢失”复现路径，这个 issue 可以关闭。
+最终前端全量测试为 162/162，这个 issue 可以关闭。
 ```
 
-## `#26` 失败重试开关
+## `#44` [Feature]: 添加批处理功能
 
-Issue: [#26](https://github.com/RoseKhlifa/Image-Studio/issues/26)
+Issue: [#44](https://github.com/RoseKhlifa/Image-Studio/issues/44)
 
 ```md
 这个需求当前仓库已经覆盖。
 
-- 设置页已提供全局“失败自动重试”开关。
-- 桌面端和 Android 端都已有入口。
+桌面端图生图批处理现已支持：
+
+- 选择目录或多张图片作为输入。
+- 按指定并发逐张处理。
+- 默认回写源目录，或选择独立输出目录。
+- 按源图比例自动适配统一分辨率档位。
+- 保留原文件名，可编辑输出前缀，并对同名文件自动追加序号。
+- 可选失败重试。
 
 主要落点：
 
-- `image-studio/frontend/src/components/panel/SettingsPanel.tsx`
-- `image-studio/frontend/src/platform/android/settings/AndroidSettingsPanel.tsx`
+- `image-studio/frontend/src/components/panel/BatchProcessSection.tsx`
+- `image-studio/frontend/src/state/studioStore.ts`
+- `image-studio/backend/service.go`
+- `docs/batch-img2img/README.md`
 
-当前本地验证链已重新通过。如果没有新的行为差异，这个 issue 可以关闭。
+批处理路径已有前后端测试覆盖，这个 issue 可以关闭；更复杂的命名模板可以单独作为增强需求。
 ```
 
-## `#27` 上游失败重试路由功能
+## `#49` [Feature]: 模板/历史里面的历史条数混乱，不够清晰的看到每一条的内容
 
-Issue: [#27](https://github.com/RoseKhlifa/Image-Studio/issues/27)
+Issue: [#49](https://github.com/RoseKhlifa/Image-Studio/issues/49)
 
 ```md
-这个需求当前仓库已经覆盖。
+这个需求已经完成。
 
-- 失败重试现在可以路由到用户指定的备用上游。
-- 不是只做“原上游再试一次”，而是支持切到备用 profile。
+- Prompt 历史改为带 `01 / 02 / ...` 序号和明确分隔线的有序列表。
+- Android 使用同一编号语义。
+- Gio 客户端同步显示“历史 1 / 历史 2 / ...”，不再把连续 prompt 混成一段。
 
 主要落点：
 
-- `go-cli/pkg/client/retry.go`
-- `image-studio/frontend/src/components/panel/UpstreamProfileEditor.tsx`
-
-本地验证链已重新通过。如果没有新的复现场景，这个 issue 可以关闭。
-```
-
-## `#28` 保存用户自定义提示词模板
-
-Issue: [#28](https://github.com/RoseKhlifa/Image-Studio/issues/28)
-
-```md
-这个功能当前仓库已经覆盖。
-
-已支持：
-
-- 添加提示词模板
-- 删除提示词模板
-- 修改并保存模板
-- 自定义模板标题
-- 点击模板快速填入提示词
-
-主要落点：
-
+- `image-studio/frontend/src/components/panel/PromptPopover.tsx`
 - `image-studio/frontend/src/lib/promptTemplates.ts`
-- `image-studio/frontend/src/components/panel/PromptTemplateManagerModal.tsx`
+- `image-studio/frontend/src/platform/android/AndroidPromptTemplateModal.tsx`
+- `gio-client/internal/ui/layout_controls.go`
 
-本地测试与验证链已重新通过。如果没有新的补充需求，这个 issue 可以关闭。
+前端与 Gio 聚焦测试均通过，这个 issue 可以关闭。
 ```
 
-## `#32` 拖结果到文件复制
+## `#50` [Feature]: 生图可以支持url生图吗
 
-Issue: [#32](https://github.com/RoseKhlifa/Image-Studio/issues/32)
+Issue: [#50](https://github.com/RoseKhlifa/Image-Studio/issues/50)
 
 ```md
-这个需求当前仓库已经覆盖。
+Images API 返回 URL 的兼容已经完成。
 
-- 桌面端结果图已支持直接拖出到系统文件管理器复制。
-- 导出逻辑优先走真实结果文件 / 全尺寸媒体路径，不是只拖缩略图。
+- `data[0].url` 会下载并转换为应用内部使用的 base64 图片。
+- 桌面 Go client、远程内核和 Android 原生 HTTP 路径均已覆盖。
+- Android 下载不再依赖 WebView `fetch`，避免 CDN CORS 阻断。
+- 下载统一限制为 50MB，并校验 HTTP 状态、URL 协议和真实 PNG/JPEG/WebP 内容。
 
 主要落点：
 
-- `image-studio/backend/dialogs.go`
-- `image-studio/frontend/src/lib/dragExport.ts`
+- `go-cli/pkg/client/images_api.go`
+- `image-studio/frontend/src/platform/runtime/remote-kernel/images.ts`
+- `android-shell/app/src/main/java/top/gptcodex/imagestudio/android/AndroidImageStudioBridge.kt`
 
-本地验证链已重新通过。如果你这边没有新的拖拽失败复现，这个 issue 可以关闭。
+fixture、Go、前端和 Android 单测均通过，这个 issue 可以关闭。
 ```
 
-## `#35` 工作区的鼠标滚动方向改为横向
+## `#51` [Feature]: 兼容google 的nano banana2
 
-Issue: [#35](https://github.com/RoseKhlifa/Image-Studio/issues/35)
+Issue: [#51](https://github.com/RoseKhlifa/Image-Studio/issues/51)
 
 ```md
-这个修正当前仓库已经覆盖。
+Nano Banana 2 的客户端兼容已经完成。
 
-- 多工作区场景下，工作区栏滚轮方向已改为横向滚动。
+- Google 官方主机 + `gemini-3.1-flash-image` 会窄路由到官方 `POST /v1beta/interactions`。
+- 请求使用 `x-goog-api-key`、`input`、`response_format`、`store=false`，并解析 `steps[].content[]` 的 `image.data` / `image.uri`。
+- 第三方 relay 仍走标准 Images API，不会被误送到 Google 原生协议。
+- Interactions 报错不会静默回退，便于定位模型权限或协议问题。
+
+官方依据：
+
+- https://ai.google.dev/gemini-api/docs/image-generation
+- https://ai.google.dev/api/interactions-api
+- https://ai.google.dev/gemini-api/docs/openai
 
 主要落点：
 
-- `image-studio/frontend/src/components/layout/WorkspaceBar.tsx`
+- `go-cli/pkg/client/google_interactions.go`
+- `shared/kernel/requestModel.js`
+- `image-studio/frontend/src/platform/runtime/remote-kernel/requestPayloads.ts`
 
-本地测试与验证链已重新通过。如果没有新的滚动行为问题，这个 issue 可以关闭。
+请求/响应 fixture 与全量测试均通过，这个 issue 可以关闭。真实模型可用性仍取决于 Google key 权限或第三方 relay 的模型支持。
 ```
 
-## `#37` 结果里生成的多张图片查看问题
+## `#53` [Feature]: 支持发送蒙版的API参数
 
-Issue: [#37](https://github.com/RoseKhlifa/Image-Studio/issues/37)
+Issue: [#53](https://github.com/RoseKhlifa/Image-Studio/issues/53)
 
 ```md
-这个需求当前仓库已经覆盖。
+可选蒙版图片功能已经完成。
 
-- 当前已支持在画板里对同批生成结果做左右切换浏览。
-- 不需要再回到结果列表逐张找。
+- Wails、Android 与 Gio 都可导入和清除蒙版图片。
+- 画布绘制蒙版与导入蒙版复用同一 `maskB64` 请求字段。
+- Responses API 按 `input_image_mask` data URL 发送。
+- Images edits 按 multipart `mask` 文件发送，并保留图片真实 MIME。
+- 无效或空蒙版会明确报错，不再静默忽略。
 
 主要落点：
 
-- `image-studio/frontend/src/components/canvas/useCanvasShortcuts.ts`
-- `image-studio/frontend/src/state/studioStore.media.ts`
+- `image-studio/frontend/src/state/studioStore.ts`
+- `image-studio/frontend/src/platform/android/canvas/AndroidCanvasWorkspace.tsx`
+- `gio-client/internal/ui/canvas_mask.go`
+- `go-cli/pkg/client/images_api.go`
+- `shared/kernel/requestModel.js`
 
-本地测试与验证链已重新通过。如果没有新的查看路径问题，这个 issue 可以关闭。
-```
-
-## `#40` 多图张数按钮选择
-
-Issue: [#40](https://github.com/RoseKhlifa/Image-Studio/issues/40)
-
-```md
-这个需求当前仓库已经覆盖。
-
-- Android 端多图张数选择已从滑杆改为带边界的按钮选择。
-
-主要落点：
-
-- `image-studio/frontend/src/platform/android/AndroidPhoneComposePanel.tsx`
-- `image-studio/frontend/src/platform/android/AndroidPadComposePanel.tsx`
-
-本地验证链已重新通过。如果没有新的交互差异，这个 issue 可以关闭。
-```
-
-## `#42` 一些功能需求
-
-Issue: [#42](https://github.com/RoseKhlifa/Image-Studio/issues/42)
-
-```md
-这个需求集合当前仓库已覆盖主要条目。
-
-已支持：
-
-1. 有参考图时，图生图默认切到 `Auto` 比例。
-2. 会根据参考图比例推导最接近的 2K / 4K 分辨率。
-3. 支持自定义提示词模板与快捷填入。
-4. 已支持结果图与参考图对比查看。
-
-主要落点：
-
-- `image-studio/frontend/src/components/panel/sizeCapabilities.ts`
-- `image-studio/frontend/src/components/panel/PromptTemplateManagerModal.tsx`
-- `image-studio/frontend/src/components/canvas/CompareOverlay.tsx`
-
-本地验证链已重新通过。如果没有新的补充项或复现场景，这个 issue 可以关闭。
+前端、Go、Gio 与 Android 单测均通过，这个 issue 可以关闭。官方上游若要求 PNG、同尺寸或 alpha 通道，仍需提供符合模型约束的蒙版。
 ```
 
 ## 暂不建议关闭的 open issue
 
-- `#30`：代码已修，但仍缺 Windows 真机视觉确认。
-- `#36`：核心修复已落地，但仍缺 Android / Windows 真机和真实高并发上游长链路证明。
-- `#23`：按当前任务约定视为上游问题，不纳入本轮收口。
-- `#14`：独立在线 Web 版已明确搁置。
+- `#30`：原生 Wails light/dark 标题栏颜色与 CSS token 已有自动化一致性验证，但仍缺 Windows 真机视觉确认。
+- `#52`：五个拖出入口已统一走 Windows 原生 OLE，IDataObject 也显式提供 Unicode CF_HDROP；仍缺 Windows + OneCommander 实机确认。
+- `#14`：这是已回答的产品问答；当前没有独立在线 Web 版，也没有可据此实现的功能验收标准。

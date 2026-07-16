@@ -25,6 +25,7 @@ export function AndroidParameterEditor({
   aspectOptions,
   activeResolution,
   activeResolutionLabel,
+  editAutoAspectComputedSizeLabel,
   exactSizeLabel,
   activeQualityLabel,
   activeStyleLabel,
@@ -33,9 +34,14 @@ export function AndroidParameterEditor({
   availableResolutions,
   apiMode,
   batchCount,
+  effectiveEditAutoAspectResolution,
+  handleEditAutoAspectResolutionSelect,
+  handleEditAutoAspectToggle,
   handleAspectSelect,
   handleResolutionSelect,
   imageModelID,
+  manualEditAutoAspectActive,
+  mode,
   onOpenCustomAspectRatioModal,
   onOpenCustomSizeModal,
   quality,
@@ -48,6 +54,7 @@ export function AndroidParameterEditor({
   aspectOptions: AspectPresetOption[];
   activeResolution: ResolutionPreset | null;
   activeResolutionLabel: string;
+  editAutoAspectComputedSizeLabel?: string | null;
   exactSizeLabel?: string | null;
   activeQualityLabel: string;
   activeStyleLabel: string;
@@ -56,9 +63,14 @@ export function AndroidParameterEditor({
   availableResolutions: ResolutionPreset[];
   apiMode: "responses" | "images";
   batchCount: number;
+  effectiveEditAutoAspectResolution: Exclude<ResolutionPreset, "auto">;
+  handleEditAutoAspectResolutionSelect: (resolution: Exclude<ResolutionPreset, "auto">) => void;
+  handleEditAutoAspectToggle: (enabled: boolean) => void;
   handleAspectSelect: (aspect: AspectPreset) => void;
   handleResolutionSelect: (resolution: ResolutionPreset) => void;
   imageModelID: string;
+  manualEditAutoAspectActive: boolean;
+  mode: "generate" | "edit";
   onOpenCustomAspectRatioModal: () => void;
   onOpenCustomSizeModal: () => void;
   quality: string;
@@ -73,6 +85,11 @@ export function AndroidParameterEditor({
     activeQualityLabel,
     batchCount,
   });
+  const showRegularSizeControls = !manualEditAutoAspectActive;
+  const editAutoResolutionOptions = RESOLUTION_PRESETS.filter(
+    (item): item is { value: Exclude<ResolutionPreset, "auto">; label: string } =>
+      item.value !== "auto" && availableResolutions.includes(item.value),
+  );
 
   return (
     <AndroidParameterEditorShell
@@ -96,23 +113,68 @@ export function AndroidParameterEditor({
         />
       </AndroidParameterBlock>
 
-      <AndroidParameterBlock title="画幅比例">
-        <AndroidAspectGrid
-          items={aspectOptions}
-          onManageCustom={allowCustomAspectRatios ? onOpenCustomAspectRatioModal : undefined}
-          value={activeAspect}
-          onChange={handleAspectSelect}
-        />
-      </AndroidParameterBlock>
+      {mode === "edit" ? (
+        <AndroidParameterBlock title="源图尺寸策略">
+          <AndroidSegmentedChoices
+            columns={2}
+            options={[
+              { value: "manual", label: "沿用当前比例", hint: "继续使用普通比例和分辨率预设" },
+              { value: "auto", label: "按源图自动适配", hint: "比例跟随源图，单独控制分辨率档位" },
+            ]}
+            value={manualEditAutoAspectActive ? "auto" : "manual"}
+            onChange={(next) => handleEditAutoAspectToggle(next === "auto")}
+          />
+          {manualEditAutoAspectActive ? (
+            <>
+              <div className="mt-3">
+                <AndroidSegmentedChoices
+                  columns={3}
+                  options={editAutoResolutionOptions}
+                  value={effectiveEditAutoAspectResolution}
+                  onChange={handleEditAutoAspectResolutionSelect}
+                />
+              </div>
+              <p className="android-parameter-note mt-2">
+                {editAutoAspectComputedSizeLabel
+                  ? `当前会按源图比例自动换算，目标分辨率档位 ${effectiveEditAutoAspectResolution.toUpperCase()}，实际提交尺寸 ${editAutoAspectComputedSizeLabel}。`
+                  : `开启后会按当前源图比例自动换算尺寸，并统一使用 ${effectiveEditAutoAspectResolution.toUpperCase()} 分辨率档位。`}
+              </p>
+            </>
+          ) : (
+            <p className="android-parameter-note mt-2">
+              关闭后使用下面的普通比例和分辨率预设。
+            </p>
+          )}
+        </AndroidParameterBlock>
+      ) : null}
 
-      <AndroidDiscreteSlider
-        label="分辨率"
-        value={activeResolution}
-        displayValue={exactSizeLabel ?? undefined}
-        options={RESOLUTION_PRESETS.filter((item) => availableResolutions.includes(item.value))}
-        onChange={handleResolutionSelect}
-        note={resolutionHint}
-      />
+      {showRegularSizeControls ? (
+        <>
+          <AndroidParameterBlock title="画幅比例">
+            <AndroidAspectGrid
+              items={aspectOptions}
+              onManageCustom={allowCustomAspectRatios ? onOpenCustomAspectRatioModal : undefined}
+              value={activeAspect}
+              onChange={handleAspectSelect}
+            />
+          </AndroidParameterBlock>
+
+          <AndroidDiscreteSlider
+            label="分辨率"
+            value={activeResolution}
+            displayValue={exactSizeLabel ?? undefined}
+            options={RESOLUTION_PRESETS.filter((item) => availableResolutions.includes(item.value))}
+            onChange={handleResolutionSelect}
+            note={resolutionHint}
+          />
+        </>
+      ) : (
+        <AndroidParameterBlock title="尺寸控制">
+          <p className="android-parameter-note">
+            当前普通图生图已开启“按源图比例自动适配”，比例会跟随源图自动计算，分辨率由上面的源图尺寸策略统一控制。
+          </p>
+        </AndroidParameterBlock>
+      )}
 
       {allowPreciseSizeControl ? (
         <AndroidParameterBlock

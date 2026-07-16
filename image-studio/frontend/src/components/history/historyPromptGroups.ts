@@ -24,6 +24,12 @@ export function historyPromptGroupLabel(group: HistoryPromptGroup): string {
   return group.prompt || "(无 prompt)";
 }
 
+export function historyPromptGroupIndexSummary(group: HistoryPromptGroup): string {
+  if (group.items.length <= 0) return "#0";
+  if (group.items.length === 1) return "#1";
+  return `#1-#${group.items.length}`;
+}
+
 export function buildHistoryPromptGroups(items: HistoryItem[]): HistoryPromptGroup[] {
   const groups = new Map<string, HistoryPromptGroup>();
 

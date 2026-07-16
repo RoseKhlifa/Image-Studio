@@ -129,6 +129,60 @@ func TestProbeUpstreamUsesCustomProxy(t *testing.T) {
 	}
 }
 
+func TestProbeUpstreamAllowsExplicitInsecureTLS(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"id":"self-signed-model"}]}`))
+	}))
+	defer srv.Close()
+
+	_, strictErr := probeUpstream(context.Background(), ProbeUpstreamOptions{
+		APIKey:  "sk-test",
+		BaseURL: srv.URL,
+	})
+	if strictErr == nil {
+		t.Fatal("strict probe unexpectedly accepted a self-signed certificate")
+	}
+
+	got, err := probeUpstream(context.Background(), ProbeUpstreamOptions{
+		APIKey:                  "sk-test",
+		BaseURL:                 srv.URL,
+		AllowInsecureConnection: true,
+	})
+	if err != nil {
+		t.Fatalf("insecure probe returned error: %v", err)
+	}
+	if got.ModelCount != 1 || len(got.Models) != 1 || got.Models[0].ID != "self-signed-model" {
+		t.Fatalf("unexpected result: %+v", got)
+	}
+}
+
+func TestProbeUpstreamAllowsExplicitRemoteHTTP(t *testing.T) {
+	got, err := probeUpstream(context.Background(), ProbeUpstreamOptions{
+		APIKey:                  "sk-test",
+		BaseURL:                 "http://relay.example.com",
+		AllowInsecureConnection: true,
+		ProxyMode:               "custom",
+		ProxyURL:                newProbeProxyServer(t),
+	})
+	if err != nil {
+		t.Fatalf("insecure HTTP probe returned error: %v", err)
+	}
+	if got.ModelCount != 1 {
+		t.Fatalf("model count = %d, want 1", got.ModelCount)
+	}
+}
+
+func newProbeProxyServer(t *testing.T) string {
+	t.Helper()
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"id":"http-model"}]}`))
+	}))
+	t.Cleanup(proxy.Close)
+	return proxy.URL
+}
+
 func TestProbeUpstreamReportsStructuredWebSocketProbeFailure(t *testing.T) {
 	var gotUpgrade bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -21,6 +22,11 @@ const (
 var readSystemNotificationPermissionFunc = readSystemNotificationPermission
 var requestSystemNotificationPermissionFunc = requestSystemNotificationPermission
 var showSystemNotificationFunc = showSystemNotification
+
+type notificationOpenResultAction struct {
+	ResultID  string
+	SavedPath string
+}
 
 func systemNotificationPermissionLabel(permission systemNotificationPermissionState) string {
 	switch permission {
@@ -92,6 +98,28 @@ func completionNotificationBody(item sharedCompat.HistoryItem) string {
 	return "图片生成任务已完成"
 }
 
+func notificationOpenResultActionForItem(item sharedCompat.HistoryItem) notificationOpenResultAction {
+	return notificationOpenResultAction{
+		ResultID:  strings.TrimSpace(item.ID),
+		SavedPath: strings.TrimSpace(item.SavedPath),
+	}
+}
+
+func (action notificationOpenResultAction) valid() bool {
+	return strings.TrimSpace(action.ResultID) != "" || strings.TrimSpace(action.SavedPath) != ""
+}
+
+func (action notificationOpenResultAction) args() []string {
+	args := make([]string, 0, 4)
+	if id := strings.TrimSpace(action.ResultID); id != "" {
+		args = append(args, "--id", id)
+	}
+	if path := strings.TrimSpace(action.SavedPath); path != "" {
+		args = append(args, "--path", path)
+	}
+	return args
+}
+
 func (a *App) setCompletionNotificationEnabled(value bool) systemNotificationPermissionState {
 	if !value {
 		a.completionNotification.Enabled = false
@@ -147,14 +175,15 @@ func (a *App) maybeSendCompletionNotification(item sharedCompat.HistoryItem, com
 	}
 	title := "Image Studio · 已完成"
 	body := completionNotificationBody(item)
+	action := notificationOpenResultActionForItem(item)
 	go func() {
-		if err := showSystemNotificationFunc(title, body); err != nil {
+		if err := showSystemNotificationFunc(title, body, action); err != nil {
 			a.appendLog("发送系统通知失败: " + err.Error())
 		}
 	}()
 }
 
-func showSystemNotification(title string, body string) error {
+func showSystemNotification(title string, body string, action notificationOpenResultAction) error {
 	title = strings.TrimSpace(title)
 	body = strings.TrimSpace(body)
 	if title == "" {
@@ -168,20 +197,67 @@ func showSystemNotification(title string, body string) error {
 		script := fmt.Sprintf("display notification %s with title %s", appleScriptQuoted(body), appleScriptQuoted(title))
 		return exec.Command("osascript", "-e", script).Run()
 	case "windows":
-		script := `Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; $n = New-Object System.Windows.Forms.NotifyIcon; $n.Icon = [System.Drawing.SystemIcons]::Information; $n.BalloonTipTitle = $args[0]; $n.BalloonTipText = $args[1]; $n.Visible = $true; $n.ShowBalloonTip(5000); Start-Sleep -Milliseconds 5500; $n.Dispose()`
-		return exec.Command("powershell", "-NoProfile", "-Command", script, title, body).Run()
+		return showWindowsSystemNotification(title, body, action)
 	default:
-		if path, err := exec.LookPath("notify-send"); err == nil {
-			return exec.Command(path, title, body).Run()
-		}
-		if path, err := exec.LookPath("zenity"); err == nil {
-			return exec.Command(path, "--notification", "--text="+title+"\n"+body).Run()
-		}
-		if path, err := exec.LookPath("kdialog"); err == nil {
-			return exec.Command(path, "--title", title, "--passivepopup", body, "5").Run()
-		}
-		return fmt.Errorf("当前平台没有可用的系统通知器")
+		return showLinuxSystemNotification(title, body, action)
 	}
+}
+
+func showWindowsSystemNotification(title string, body string, action notificationOpenResultAction) error {
+	script := `Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; $n = New-Object System.Windows.Forms.NotifyIcon; $n.Icon = [System.Drawing.SystemIcons]::Information; $n.BalloonTipTitle = $args[0]; $n.BalloonTipText = $args[1]; if ($args.Length -gt 2) { $exe = $args[2]; $payloadArgs = @(); if ($args.Length -gt 3) { $payloadArgs = $args[3..($args.Length-1)] }; $subscription = Register-ObjectEvent -InputObject $n -EventName BalloonTipClicked -MessageData @{Exe=$exe; Arguments=$payloadArgs} -Action { Start-Process -FilePath $event.MessageData.Exe -ArgumentList $event.MessageData.Arguments | Out-Null } }; $n.Visible = $true; $n.ShowBalloonTip(5000); Start-Sleep -Milliseconds 5500; if ($subscription) { Unregister-Event -SubscriptionId $subscription.Id -ErrorAction SilentlyContinue; Remove-Job -Id $subscription.Id -Force -ErrorAction SilentlyContinue }; $n.Dispose()`
+	args := []string{"-NoProfile", "-Command", script, title, body}
+	if action.valid() {
+		exe, err := os.Executable()
+		if err != nil {
+			return err
+		}
+		args = append(args, exe)
+		args = append(args, append([]string{"open-result"}, action.args()...)...)
+	}
+	return exec.Command("powershell", args...).Run()
+}
+
+func showLinuxSystemNotification(title string, body string, action notificationOpenResultAction) error {
+	if path, err := exec.LookPath("notify-send"); err == nil {
+		if action.valid() && notifySendSupportsActions(path) {
+			cmd := exec.Command(path, "--action=view=查看详情", "--wait", title, body)
+			output, notifyErr := cmd.Output()
+			if notifyErr == nil {
+				if strings.TrimSpace(string(output)) == "view" {
+					return runNotificationOpenResultAction(action)
+				}
+				return nil
+			}
+		}
+		return exec.Command(path, title, body).Run()
+	}
+	if path, err := exec.LookPath("zenity"); err == nil {
+		return exec.Command(path, "--notification", "--text="+title+"\n"+body).Run()
+	}
+	if path, err := exec.LookPath("kdialog"); err == nil {
+		return exec.Command(path, "--title", title, "--passivepopup", body, "5").Run()
+	}
+	return fmt.Errorf("当前平台没有可用的系统通知器")
+}
+
+func notifySendSupportsActions(path string) bool {
+	output, err := exec.Command(path, "--help").Output()
+	if err != nil {
+		return false
+	}
+	return strings.Contains(string(output), "--action")
+}
+
+func runNotificationOpenResultAction(action notificationOpenResultAction) error {
+	if !action.valid() {
+		return nil
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	args := append([]string{"open-result"}, action.args()...)
+	return exec.Command(exe, args...).Start()
 }
 
 func appleScriptQuoted(value string) string {

@@ -19,6 +19,7 @@ export function AndroidPadParameterSection({
   aspectOptions,
   activeResolution,
   activeResolutionLabel,
+  editAutoAspectComputedSizeLabel,
   exactSizeLabel,
   activeQualityLabel,
   activeStyleLabel,
@@ -27,10 +28,15 @@ export function AndroidPadParameterSection({
   availableResolutions,
   apiMode,
   batchCount,
+  effectiveEditAutoAspectResolution,
+  handleEditAutoAspectResolutionSelect,
+  handleEditAutoAspectToggle,
   handleAspectSelect,
   handleResolutionSelect,
   imageModelID,
   isMediumPad,
+  manualEditAutoAspectActive,
+  mode,
   needsUpstreamSetup,
   onOpenCustomAspectRatioModal,
   onOpenCustomSizeModal,
@@ -45,6 +51,7 @@ export function AndroidPadParameterSection({
   aspectOptions: AspectPresetOption[];
   activeResolution: ResolutionPreset | null;
   activeResolutionLabel: string;
+  editAutoAspectComputedSizeLabel?: string | null;
   exactSizeLabel?: string | null;
   activeQualityLabel: string;
   activeStyleLabel: string;
@@ -53,10 +60,15 @@ export function AndroidPadParameterSection({
   availableResolutions: ResolutionPreset[];
   apiMode: "responses" | "images";
   batchCount: number;
+  effectiveEditAutoAspectResolution: Exclude<ResolutionPreset, "auto">;
+  handleEditAutoAspectResolutionSelect: (resolution: Exclude<ResolutionPreset, "auto">) => void;
+  handleEditAutoAspectToggle: (enabled: boolean) => void;
   handleAspectSelect: (aspect: AspectPreset) => void;
   handleResolutionSelect: (resolution: ResolutionPreset) => void;
   imageModelID: string;
   isMediumPad: boolean;
+  manualEditAutoAspectActive: boolean;
+  mode: "generate" | "edit";
   needsUpstreamSetup: boolean;
   onOpenCustomAspectRatioModal: () => void;
   onOpenCustomSizeModal: () => void;
@@ -120,6 +132,7 @@ export function AndroidPadParameterSection({
           aspectOptions={aspectOptions}
           activeResolution={activeResolution}
           activeResolutionLabel={activeResolutionLabel}
+          editAutoAspectComputedSizeLabel={editAutoAspectComputedSizeLabel}
           exactSizeLabel={exactSizeLabel}
           activeQualityLabel={activeQualityLabel}
           activeStyleLabel={activeStyleLabel}
@@ -128,9 +141,14 @@ export function AndroidPadParameterSection({
           availableResolutions={availableResolutions}
           apiMode={apiMode}
           batchCount={batchCount}
+          effectiveEditAutoAspectResolution={effectiveEditAutoAspectResolution}
+          handleEditAutoAspectResolutionSelect={handleEditAutoAspectResolutionSelect}
+          handleEditAutoAspectToggle={handleEditAutoAspectToggle}
           handleAspectSelect={handleAspectSelect}
           handleResolutionSelect={handleResolutionSelect}
           imageModelID={imageModelID}
+          manualEditAutoAspectActive={manualEditAutoAspectActive}
+          mode={mode}
           onOpenCustomAspectRatioModal={onOpenCustomAspectRatioModal}
           onOpenCustomSizeModal={onOpenCustomSizeModal}
           quality={quality}

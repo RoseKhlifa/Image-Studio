@@ -1,7 +1,12 @@
 package ui
 
 import (
+	"fmt"
+	"image"
 	"os"
+	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -33,7 +38,12 @@ func (a *App) cancelRun() {
 	if cancel != nil {
 		a.cancel = nil
 		a.running = false
+		a.lastRunConcurrency = 0
 		a.status = "已取消"
+		a.clearBatchPreviewItemsLocked()
+		if !a.canOpenResultGridLocked() {
+			a.resultGridOpen = false
+		}
 		a.appendLogLocked("任务已取消")
 	}
 	a.mu.Unlock()
@@ -47,6 +57,11 @@ func (a *App) finishWithError(err error, rawPath string) {
 	a.mu.Lock()
 	a.running = false
 	a.cancel = nil
+	a.lastRunConcurrency = 0
+	a.clearBatchPreviewItemsLocked()
+	if !a.canOpenResultGridLocked() {
+		a.resultGridOpen = false
+	}
 	a.status = "失败"
 	a.lastErrorMessage = strings.TrimSpace(err.Error())
 	if rawPath != "" {
@@ -61,6 +76,11 @@ func (a *App) finishCancelled() {
 	a.mu.Lock()
 	a.running = false
 	a.cancel = nil
+	a.lastRunConcurrency = 0
+	a.clearBatchPreviewItemsLocked()
+	if !a.canOpenResultGridLocked() {
+		a.resultGridOpen = false
+	}
 	a.status = "已取消"
 	a.mu.Unlock()
 	a.invalidateNow()
@@ -115,8 +135,7 @@ func (a *App) clearLogsLocked() {
 
 func (a *App) closeSavePrompt() {
 	a.mu.Lock()
-	a.savePromptVisible = false
-	a.savePromptSourcePath = ""
+	a.resetSavePromptStateLocked()
 	a.mu.Unlock()
 	a.invalidateNow()
 }
@@ -124,12 +143,11 @@ func (a *App) closeSavePrompt() {
 func (a *App) openHistoryTimeline() {
 	a.mu.Lock()
 	a.historyTimelineOpen = true
-	a.historyTimelineModeFilter = a.historyModeFilter
-	a.historyTimelineDateFilter = a.historyDateFilter
 	a.historyTimelineModePickerOpen = false
 	a.historyTimelineDatePickerOpen = false
-	a.historyTimelineQueryInput.SetText(a.historyQueryInput.Text())
 	a.expandedPromptGroups = map[string]bool{}
+	a.historyActionMenuItem = sharedCompat.HistoryItem{}
+	a.historyActionMenuContext = ""
 	a.mu.Unlock()
 	a.invalidateNow()
 }
@@ -140,12 +158,18 @@ func (a *App) closeHistoryTimeline() {
 	a.historyTimelineModePickerOpen = false
 	a.historyTimelineDatePickerOpen = false
 	a.expandedPromptGroups = map[string]bool{}
+	a.historyActionMenuItem = sharedCompat.HistoryItem{}
+	a.historyActionMenuContext = ""
 	a.mu.Unlock()
 	a.invalidateNow()
 }
 
 func (a *App) batchGridCountLocked() int {
-	total := len(a.batchResultIDs)
+	total := batchGridTotalSlots(
+		a.batchResultsSnapshotLocked(a.history),
+		a.batchPreviewItemsSnapshotLocked(),
+		0,
+	)
 	if a.running && a.lastRunBatchCount > total {
 		total = a.lastRunBatchCount
 	}
@@ -178,9 +202,12 @@ func (a *App) closeResultGrid() {
 
 func (a *App) openSavePromptForCurrent() {
 	a.mu.Lock()
-	src := strings.TrimSpace(a.result.SavedPath)
+	item := a.result.Item
+	if strings.TrimSpace(item.SavedPath) == "" {
+		item.SavedPath = strings.TrimSpace(a.result.SavedPath)
+	}
 	a.mu.Unlock()
-	a.openSavePromptForPath(src)
+	a.openSavePromptForItem(item)
 }
 
 func (a *App) openSavePromptForPath(path string) {
@@ -188,10 +215,163 @@ func (a *App) openSavePromptForPath(path string) {
 	if src == "" {
 		return
 	}
+	if isVirtualImagePath(src) {
+		imageB64, ok := readVirtualImageB64(src)
+		if !ok || strings.TrimSpace(imageB64) == "" {
+			return
+		}
+		a.mu.Lock()
+		a.savePromptVisible = true
+		a.savePromptSourcePath = ""
+		a.savePromptSourceImageB64 = imageB64
+		a.savePromptSuggestedName = virtualImageDisplayName(src)
+		a.savePromptPathInput.SetText(filepath.Join(strings.TrimSpace(a.outputDirInput.Text()), virtualImageDisplayName(src)))
+		a.mu.Unlock()
+		a.invalidateNow()
+		return
+	}
 	a.mu.Lock()
 	a.savePromptVisible = true
 	a.savePromptSourcePath = src
+	a.savePromptSourceImageB64 = ""
+	a.savePromptSuggestedName = filepath.Base(src)
 	a.savePromptPathInput.SetText(src)
+	a.mu.Unlock()
+	a.invalidateNow()
+}
+
+func (a *App) openSavePromptForItem(item sharedCompat.HistoryItem) {
+	suggestedName := suggestedSaveNameForHistoryItem(item)
+	if src := strings.TrimSpace(item.SavedPath); src != "" {
+		if !isVirtualImagePath(src) {
+			a.openSavePromptForPath(src)
+			return
+		}
+		if name := strings.TrimSpace(virtualImageDisplayName(src)); name != "" {
+			suggestedName = name
+		}
+	}
+	imageB64 := strings.TrimSpace(item.ImageB64)
+	if imageB64 == "" && strings.TrimSpace(item.SavedPath) != "" {
+		if b64, ok := readVirtualImageB64(item.SavedPath); ok {
+			imageB64 = b64
+		}
+	}
+	if imageB64 == "" {
+		return
+	}
+	target := defaultSavePromptTargetForHistoryItem(item, a.outputDirInput.Text())
+	a.mu.Lock()
+	a.savePromptVisible = true
+	a.savePromptSourcePath = ""
+	a.savePromptSourceImageB64 = imageB64
+	a.savePromptSuggestedName = suggestedName
+	a.savePromptPathInput.SetText(target)
+	a.mu.Unlock()
+	a.invalidateNow()
+}
+
+func filterSavePromptBatchItems(items []sharedCompat.HistoryItem) []sharedCompat.HistoryItem {
+	if len(items) == 0 {
+		return nil
+	}
+	filtered := make([]sharedCompat.HistoryItem, 0, len(items))
+	for _, item := range items {
+		if canSaveHistoryItem(item) {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered
+}
+
+func (a *App) openBatchSavePrompt(items []sharedCompat.HistoryItem) {
+	items = filterSavePromptBatchItems(items)
+	if len(items) == 0 {
+		return
+	}
+	selected := make(map[string]bool, len(items))
+	for _, item := range items {
+		if id := strings.TrimSpace(item.ID); id != "" {
+			selected[id] = true
+		}
+	}
+	targetDir := strings.TrimSpace(a.outputDirInput.Text())
+	if targetDir == "" {
+		targetDir = kernel.DefaultOutputDir()
+	}
+	a.mu.Lock()
+	a.savePromptVisible = true
+	a.savePromptSourcePath = ""
+	a.savePromptSourceImageB64 = ""
+	a.savePromptSuggestedName = ""
+	a.savePromptBatchItems = append([]sharedCompat.HistoryItem(nil), items...)
+	a.savePromptBatchSelection = selected
+	a.savePromptPathInput.SetText(targetDir)
+	a.mu.Unlock()
+	a.invalidateNow()
+}
+
+func (a *App) savePromptBatchSelectedItemsLocked() []sharedCompat.HistoryItem {
+	if len(a.savePromptBatchItems) == 0 {
+		return nil
+	}
+	selected := make([]sharedCompat.HistoryItem, 0, len(a.savePromptBatchItems))
+	for _, item := range a.savePromptBatchItems {
+		id := strings.TrimSpace(item.ID)
+		if id == "" {
+			continue
+		}
+		if a.savePromptBatchSelection[id] {
+			selected = append(selected, item)
+		}
+	}
+	return selected
+}
+
+func (a *App) savePromptBatchSelectedCount() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return len(a.savePromptBatchSelectedItemsLocked())
+}
+
+func (a *App) savePromptBatchSelected(id string) bool {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return false
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.savePromptBatchSelection[id]
+}
+
+func (a *App) toggleSavePromptBatchSelection(id string) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return
+	}
+	a.mu.Lock()
+	if a.savePromptBatchSelection == nil {
+		a.savePromptBatchSelection = map[string]bool{}
+	}
+	a.savePromptBatchSelection[id] = !a.savePromptBatchSelection[id]
+	a.mu.Unlock()
+	a.invalidateNow()
+}
+
+func (a *App) setAllSavePromptBatchSelections(value bool) {
+	a.mu.Lock()
+	if len(a.savePromptBatchItems) == 0 {
+		a.mu.Unlock()
+		return
+	}
+	if a.savePromptBatchSelection == nil {
+		a.savePromptBatchSelection = map[string]bool{}
+	}
+	for _, item := range a.savePromptBatchItems {
+		if id := strings.TrimSpace(item.ID); id != "" {
+			a.savePromptBatchSelection[id] = value
+		}
+	}
 	a.mu.Unlock()
 	a.invalidateNow()
 }
@@ -210,9 +390,40 @@ func (a *App) setSavePromptSuppressed(value bool) {
 func (a *App) savePromptCopy() {
 	a.mu.Lock()
 	src := a.savePromptSourcePath
+	imageB64 := a.savePromptSourceImageB64
+	suggestedName := a.savePromptSuggestedName
 	dst := a.savePromptPathInput.Text()
+	batchMode := len(a.savePromptBatchItems) > 0
+	batchItems := a.savePromptBatchSelectedItemsLocked()
 	a.mu.Unlock()
-	saved, err := copyImageFile(src, dst)
+	if batchMode {
+		if len(batchItems) == 0 {
+			a.appendLog("批量另存失败: 请先勾选要另存的图片")
+			return
+		}
+		saved, err := saveHistoryItemsToDirectory(batchItems, dst)
+		if err != nil {
+			a.appendLog("批量另存失败: " + err.Error())
+			return
+		}
+		dir := strings.TrimSpace(strings.Trim(dst, `"'`))
+		label := dir
+		if base := filepath.Base(dir); base != "" && base != "." && base != string(os.PathSeparator) {
+			label = base
+		}
+		a.appendLog(fmt.Sprintf("已另存 %d 张到 %s", len(saved), label))
+		a.closeSavePrompt()
+		return
+	}
+	var (
+		saved string
+		err   error
+	)
+	if strings.TrimSpace(src) != "" {
+		saved, err = copyImageFile(src, dst)
+	} else {
+		saved, err = saveImageB64ToPath(imageB64, suggestedName, dst)
+	}
 	if err != nil {
 		a.appendLog("另存失败: " + err.Error())
 		return
@@ -226,17 +437,21 @@ func (a *App) openRawResponseModal(path string) {
 	if path == "" {
 		return
 	}
-	content, err := os.ReadFile(path)
 	text := ""
 	readErr := ""
-	if err != nil {
-		readErr = err.Error()
+	if virtualText, ok := readVirtualText(path); ok {
+		text = virtualText
 	} else {
-		text = string(content)
-		const maxPreview = 200_000
-		if len(text) > maxPreview {
-			text = text[:maxPreview] + "\n\n... [截断,完整内容请查看文件]"
+		content, err := os.ReadFile(path)
+		if err != nil {
+			readErr = err.Error()
+		} else {
+			text = string(content)
 		}
+	}
+	const maxPreview = 200_000
+	if len(text) > maxPreview {
+		text = text[:maxPreview] + "\n\n... [截断,完整内容请查看文件]"
 	}
 	a.mu.Lock()
 	a.rawResponseModalPath = path
@@ -257,6 +472,124 @@ func (a *App) closeRawResponseModal() {
 	a.invalidateNow()
 }
 
+func (a *App) openAdvancedPanel() {
+	a.mu.Lock()
+	a.advancedOpen = true
+	a.mu.Unlock()
+	a.invalidateNow()
+}
+
+func (a *App) closeAdvancedPanel() {
+	if err := a.persistAdvancedPanelPrefs(); err != nil {
+		a.appendLog("保存高级参数面板偏好失败: " + err.Error())
+	}
+	a.mu.Lock()
+	a.advancedOpen = false
+	a.mu.Unlock()
+	a.invalidateNow()
+}
+
+func (a *App) toggleAdvancedGroup(group string) {
+	a.mu.Lock()
+	switch strings.TrimSpace(group) {
+	case "core":
+		a.advancedCoreGroupOpen = !a.advancedCoreGroupOpen
+	case "output":
+		a.advancedOutputGroupOpen = !a.advancedOutputGroupOpen
+	case "strategy":
+		a.advancedStrategyGroupOpen = !a.advancedStrategyGroupOpen
+	case "stream":
+		a.advancedStreamGroupOpen = !a.advancedStreamGroupOpen
+	default:
+		a.mu.Unlock()
+		return
+	}
+	a.mu.Unlock()
+	if err := a.persistAdvancedPanelPrefs(); err != nil {
+		a.appendLog("保存高级参数面板偏好失败: " + err.Error())
+	}
+	a.invalidateNow()
+}
+
+func (a *App) openHistoryActionMenu(item sharedCompat.HistoryItem, context string) {
+	if strings.TrimSpace(item.ID) == "" && strings.TrimSpace(item.SavedPath) == "" {
+		return
+	}
+	a.mu.Lock()
+	anchor := a.lastGlobalPressPos
+	if anchor == (image.Point{}) {
+		anchor = a.lastGlobalPointer
+	}
+	if anchor == (image.Point{}) {
+		anchor = image.Pt(240, 180)
+	}
+	a.historyActionMenuItem = item
+	a.historyActionMenuContext = strings.TrimSpace(context)
+	a.historyActionMenuPos = anchor
+	a.mu.Unlock()
+	a.invalidateNow()
+}
+
+func (a *App) closeHistoryActionMenu() {
+	a.mu.Lock()
+	a.historyActionMenuItem = sharedCompat.HistoryItem{}
+	a.historyActionMenuContext = ""
+	a.historyActionMenuPos = image.Point{}
+	a.mu.Unlock()
+	a.invalidateNow()
+}
+
+func (a *App) beginNativeFileDrag(path string) error {
+	if runtime.GOOS != "darwin" {
+		return fmt.Errorf("当前平台不支持原生文件拖出")
+	}
+	path = strings.TrimSpace(path)
+	if path == "" || isVirtualImagePath(path) {
+		return fmt.Errorf("当前结果没有可拖出的本地文件")
+	}
+	a.mu.Lock()
+	view := a.darwinAppKitView
+	window := a.window
+	a.mu.Unlock()
+	if view == 0 {
+		return fmt.Errorf("当前窗口还没有可用的原生视图句柄")
+	}
+	if window == nil {
+		return fmt.Errorf("当前窗口未初始化")
+	}
+	var dragErr error
+	window.Run(func() {
+		dragErr = beginNativeFileDragDarwin(view, path)
+	})
+	return dragErr
+}
+
+func (a *App) prepareHistoryItemForNativeDrag(item sharedCompat.HistoryItem) (sharedCompat.HistoryItem, string, error) {
+	path := strings.TrimSpace(item.SavedPath)
+	if path != "" && !isVirtualImagePath(path) {
+		return item, path, nil
+	}
+	if !canSaveHistoryItem(item) {
+		return item, "", fmt.Errorf("当前结果没有可拖出的本地文件")
+	}
+	next, err := a.materializeHistoryItemForLocalPath(item)
+	if err != nil {
+		return item, "", err
+	}
+	return next, strings.TrimSpace(next.SavedPath), nil
+}
+
+func (a *App) dragOutHistoryItem(item sharedCompat.HistoryItem) (sharedCompat.HistoryItem, error) {
+	next, path, err := a.prepareHistoryItemForNativeDrag(item)
+	if err != nil {
+		return item, err
+	}
+	if err := a.beginNativeFileDrag(path); err != nil {
+		return next, err
+	}
+	return next, nil
+}
+
 func (a *App) readSnapshot() snapshot {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -271,6 +604,7 @@ func (a *App) readSnapshot() snapshot {
 	}
 	history := a.history
 	batchResults := a.batchResultsSnapshotLocked(history)
+	batchPreviewItems := a.batchPreviewItemsSnapshotLocked()
 	profiles := a.profiles
 	promptHistory := a.promptHistory
 	promptTemplates := a.promptTemplates
@@ -289,7 +623,10 @@ func (a *App) readSnapshot() snapshot {
 		TodayHistoryCount:         todayCount,
 		History:                   history,
 		BatchResults:              batchResults,
+		BatchPreviewItems:         batchPreviewItems,
 		BatchTotal:                a.lastRunBatchCount,
+		BatchLiveSlotCount:        a.lastRunConcurrency,
+		SavePromptBatchItems:      append([]sharedCompat.HistoryItem(nil), a.savePromptBatchItems...),
 		Profiles:                  profiles,
 		ActiveProfileID:           a.activeProfileID,
 		SettingsSelectedProfileID: a.settingsSelectedProfileID,
@@ -308,6 +645,8 @@ func (a *App) readSnapshot() snapshot {
 		Fullscreen:                a.fullscreen,
 		LastErrorMessage:          a.lastErrorMessage,
 		LastRunAvailable:          a.lastRunValid,
+		LastRunWorkflowWorkspace:  a.lastRunWorkflowWorkspace,
+		LastRunWorkflowOutput:     a.lastRunWorkflowOutput,
 		LastLowFPSSnapshotPath:    a.lastLowFPSDiagnosticsPath,
 		RawResponseModalPath:      a.rawResponseModalPath,
 		RawResponseModalText:      a.rawResponseModalText,
@@ -325,6 +664,8 @@ func (a *App) readSnapshot() snapshot {
 		PromptImportRegisterOpen:  a.promptImportRegisterOpen,
 		PromptImportRegisterBusy:  a.promptImportRegisterBusy,
 		PromptImportRegisterNote:  a.promptImportRegisterNote,
+		HistoryActionMenuItem:     a.historyActionMenuItem,
+		HistoryActionMenuContext:  a.historyActionMenuContext,
 	}
 	a.snapshotCache = snap
 	a.snapshotReady = true
@@ -342,6 +683,24 @@ func (a *App) batchResultsSnapshotLocked(history []sharedCompat.HistoryItem) []s
 	return a.batchResultsSnapshot
 }
 
+func (a *App) batchPreviewItemsSnapshotLocked() []sharedCompat.HistoryItem {
+	return orderedBatchPreviewItems(a.batchPreviewItems)
+}
+
+func (a *App) removeBatchPreviewItemLocked(index int) {
+	if len(a.batchPreviewItems) == 0 {
+		return
+	}
+	delete(a.batchPreviewItems, index)
+	if len(a.batchPreviewItems) == 0 {
+		a.batchPreviewItems = nil
+	}
+}
+
+func (a *App) clearBatchPreviewItemsLocked() {
+	a.batchPreviewItems = nil
+}
+
 func (a *App) todayHistoryCountLocked() int {
 	now := time.Now()
 	day := now.Format("2006-01-02")
@@ -357,13 +716,14 @@ func (a *App) todayHistoryCountLocked() int {
 
 func (a *App) setHistoryLocked(items []sharedCompat.HistoryItem) {
 	a.history = append([]sharedCompat.HistoryItem(nil), items...)
+	historySnapshot := append([]sharedCompat.HistoryItem(nil), a.history...)
 	a.historyRev++
 	a.historyItemDisplayCache = historyItemDisplayCache{}
 	a.historyButtons = map[string]*widget.Clickable{}
 	a.historyActionButtons = map[string]*widget.Clickable{}
 	a.expandedPromptGroups = map[string]bool{}
 	a.pruneImageCacheLocked()
-	go a.startHistoryThumbBackfill()
+	go a.startHistoryThumbBackfillItems(historySnapshot, true)
 }
 
 func (a *App) setProfilesLocked(items []sharedCompat.UpstreamProfile) {
@@ -408,40 +768,35 @@ func (a *App) closeGeneralSettingsModal() {
 }
 
 func (a *App) persistGeneralSettings() error {
-	state, _, err := gioCompat.LoadState()
-	if err != nil {
-		return err
-	}
-	state = sharedCompat.Normalize(state)
-	state.Settings.ProxyMode = strings.TrimSpace(a.proxy)
-	if state.Settings.ProxyMode == "" {
-		state.Settings.ProxyMode = "system"
-	}
-	protectStreamPreview := a.protectStreamPreview
-	state.Settings.ProtectStreamPreview = &protectStreamPreview
-	autoRetryEnabled := a.autoRetryEnabled
-	state.Settings.AutoRetryEnabled = &autoRetryEnabled
-	autoRetryCount := normalizeAutoRetryCount(a.autoRetryCount)
-	state.Settings.AutoRetryCount = &autoRetryCount
-	completionSound := a.completionSound
-	state.Settings.CompletionSound = &completionSound
-	completionNotification := a.completionNotification
-	state.Settings.CompletionNotification = &completionNotification
-	state.Settings.CleanupPreviewCacheOnExit = a.cleanupPreviewCacheOnExit
-	state.Settings.KernelRuntimeMode = normalizeKernelRuntimeMode(a.kernelRuntimeMode)
-	state.Settings.FontScale = normalizeFontScale(a.fontScale)
-	state.Settings.ReducedEffects = a.reducedEffects
-	state.Settings.ProxyURL = strings.TrimSpace(a.proxyURLInput.Text())
-	state.Settings.OutputDir = strings.TrimSpace(a.outputDirInput.Text())
-	state = gioCompat.RememberTrustedOutputRoot(state, state.Settings.OutputDir)
-	state.Settings.KeepLogs = a.keepLogs
-	state.Settings.IgnoredReleaseTag = strings.TrimSpace(a.ignoredReleaseTag)
-	state.Settings.UserIdentifier = strings.TrimSpace(a.userIdentifierInput.Text())
-	state.UpdatedAt = time.Now().UnixMilli()
-	if err := gioCompat.SaveState(state); err != nil {
-		return err
-	}
-	return nil
+	return gioCompat.UpdateState(func(state *sharedCompat.State) error {
+		*state = sharedCompat.Normalize(*state)
+		state.Settings.ProxyMode = strings.TrimSpace(a.proxy)
+		if state.Settings.ProxyMode == "" {
+			state.Settings.ProxyMode = "system"
+		}
+		protectStreamPreview := a.protectStreamPreview
+		state.Settings.ProtectStreamPreview = &protectStreamPreview
+		autoRetryEnabled := a.autoRetryEnabled
+		state.Settings.AutoRetryEnabled = &autoRetryEnabled
+		autoRetryCount := normalizeAutoRetryCount(a.autoRetryCount)
+		state.Settings.AutoRetryCount = &autoRetryCount
+		completionSound := a.completionSound
+		state.Settings.CompletionSound = &completionSound
+		completionNotification := a.completionNotification
+		state.Settings.CompletionNotification = &completionNotification
+		state.Settings.CleanupPreviewCacheOnExit = a.cleanupPreviewCacheOnExit
+		state.Settings.KernelRuntimeMode = normalizeKernelRuntimeMode(a.kernelRuntimeMode)
+		state.Settings.FontScale = normalizeFontScale(a.fontScale)
+		state.Settings.ReducedEffects = a.reducedEffects
+		state.Settings.ProxyURL = strings.TrimSpace(a.proxyURLInput.Text())
+		state.Settings.OutputDir = strings.TrimSpace(a.outputDirInput.Text())
+		*state = gioCompat.RememberTrustedOutputRoot(*state, state.Settings.OutputDir)
+		state.Settings.KeepLogs = a.keepLogs
+		state.Settings.IgnoredReleaseTag = strings.TrimSpace(a.ignoredReleaseTag)
+		state.Settings.UserIdentifier = strings.TrimSpace(a.userIdentifierInput.Text())
+		state.UpdatedAt = time.Now().UnixMilli()
+		return nil
+	})
 }
 
 func (a *App) dismissFailureState() {
@@ -458,11 +813,63 @@ func (a *App) dismissFailureState() {
 	a.invalidateNow()
 }
 
-func (a *App) applyPartialPreview(partial client.PartialImage) {
+func (a *App) applyPartialPreview(batchIndex int, previewSlotIndex int, partial client.PartialImage) {
 	imageB64 := strings.TrimSpace(partial.ImageB64)
 	if imageB64 == "" {
 		return
 	}
+	a.mu.Lock()
+	if !a.running {
+		a.mu.Unlock()
+		return
+	}
+	cfg := a.lastRunConfig
+	if batchIndex < 0 {
+		batchIndex = partial.PartialImageIndex
+	}
+	if batchIndex < 0 {
+		batchIndex = 0
+	}
+	if previewSlotIndex < 0 {
+		previewSlotIndex = batchIndex
+	}
+	itemID := "preview:current"
+	if a.lastRunBatchCount > 1 {
+		itemID = "preview:slot:" + strconv.Itoa(previewSlotIndex)
+	} else if currentID := strings.TrimSpace(a.result.Item.ID); currentID != "" {
+		itemID = currentID
+	}
+	previewItem := sharedCompat.HistoryItem{
+		ID:               itemID,
+		Prompt:           strings.TrimSpace(cfg.Prompt),
+		RevisedPrompt:    strings.TrimSpace(partial.RevisedPrompt),
+		Mode:             string(cfg.Mode),
+		Size:             strings.TrimSpace(cfg.Size),
+		Quality:          strings.TrimSpace(cfg.Quality),
+		OutputFormat:     strings.TrimSpace(cfg.OutputFormat),
+		ParentID:         strings.TrimSpace(cfg.ParentID),
+		CreatedAt:        time.Now().UnixMilli(),
+		BatchIndex:       batchIndex,
+		PreviewSlotIndex: previewSlotIndex,
+		ImageB64:         imageB64,
+		PreviewOnly:      true,
+	}
+	if a.lastRunBatchCount > 1 {
+		if a.batchPreviewItems == nil {
+			a.batchPreviewItems = map[int]sharedCompat.HistoryItem{}
+		}
+		a.batchPreviewItems[previewSlotIndex] = previewItem
+		a.resultGridOpen = true
+		a.compare = resultState{Rev: a.compare.Rev + 1}
+		a.compareSplitSlider.Value = 0.5
+		a.selectedHistoryID = ""
+		a.imageOpRev = 0
+		a.compareImageOpRev = 0
+		a.mu.Unlock()
+		a.invalidateSoon(33 * time.Millisecond)
+		return
+	}
+	a.mu.Unlock()
 	img, err := decodeImageB64(imageB64)
 	if err != nil {
 		a.appendLog("解析流式预览失败: " + err.Error())
@@ -478,6 +885,8 @@ func (a *App) applyPartialPreview(partial client.PartialImage) {
 		Image:         preview,
 		RevisedPrompt: strings.TrimSpace(partial.RevisedPrompt),
 		SourceEvent:   "partial",
+		Item:          previewItem,
+		HasItem:       true,
 		Rev:           a.result.Rev + 1,
 	}
 	a.compare = resultState{Rev: a.compare.Rev + 1}
@@ -500,19 +909,13 @@ func (a *App) invalidateNow() {
 	a.noteRenderActivityLocked(time.Now())
 	a.snapshotReady = false
 	a.mu.Unlock()
-	if a.invalidate != nil {
-		a.invalidate()
-	}
+	a.requestWakeup()
 }
 
 func (a *App) invalidateSoon(delay time.Duration) {
 	a.mu.Lock()
 	a.noteRenderActivityLocked(time.Now())
 	a.snapshotReady = false
-	if a.invalidate == nil {
-		a.mu.Unlock()
-		return
-	}
 	if a.invalidateQueued {
 		a.mu.Unlock()
 		return
@@ -523,11 +926,7 @@ func (a *App) invalidateSoon(delay time.Duration) {
 	time.AfterFunc(delay, func() {
 		a.mu.Lock()
 		a.invalidateQueued = false
-		current := a.invalidate
 		a.mu.Unlock()
-		if current == nil {
-			return
-		}
-		current()
+		a.requestWakeup()
 	})
 }

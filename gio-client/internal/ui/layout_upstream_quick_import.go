@@ -28,7 +28,7 @@ func (a *App) layoutUpstreamQuickImportModal(gtx layout.Context) layout.Dimensio
 							style.HintColor = fluent.textDim
 							style.SelectionColor = accentAlpha(0x3d)
 							style.TextSize = a.scaledSp(unit.Sp(12))
-							style.Font.Typeface = uiMonoTypeface
+							style.Font.Typeface = desktopMonoTypeface(a.desktopStyle)
 							return style.Layout(gtx)
 						})
 					})

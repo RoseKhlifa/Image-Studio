@@ -326,6 +326,10 @@
 .prompt-tab.active { color: var(--on-accent-soft); background: var(--accent-soft); }
 .prompt-tab.close { flex: 0 0 32px; font-size: 16px; }
 .prompt-popover-body { overflow-y: auto; padding: 4px; }
+.prompt-history-entry {
+  min-height: 44px;
+  padding: 11px 12px;
+}
 .prompt-item {
   display: block;
   width: 100%;

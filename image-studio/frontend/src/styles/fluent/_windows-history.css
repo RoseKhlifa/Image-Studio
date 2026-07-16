@@ -29,6 +29,13 @@ html[data-platform="windows"][data-ui-family="fluent"] .windows-history-section-
   gap: 10px;
 }
 
+html[data-platform="windows"][data-ui-family="fluent"] .windows-history-card-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+}
+
 html[data-platform="windows"][data-ui-family="fluent"] .windows-history-section-head {
   color: var(--text-muted);
   font-size: 11px;
@@ -130,6 +137,7 @@ html[data-platform="windows"][data-ui-family="fluent"] .windows-history-stats {
 
 html[data-platform="windows"][data-ui-family="fluent"] .windows-history-stats button,
 html[data-platform="windows"][data-ui-family="fluent"] .windows-history-filter-row button,
+html[data-platform="windows"][data-ui-family="fluent"] .windows-history-clear,
 html[data-platform="windows"][data-ui-family="fluent"] .windows-history-collapse,
 html[data-platform="windows"][data-ui-family="fluent"] .windows-compare-exit {
   display: inline-flex;
@@ -145,6 +153,21 @@ html[data-platform="windows"][data-ui-family="fluent"] .windows-compare-exit {
   color: var(--text-muted);
   font-size: 11px;
   white-space: nowrap;
+}
+
+html[data-platform="windows"][data-ui-family="fluent"] .windows-history-clear {
+  border-color: color-mix(in srgb, var(--danger) 24%, var(--border));
+  color: var(--danger);
+}
+
+html[data-platform="windows"][data-ui-family="fluent"] .windows-history-clear:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--danger) 42%, var(--border));
+  background: var(--danger-soft);
+}
+
+html[data-platform="windows"][data-ui-family="fluent"] .windows-history-clear:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 html[data-platform="windows"][data-ui-family="fluent"] .windows-history-stats button {

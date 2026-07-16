@@ -24,6 +24,9 @@ export interface UpstreamProfile {
   responsesTransport?: ResponsesTransport;
   requestPolicy: RequestPolicy;
   imagesNewAPICompat?: boolean;
+  // 显式允许远程 HTTP，以及忽略 HTTPS/WSS 证书校验错误。
+  // 默认关闭；只应用到当前 profile 发出的上游请求。
+  allowInsecureConnection?: boolean;
   baseURL: string;
   textModelID: string;
   imageModelID: string;
@@ -60,7 +63,8 @@ export type ThemeMode = "system" | "light" | "dark";
 export type CompletionSoundMode = "default" | "custom";
 export type EditSourceMode = "manual" | "batch";
 export type BatchProcessOutputMode = "source_dir" | "custom_dir";
-export type BatchProcessAutoAspectResolution = "" | "256" | "512" | "1k" | "2k" | "4k";
+export type AutoAspectResolutionPreset = "" | "256" | "512" | "1k" | "2k" | "4k";
+export type BatchProcessAutoAspectResolution = AutoAspectResolutionPreset;
 export type SystemNotificationPermissionState = "default" | "granted" | "denied" | "unsupported";
 
 export interface CompletionSoundConfig {
@@ -193,6 +197,7 @@ export interface HistoryItem {
   imageId?: string;
   previewUrl?: string;
   fullUrl?: string;
+  previewPath?: string;
   thumbPath?: string;
   previewWidth?: number;
   previewHeight?: number;
@@ -225,6 +230,7 @@ export interface HistoryItem {
   previewSlotIndex?: number;
   elapsedSec?: number;     // generation duration in seconds
 
+  sourcePaths?: string[];
   savedPath?: string;
   rawPath?: string;
 }
@@ -287,6 +293,7 @@ export interface Workspace {
   batchCount: number;
   selectedPresetId?: string | null;
   editSourceMode: EditSourceMode;
+  editAutoAspectResolution?: AutoAspectResolutionPreset;
   batchProcess: BatchProcessConfig;
   loopGeneration: LoopGenerationConfig;
   sources: SourceImage[];
@@ -326,6 +333,7 @@ export interface Preset {
   imageStyle?: ImageStyleValue;
   moderation?: ModerationValue;
   styleTag?: string;
+  editAutoAspectResolution?: AutoAspectResolutionPreset;
   kernelRuntimeMode?: KernelRuntimeMode;
   batchCount: number;
 }

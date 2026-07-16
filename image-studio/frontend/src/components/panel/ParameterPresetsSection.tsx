@@ -128,9 +128,9 @@ export function ParameterPresetsSection({
             >
               <option value="">选择预设...</option>
               {presets.map((preset) => (
-                <option key={preset.id} value={preset.id}>
-                  {preset.name} · {preset.size === "auto" ? "Auto" : preset.size} · {QUALITY_LABELS[preset.quality] ?? preset.quality}
-                </option>
+              <option key={preset.id} value={preset.id}>
+                  {preset.name} · {preset.editAutoAspectResolution ? `按源图+${preset.editAutoAspectResolution.toUpperCase()}` : (preset.size === "auto" ? "Auto" : preset.size)} · {QUALITY_LABELS[preset.quality] ?? preset.quality}
+              </option>
               ))}
             </select>
           </div>
@@ -258,7 +258,11 @@ function describePreset(preset: Preset): string {
     ? STYLE_CHIPS.find((item) => item.id === preset.styleTag)?.label ?? preset.styleTag
     : "默认风格";
   return [
-    preset.size === "auto" ? "Auto 尺寸" : preset.size,
+    preset.editAutoAspectResolution
+      ? `按源图比例 + ${preset.editAutoAspectResolution.toUpperCase()}`
+      : preset.size === "auto"
+        ? "Auto 尺寸"
+        : preset.size,
     `质量 ${QUALITY_LABELS[preset.quality] ?? preset.quality}`,
     preset.outputFormat ? preset.outputFormat.toUpperCase() : "PNG",
     `风格 ${styleLabel}`,

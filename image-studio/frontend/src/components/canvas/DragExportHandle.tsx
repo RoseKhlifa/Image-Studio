@@ -1,6 +1,7 @@
 import type { HistoryItem } from "../../types/domain";
 import {
   buildHistoryItemDragExport,
+  shouldUseNativeFileDrag,
   writeImageFileDragData,
   writeInternalHistoryItemDragData,
 } from "../../lib/dragExport.ts";
@@ -16,7 +17,7 @@ export function DragExportHandle({
   className?: string;
   sourceURL?: string | null;
 }) {
-  const { isMac } = usePlatform();
+  const { targetPlatform } = usePlatform();
   const spec = buildHistoryItemDragExport(item, sourceURL);
   if (!spec) return null;
 
@@ -38,7 +39,7 @@ export function DragExportHandle({
       }}
       onDragStart={(event) => {
         event.stopPropagation();
-        if (isMac && item.savedPath) {
+        if (shouldUseNativeFileDrag(targetPlatform, item.savedPath)) {
           event.preventDefault();
           console.debug("[drag-export] native-file-drag", item.savedPath);
           void BeginNativeFileDrag(item.savedPath).catch((error) => {

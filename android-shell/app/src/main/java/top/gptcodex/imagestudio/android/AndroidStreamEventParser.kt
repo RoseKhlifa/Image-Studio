@@ -8,55 +8,72 @@ internal data class NativeHttpStreamResultSnapshot(
     val sourceEvent: String,
 )
 
-internal fun extractNativeHttpStreamResult(line: String): NativeHttpStreamResultSnapshot? {
+private fun parseNativeHttpStreamEvent(line: String): JSONObject? {
     val trimmed = line.trim()
-    if (!trimmed.startsWith("data: ")) return null
-    val payload = trimmed.removePrefix("data: ").trim()
+    if (trimmed.isBlank() || trimmed.startsWith(":")) return null
+    val payload = if (trimmed.startsWith("data:")) {
+        trimmed.removePrefix("data:").trim()
+    } else {
+        trimmed
+    }
     if (payload.isBlank() || payload == "[DONE]") return null
     return try {
-        val event = JSONObject(payload)
-        when (event.optString("type")) {
-            "response.output_item.done" -> {
-                val item = event.optJSONObject("item")
-                if (item?.optString("type") == "image_generation_call") {
-                    val result = item.optString("result")
-                    if (result.isNotBlank()) {
-                        NativeHttpStreamResultSnapshot(
-                            imageB64 = result,
-                            revisedPrompt = item.optString("revised_prompt"),
-                            sourceEvent = "final",
-                        )
-                    } else null
-                } else null
-            }
-            "image_generation.completed", "image_edit.completed" -> {
-                val result = event.optString("b64_json")
-                if (result.isNotBlank()) {
-                    NativeHttpStreamResultSnapshot(
-                        imageB64 = result,
-                        revisedPrompt = "",
-                        sourceEvent = "images_api",
-                    )
-                } else null
-            }
-            else -> null
-        }
+        JSONObject(payload)
     } catch (_: Exception) {
         null
     }
 }
 
-internal fun buildNativeHttpStreamProgressPayload(line: String): Any? {
-    val trimmed = line.trim()
-    if (!trimmed.startsWith("data: ")) {
-        return mapOf("line" to line)
+private fun extractNativeHttpStreamResult(event: JSONObject): NativeHttpStreamResultSnapshot? {
+    val firstImage = event.optJSONArray("data")?.optJSONObject(0)
+    if (firstImage != null) {
+        val imageB64 = firstImage.optString("b64_json")
+        if (imageB64.isNotBlank()) {
+            return NativeHttpStreamResultSnapshot(
+                imageB64 = imageB64,
+                revisedPrompt = firstImage.optString("revised_prompt"),
+                sourceEvent = "images_api",
+            )
+        }
     }
-    val payload = trimmed.removePrefix("data: ").trim()
-    if (payload.isBlank() || payload == "[DONE]") {
+    return when (event.optString("type")) {
+        "response.output_item.done" -> {
+            val item = event.optJSONObject("item")
+            if (item?.optString("type") == "image_generation_call") {
+                val result = item.optString("result")
+                if (result.isNotBlank()) {
+                    NativeHttpStreamResultSnapshot(
+                        imageB64 = result,
+                        revisedPrompt = item.optString("revised_prompt"),
+                        sourceEvent = "final",
+                    )
+                } else null
+            } else null
+        }
+        "image_generation.completed", "image_edit.completed" -> {
+            val result = event.optString("b64_json")
+            if (result.isNotBlank()) {
+                NativeHttpStreamResultSnapshot(
+                    imageB64 = result,
+                    revisedPrompt = "",
+                    sourceEvent = "images_api",
+                )
+            } else null
+        }
+        else -> null
+    }
+}
+
+internal fun extractNativeHttpStreamResult(line: String): NativeHttpStreamResultSnapshot? {
+    return parseNativeHttpStreamEvent(line)?.let(::extractNativeHttpStreamResult)
+}
+
+internal fun buildNativeHttpStreamProgressPayload(line: String): Any? {
+    val event = parseNativeHttpStreamEvent(line)
+    if (event == null) {
         return mapOf("line" to line)
     }
     return try {
-        val event = JSONObject(payload)
         when (event.optString("type")) {
             "response.image_generation_call.partial_image" -> mapOf(
                 "event" to mapOf(
@@ -84,7 +101,7 @@ internal fun buildNativeHttpStreamProgressPayload(line: String): Any? {
             "image_generation.completed", "image_edit.completed" -> {
                 if (event.optString("b64_json").isNotBlank()) null else mapOf("line" to line)
             }
-            else -> mapOf("line" to line)
+            else -> if (extractNativeHttpStreamResult(event) != null) null else mapOf("line" to line)
         }
     } catch (_: Exception) {
         mapOf("line" to line)

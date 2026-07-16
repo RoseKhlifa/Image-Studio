@@ -1,5 +1,6 @@
 import { ImagePlus, Trash2, X } from "lucide-react";
 import type {
+  AutoAspectResolutionPreset,
   Mode,
   QualityValue,
   RequestPolicy,
@@ -35,7 +36,12 @@ export function DesktopComposeSections({
   clearSources,
   currentImageSavedPath,
   editSourceMode,
+  editAutoAspectComputedSizeLabel,
+  editAutoAspectResolution,
+  effectiveEditAutoAspectResolution,
   handleAspectSelect,
+  handleEditAutoAspectResolutionSelect,
+  handleEditAutoAspectToggle,
   handleResolutionSelect,
   imageModelID,
   onOpenCustomAspectRatioModal,
@@ -70,7 +76,12 @@ export function DesktopComposeSections({
   clearSources: () => void;
   currentImageSavedPath?: string | null;
   editSourceMode: EditSourceMode;
+  editAutoAspectComputedSizeLabel?: string | null;
+  editAutoAspectResolution: AutoAspectResolutionPreset;
+  effectiveEditAutoAspectResolution: Exclude<ResolutionPreset, "auto">;
   handleAspectSelect: (aspect: AspectPreset) => void;
+  handleEditAutoAspectResolutionSelect: (resolution: Exclude<ResolutionPreset, "auto">) => void;
+  handleEditAutoAspectToggle: (enabled: boolean) => void;
   handleResolutionSelect: (resolution: ResolutionPreset) => void;
   imageModelID: string;
   onOpenCustomAspectRatioModal: () => void;
@@ -84,7 +95,7 @@ export function DesktopComposeSections({
   qualityOptions: Array<{ value: QualityValue; label: string }>;
   requestPolicy: RequestPolicy;
   selectSourceImage: () => void;
-  setField: (key: "styleTag" | "quality" | "batchCount" | "size", value: any) => void;
+  setField: (key: "styleTag" | "quality" | "batchCount" | "size" | "editAutoAspectResolution", value: any) => void;
   size: SizeValue;
   sources: SourceImage[];
   styleTag: string;
@@ -92,6 +103,12 @@ export function DesktopComposeSections({
 }) {
   const batchMode = mode === "edit" && editSourceMode === "batch";
   const batchAutoAspectActive = batchMode && batchProcess.autoAspectResolution !== "";
+  const manualEditAutoAspectActive = mode === "edit" && editSourceMode === "manual" && editAutoAspectResolution !== "";
+  const hideRegularSizeControls = batchAutoAspectActive || manualEditAutoAspectActive;
+  const editAutoResolutionOptions = RESOLUTION_PRESETS.filter(
+    (item): item is { value: Exclude<ResolutionPreset, "auto">; label: string } =>
+      item.value !== "auto" && availableResolutions.includes(item.value),
+  );
 
   return (
     <>
@@ -122,7 +139,57 @@ export function DesktopComposeSections({
         </div>
       </section>
 
-      {!batchAutoAspectActive ? (
+      {mode === "edit" && editSourceMode === "manual" ? (
+        <Section label="源图尺寸策略">
+          <div className="space-y-2">
+            <Seg>
+              <SegItem
+                active={!manualEditAutoAspectActive}
+                onClick={() => handleEditAutoAspectToggle(false)}
+              >
+                沿用当前比例
+              </SegItem>
+              <SegItem
+                active={manualEditAutoAspectActive}
+                onClick={() => handleEditAutoAspectToggle(true)}
+              >
+                按源图比例自动适配
+              </SegItem>
+            </Seg>
+            {manualEditAutoAspectActive ? (
+              <>
+                <div className="grid grid-cols-5 gap-2">
+                  {editAutoResolutionOptions.map((item) => (
+                    <button
+                      key={item.value}
+                      type="button"
+                      onClick={() => handleEditAutoAspectResolutionSelect(item.value)}
+                      className={`border px-2 py-3 text-[12px] font-semibold transition-colors ${
+                        effectiveEditAutoAspectResolution === item.value
+                          ? "border-[color:var(--accent)]/35 bg-white text-[var(--accent)] shadow-sm dark:bg-zinc-900"
+                          : "border-black/[0.08] bg-white/70 text-zinc-600 hover:border-[color:var(--accent)]/30 hover:text-zinc-900 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-zinc-300"
+                      } ${usesFluentUI ? "rounded-[10px]" : "rounded-[14px]"}`}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[10px] leading-relaxed text-zinc-500 dark:text-zinc-400">
+                  {editAutoAspectComputedSizeLabel
+                    ? `当前会按源图比例自动换算，目标分辨率档位 ${effectiveEditAutoAspectResolution.toUpperCase()}，实际提交尺寸 ${editAutoAspectComputedSizeLabel}。`
+                    : `开启后会按当前源图比例自动换算尺寸，并统一使用 ${effectiveEditAutoAspectResolution.toUpperCase()} 分辨率档位。`}
+                </p>
+              </>
+            ) : (
+              <p className="text-[10px] leading-relaxed text-zinc-500 dark:text-zinc-400">
+                关闭后使用下面的普通比例和分辨率预设。
+              </p>
+            )}
+          </div>
+        </Section>
+      ) : null}
+
+      {!hideRegularSizeControls ? (
         <>
           <Section
             label="比例"
@@ -201,7 +268,9 @@ export function DesktopComposeSections({
       ) : (
         <Section label="尺寸控制">
           <div className={`border border-[color:var(--accent)]/16 bg-[var(--accent-soft)]/55 px-3 py-2 text-[11px] leading-5 text-zinc-600 dark:text-zinc-300 ${usesFluentUI ? "rounded-[10px]" : "rounded-[14px]"}`}>
-            当前批处理已开启“按源图比例自动适配”，本批任务的比例与分辨率由“批处理图生图”区统一控制。这里的普通比例/分辨率预设已暂时隐藏，避免出现两套尺寸入口。
+            {batchAutoAspectActive
+              ? "当前批处理已开启“按源图比例自动适配”，本批任务的比例与分辨率由“批处理图生图”区统一控制。这里的普通比例/分辨率预设已暂时隐藏，避免出现两套尺寸入口。"
+              : "当前普通图生图已开启“按源图比例自动适配”，比例会跟随源图自动计算，分辨率由上面的源图尺寸策略统一控制。这里的普通比例/分辨率预设已暂时隐藏，避免出现两套尺寸入口。"}
           </div>
         </Section>
       )}

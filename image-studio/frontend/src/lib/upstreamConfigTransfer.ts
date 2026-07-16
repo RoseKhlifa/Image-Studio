@@ -9,6 +9,7 @@ export type UpstreamConfigExportProfile = {
   responsesTransport: ResponsesTransport;
   requestPolicy: RequestPolicy;
   imagesNewAPICompat: boolean;
+  allowInsecureConnection: boolean;
   baseURL: string;
   textModelID: string;
   imageModelID: string;
@@ -24,11 +25,13 @@ export type UpstreamConfigExportFile = {
   version: 1;
   exportedAt: string;
   activeProfileId: string;
+  aiProfileId?: string;
   profiles: UpstreamConfigExportProfile[];
 };
 
 export type ParsedUpstreamConfigImport = {
   activeProfileId: string;
+  aiProfileId?: string;
   profiles: UpstreamConfigExportProfile[];
 };
 
@@ -41,6 +44,7 @@ export type UpstreamConfigImportActions = {
     baseURL?: string;
     requestPolicy?: RequestPolicy;
     imagesNewAPICompat?: boolean;
+    allowInsecureConnection?: boolean;
     textModelID?: string;
     imageModelID?: string;
     reasoningEffort?: ReasoningEffortValue;
@@ -53,11 +57,13 @@ export type UpstreamConfigImportActions = {
     patch: Partial<Omit<UpstreamProfile, "id" | "createdAt">> & { apiKey?: string },
   ) => Promise<boolean>;
   setActiveProfile: (id: string) => Promise<void>;
+  setAIProfile?: (id: string) => Promise<boolean>;
 };
 
 export type AppliedUpstreamConfigImport = {
   importedCount: number;
   activeProfileId: string;
+  aiProfileId?: string;
   importedProfileIds: string[];
 };
 
@@ -69,6 +75,7 @@ function toProfileSnapshot(input: UpstreamConfigExportProfile, actualId: string)
     responsesTransport: input.responsesTransport ?? "sse",
     requestPolicy: input.requestPolicy,
     imagesNewAPICompat: input.imagesNewAPICompat,
+    allowInsecureConnection: input.allowInsecureConnection,
     baseURL: input.baseURL,
     textModelID: input.textModelID,
     imageModelID: input.imageModelID,
@@ -152,6 +159,7 @@ function parseExportProfile(raw: unknown): UpstreamConfigExportProfile | null {
     responsesTransport: normalizeResponsesTransport(source.responsesTransport),
     requestPolicy: normalizeRequestPolicy(source.requestPolicy),
     imagesNewAPICompat: source.imagesNewAPICompat === true,
+    allowInsecureConnection: source.allowInsecureConnection === true,
     baseURL: normalizeImportedBaseURL(source.baseURL),
     textModelID: typeof source.textModelID === "string" ? source.textModelID.trim() : "",
     imageModelID: typeof source.imageModelID === "string" ? source.imageModelID.trim() : "",
@@ -182,6 +190,7 @@ function parseNewAPIChannelConnTemplate(raw: Record<string, unknown>): ParsedUps
         responsesTransport: "sse",
         requestPolicy: "openai",
         imagesNewAPICompat: false,
+        allowInsecureConnection: false,
         baseURL,
         textModelID: "",
         imageModelID: "",
@@ -249,6 +258,7 @@ function parseOpenCodeProviderTemplate(raw: Record<string, unknown>): ParsedUpst
       responsesTransport: "sse",
       requestPolicy: "openai",
       imagesNewAPICompat: false,
+      allowInsecureConnection: false,
       baseURL,
       textModelID,
       imageModelID,
@@ -273,15 +283,18 @@ export function buildUpstreamConfigExportFile(
   profiles: UpstreamProfile[],
   activeProfileId: string,
   apiKeysById: Record<string, string>,
+  aiProfileId = "",
 ): UpstreamConfigExportFile {
   return {
     version: 1,
     exportedAt: new Date().toISOString(),
     activeProfileId,
+    ...(aiProfileId ? { aiProfileId } : {}),
     profiles: profiles.map((profile) => ({
       ...profile,
       responsesTransport: profile.responsesTransport === "websocket" ? "websocket" : "sse",
       imagesNewAPICompat: profile.imagesNewAPICompat === true,
+      allowInsecureConnection: profile.allowInsecureConnection === true,
       apiKey: (apiKeysById[profile.id] ?? "").trim(),
     })),
   };
@@ -302,8 +315,10 @@ export function parseUpstreamConfigImportFile(rawJSON: string): ParsedUpstreamCo
     throw new Error("暂不支持这类 JSON。当前支持：本应用导出文件、newapi_channel_conn、OpenCode provider 配置");
   }
   const activeProfileId = typeof parsed?.activeProfileId === "string" ? parsed.activeProfileId.trim() : "";
+  const aiProfileId = typeof parsed?.aiProfileId === "string" ? parsed.aiProfileId.trim() : "";
   return {
     activeProfileId,
+    ...(aiProfileId ? { aiProfileId } : {}),
     profiles,
   };
 }
@@ -317,6 +332,7 @@ function buildProfilePatch(
     responsesTransport: incoming.responsesTransport ?? "sse",
     requestPolicy: incoming.requestPolicy,
     imagesNewAPICompat: incoming.imagesNewAPICompat,
+    allowInsecureConnection: incoming.allowInsecureConnection,
     baseURL: incoming.baseURL,
     textModelID: incoming.textModelID,
     imageModelID: incoming.imageModelID,
@@ -354,6 +370,7 @@ export async function applyParsedUpstreamConfigImport(
       responsesTransport: incoming.responsesTransport ?? "sse",
       requestPolicy: incoming.requestPolicy,
       imagesNewAPICompat: incoming.imagesNewAPICompat,
+      allowInsecureConnection: incoming.allowInsecureConnection,
       baseURL: incoming.baseURL,
       textModelID: incoming.textModelID,
       imageModelID: incoming.imageModelID,
@@ -385,10 +402,17 @@ export async function applyParsedUpstreamConfigImport(
   if (nextActiveProfileId) {
     await actions.setActiveProfile(nextActiveProfileId);
   }
+  const nextAIProfileId = parsed.aiProfileId?.trim()
+    ? (originalToActualID.get(parsed.aiProfileId.trim()) ?? "")
+    : "";
+  if (nextAIProfileId && actions.setAIProfile) {
+    await actions.setAIProfile(nextAIProfileId);
+  }
 
   return {
     importedCount: parsed.profiles.length,
     activeProfileId: nextActiveProfileId,
+    ...(nextAIProfileId ? { aiProfileId: nextAIProfileId } : {}),
     importedProfileIds,
   };
 }

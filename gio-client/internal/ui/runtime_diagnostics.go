@@ -191,6 +191,26 @@ func formatLayoutTimingValue(duration time.Duration, visible bool) string {
 	return fmt.Sprintf("%.1f", float64(duration)/float64(time.Millisecond))
 }
 
+func currentResultDiagnosticsState(result resultState, canvasTarget int) (savedPresent bool, previewPresent bool, thumbPresent bool, managedPreviewReady bool, managedPreviewPath string) {
+	savedPath := strings.TrimSpace(result.SavedPath)
+	if savedPath == "" {
+		savedPath = strings.TrimSpace(result.Item.SavedPath)
+	}
+	previewPath := strings.TrimSpace(result.Item.PreviewPath)
+	thumbPath := strings.TrimSpace(result.Item.ThumbPath)
+	savedPresent = headlessPathReady(savedPath)
+	previewPresent = headlessPathReady(previewPath)
+	thumbPresent = headlessPathReady(thumbPath)
+	if savedPath == "" || isVirtualImagePath(savedPath) {
+		return savedPresent, previewPresent, thumbPresent, false, ""
+	}
+	path, err := managedSourcePreviewPath(savedPath, canvasTarget)
+	if err != nil {
+		return savedPresent, previewPresent, thumbPresent, false, ""
+	}
+	return savedPresent, previewPresent, thumbPresent, headlessPathReady(path), path
+}
+
 type layoutTimingSample struct {
 	name     string
 	duration time.Duration
@@ -391,15 +411,8 @@ func (a *App) buildPerformanceDiagnosticsReport() string {
 	currentResultManagedPreviewReady := false
 	currentResultCanvasTarget := a.effectiveCanvasMaxDimension()
 	currentResultManagedPreviewPath := ""
-	if item := snap.Result.Item; strings.TrimSpace(item.SavedPath) != "" {
-		currentResultSavedPresent = headlessPathReady(item.SavedPath)
-		currentResultPreviewPresent = headlessPathReady(item.PreviewPath)
-		currentResultThumbPresent = headlessPathReady(item.ThumbPath)
-		if previewPath, err := managedSourcePreviewPath(item.SavedPath, currentResultCanvasTarget); err == nil {
-			currentResultManagedPreviewPath = previewPath
-			currentResultManagedPreviewReady = headlessPathReady(previewPath)
-		}
-	}
+	currentResultSavedPresent, currentResultPreviewPresent, currentResultThumbPresent, currentResultManagedPreviewReady, currentResultManagedPreviewPath =
+		currentResultDiagnosticsState(snap.Result, currentResultCanvasTarget)
 	slowestLayout := slowestLayoutSample([]layoutTimingSample{
 		{name: "shell", duration: layoutShellEMA, visible: true},
 		{name: "controls", duration: layoutControlsEMA, visible: controlsVisible},
@@ -610,15 +623,8 @@ func (a *App) maybeRecordLowFPSLocked(now time.Time) bool {
 	currentResultManagedPreviewReady := false
 	currentResultCanvasTarget := a.effectiveCanvasMaxDimension()
 	currentResultManagedPreviewPath := ""
-	if item := a.result.Item; strings.TrimSpace(item.SavedPath) != "" {
-		currentResultSavedPresent = headlessPathReady(item.SavedPath)
-		currentResultPreviewPresent = headlessPathReady(item.PreviewPath)
-		currentResultThumbPresent = headlessPathReady(item.ThumbPath)
-		if previewPath, err := managedSourcePreviewPath(item.SavedPath, currentResultCanvasTarget); err == nil {
-			currentResultManagedPreviewPath = previewPath
-			currentResultManagedPreviewReady = headlessPathReady(previewPath)
-		}
-	}
+	currentResultSavedPresent, currentResultPreviewPresent, currentResultThumbPresent, currentResultManagedPreviewReady, currentResultManagedPreviewPath =
+		currentResultDiagnosticsState(a.result, currentResultCanvasTarget)
 	lastHistoryThumbPrewarmAt := a.lastHistoryThumbPrewarmAt
 	lastHistoryThumbPrewarmMs := a.lastHistoryThumbPrewarmMs
 	lastHistoryThumbPrewarmLoad := a.lastHistoryThumbPrewarmLoad

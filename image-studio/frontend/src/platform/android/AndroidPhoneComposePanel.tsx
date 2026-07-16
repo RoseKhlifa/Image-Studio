@@ -1,6 +1,6 @@
 import { useState } from "react";
 import {
-  FileText, ListPlus, RotateCw, Settings, Sparkles, X,
+  FileText, ListPlus, RotateCw, ScanSearch, Settings, Sparkles, X,
 } from "lucide-react";
 import { useStudioStore } from "../../state/studioStore";
 import { OpenFile } from "../runtime/host";
@@ -10,10 +10,13 @@ import {
   aspectPresetLabel,
   availableResolutionPresets,
   buildReferenceAspectRatio,
+  buildReferenceResolutionSizeSelection,
   deriveExactSizeSelection,
   deriveAspectPreset,
   deriveResolutionPreset,
+  formatSizeValue,
   listAspectPresetOptions,
+  normalizeResolutionSelection,
   normalizeSizeSelection,
   supportsCustomAspectRatios,
   supportsPreciseSizeControl,
@@ -41,11 +44,11 @@ export function AndroidPhoneComposePanel({
   const {
     apiKey, mode, prompt, background, imageStyle, inputFidelity, moderation, negativePrompt, outputCompression, size, quality, seed, styleTag,
     userIdentifier, partialImages,
-    outputFormat, batchCount, loopGeneration, sources, currentImage, errorMessage, errorCanRetry, errorRawPath,
-    isRunning, lastPayload, isOptimizingPrompt, apiMode, requestPolicy, baseURL, profiles, imageModelID,
+    outputFormat, batchCount, editAutoAspectResolution, loopGeneration, sources, currentImage, errorMessage, errorCanRetry, errorRawPath,
+    isRunning, lastPayload, isOptimizingPrompt, isInferringPrompt, apiMode, requestPolicy, baseURL, profiles, aiProfileId, imageModelID,
     customAspectRatios,
     setField, clearError, pushToast, selectSourceImage,
-    removeSource, clearSources, viewSourceOnCanvas, openCustomAspectRatioModal, openCustomSizeModal, openUpstreamConfig, submit, cancel, retryLast, optimizePrompt,
+    removeSource, clearSources, viewSourceOnCanvas, openCustomAspectRatioModal, openCustomSizeModal, openUpstreamConfig, submit, cancel, retryLast, optimizePrompt, inferPromptFromCanvas,
     compareSourceOnCanvas,
   } = useStudioStore();
   const [templateOpen, setTemplateOpen] = useState(false);
@@ -55,11 +58,10 @@ export function AndroidPhoneComposePanel({
   const promptTemplates = useStudioStore((s) => s.promptTemplates);
   const promptLen = prompt.length;
   const needsUpstreamSetup = !apiKey.trim() || !baseURL.trim();
-  const hasUsableResponsesProfile = profiles.some(
-    (p) => p.apiMode === "responses" && p.baseURL.trim(),
-  );
+  const aiProfile = profiles.find((profile) => profile.id === aiProfileId && profile.apiMode === "responses");
+  const aiReady = !!aiProfile?.baseURL.trim();
   const optimizeReady = !!(
-    prompt.trim() && (hasUsableResponsesProfile || (apiKey.trim() && baseURL.trim()))
+    prompt.trim() && aiReady
   );
   const capabilityInput = { apiMode, requestPolicy, imageModelID };
   const normalizedSize = normalizeSizeSelection(size, capabilityInput, customAspectRatios);
@@ -83,11 +85,32 @@ export function AndroidPhoneComposePanel({
   const exactSize = deriveExactSizeSelection(normalizedSize, capabilityInput, sizingAspectRatios);
   const derivedAspect = deriveAspectPreset(normalizedSize, sizingAspectRatios);
   const derivedResolution = deriveResolutionPreset(normalizedSize);
+  const normalizedEditAutoAspectResolution = normalizeResolutionSelection(editAutoAspectResolution || "1k", capabilityInput);
+  const effectiveEditAutoAspectResolution = normalizedEditAutoAspectResolution === "auto"
+    ? "1k"
+    : normalizedEditAutoAspectResolution;
+  const manualEditAutoAspectActive = mode === "edit" && editAutoAspectResolution !== "";
+  const editAutoAspectComputedSizeLabel = manualEditAutoAspectActive && referenceDimensions
+    ? formatSizeValue(buildReferenceResolutionSizeSelection(
+        effectiveEditAutoAspectResolution,
+        referenceDimensions,
+        capabilityInput,
+        customAspectRatios,
+      ))
+    : null;
   const activeAspect = exactSize ? null : derivedAspect;
   const activeResolution = exactSize ? null : derivedResolution;
   const availableResolutions = availableResolutionPresets(capabilityInput);
-  const activeAspectLabel = exactSize ? "精确尺寸" : aspectPresetLabel(derivedAspect, sizingAspectRatios);
-  const activeResolutionLabel = exactSize ? exactSize.label : (derivedResolution === "auto" ? "自动" : derivedResolution.toUpperCase());
+  const activeAspectLabel = manualEditAutoAspectActive
+    ? "按源图自动适配"
+    : exactSize
+      ? "精确尺寸"
+      : aspectPresetLabel(derivedAspect, sizingAspectRatios);
+  const activeResolutionLabel = manualEditAutoAspectActive
+    ? effectiveEditAutoAspectResolution.toUpperCase()
+    : exactSize
+      ? exactSize.label
+      : (derivedResolution === "auto" ? "自动" : derivedResolution.toUpperCase());
   const activeQualityLabel = qualityOptions.find((item) => item.value === normalizedQuality)?.label ?? normalizedQuality;
   const editSourceLabel = sources.length > 0 ? `${sources.length} 张已添加` : currentImage?.savedPath ? "使用当前画板" : "未添加";
   const settingsExpanded = parametersOpen || advancedOpen;
@@ -117,6 +140,14 @@ export function AndroidPhoneComposePanel({
     ));
   };
 
+  const handleEditAutoAspectToggle = (enabled: boolean) => {
+    setField("editAutoAspectResolution", enabled ? effectiveEditAutoAspectResolution : "");
+  };
+
+  const handleEditAutoAspectResolutionSelect = (resolution: typeof effectiveEditAutoAspectResolution) => {
+    setField("editAutoAspectResolution", resolution);
+  };
+
   const handleModeChange = (next: Mode) => {
     vibrateForPlatform(12);
     setField("mode", next);
@@ -132,6 +163,11 @@ export function AndroidPhoneComposePanel({
   const handleOptimize = () => {
     vibrateForPlatform(10);
     optimizePrompt();
+  };
+
+  const handleInferPrompt = () => {
+    vibrateForPlatform(10);
+    inferPromptFromCanvas();
   };
 
   const handleSelectSource = () => {
@@ -292,7 +328,7 @@ export function AndroidPhoneComposePanel({
           <button
             type="button"
             onClick={handleOptimize}
-            disabled={!optimizeReady || isOptimizingPrompt}
+            disabled={!optimizeReady || isOptimizingPrompt || isInferringPrompt}
             className={`platform-pill android-phone-action-pill inline-flex min-h-[38px] items-center gap-1.5 px-3 text-[11px] ${
               isOptimizingPrompt
                 ? "bg-[var(--accent-soft)] text-[var(--accent)]"
@@ -301,6 +337,20 @@ export function AndroidPhoneComposePanel({
           >
             <Sparkles className={`h-3.5 w-3.5 ${isOptimizingPrompt ? "animate-pulse" : ""}`} />
             {isOptimizingPrompt ? "优化中..." : "AI 优化"}
+          </button>
+          <button
+            type="button"
+            onClick={handleInferPrompt}
+            disabled={!currentImage || !aiReady || isOptimizingPrompt || isInferringPrompt}
+            className={`platform-pill android-phone-action-pill inline-flex min-h-[38px] items-center gap-1.5 px-3 text-[11px] ${
+              isInferringPrompt
+                ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-300"
+                : "text-zinc-500 hover:bg-emerald-500/10 hover:text-emerald-600 dark:hover:text-emerald-300"
+            } disabled:cursor-not-allowed disabled:opacity-50`}
+            title="反推画布图片提示词"
+          >
+            <ScanSearch className={`h-3.5 w-3.5 ${isInferringPrompt ? "animate-pulse" : ""}`} />
+            {isInferringPrompt ? "反推中..." : "图片反推"}
           </button>
         </div>
       </section>
@@ -312,6 +362,7 @@ export function AndroidPhoneComposePanel({
           aspectOptions={aspectOptions}
           activeResolution={activeResolution}
           activeResolutionLabel={activeResolutionLabel}
+          editAutoAspectComputedSizeLabel={editAutoAspectComputedSizeLabel}
           exactSizeLabel={exactSize?.label ?? null}
           activeQualityLabel={activeQualityLabel}
           activeStyleLabel={activeStyleLabel}
@@ -319,9 +370,14 @@ export function AndroidPhoneComposePanel({
           allowPreciseSizeControl={allowPreciseSizeControl}
           availableResolutions={availableResolutions}
           batchCount={batchCount}
+          effectiveEditAutoAspectResolution={effectiveEditAutoAspectResolution}
+          handleEditAutoAspectResolutionSelect={handleEditAutoAspectResolutionSelect}
+          handleEditAutoAspectToggle={handleEditAutoAspectToggle}
           handleAspectSelect={handleAspectSelect}
           handleResolutionSelect={handleResolutionSelect}
           imageModelID={imageModelID}
+          manualEditAutoAspectActive={manualEditAutoAspectActive}
+          mode={mode}
           onOpenCustomAspectRatioModal={openCustomAspectRatioModal}
           onOpenCustomSizeModal={openCustomSizeModal}
           apiMode={apiMode}

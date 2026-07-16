@@ -28,6 +28,21 @@ func chooseImageFiles() ([]string, error) {
 			return nil, err
 		}
 		return parseDialogPaths(string(out)), nil
+	case "darwin":
+		out, err := exec.Command(
+			"osascript",
+			"-e",
+			`set selectedFiles to choose file with prompt "选择图片" of type {"public.image"} with multiple selections allowed
+set selectedPaths to ""
+repeat with selectedFile in selectedFiles
+	set selectedPaths to selectedPaths & POSIX path of selectedFile & linefeed
+end repeat
+return selectedPaths`,
+		).Output()
+		if err != nil {
+			return nil, err
+		}
+		return parseDialogPaths(string(out)), nil
 	default:
 		if path, err := exec.LookPath("zenity"); err == nil {
 			out, err := exec.Command(path, "--file-selection", "--multiple", "--separator=\n", "--file-filter=Images | *.png *.jpg *.jpeg *.webp").Output()
@@ -59,6 +74,20 @@ func chooseDirectory() (string, error) {
 				`if ($dlg.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::UTF8; $dlg.SelectedPath }`,
 		)
 		out, err := cmd.Output()
+		if err != nil {
+			return "", err
+		}
+		paths := parseDialogPaths(string(out))
+		if len(paths) == 0 {
+			return "", nil
+		}
+		return paths[0], nil
+	case "darwin":
+		out, err := exec.Command(
+			"osascript",
+			"-e",
+			`POSIX path of (choose folder with prompt "选择目录")`,
+		).Output()
 		if err != nil {
 			return "", err
 		}

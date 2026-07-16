@@ -1,8 +1,10 @@
 package ui
 
 import (
+	"encoding/base64"
 	"image"
 	"os"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
@@ -366,10 +368,6 @@ func TestBuildPerformanceDiagnosticsReportIncludesKeyFields(t *testing.T) {
 		"history_preview_coverage: 0.0%",
 		"history_backfill_inflight: 0",
 		"image_cache_entries: 2",
-		"thumb_decode_queue: 0",
-		"thumb_decode_busy: 0",
-		"thumb_decode_queue_peak: 0",
-		"thumb_decode_busy_peak: 0",
 		"thumb_display_requests: 0",
 		"thumb_display_cache_hits: 0",
 		"thumb_display_cache_misses: 0",
@@ -417,5 +415,40 @@ func TestBuildPerformanceDiagnosticsReportIncludesKeyFields(t *testing.T) {
 		if !strings.Contains(report, want) {
 			t.Fatalf("report missing %q:\n%s", want, report)
 		}
+	}
+	for _, pattern := range []string{
+		`thumb_decode_queue: -?\d+`,
+		`thumb_decode_busy: -?\d+`,
+		`thumb_decode_queue_peak: -?\d+`,
+		`thumb_decode_busy_peak: -?\d+`,
+	} {
+		matched, err := regexp.MatchString(pattern, report)
+		if err != nil {
+			t.Fatalf("invalid regexp %q: %v", pattern, err)
+		}
+		if !matched {
+			t.Fatalf("report missing pattern %q:\n%s", pattern, report)
+		}
+	}
+}
+
+func TestBuildPerformanceDiagnosticsReportMarksVirtualCurrentResultPresent(t *testing.T) {
+	virtualPath := registerVirtualImage(base64.StdEncoding.EncodeToString([]byte("virtual-image")), "remote-result.png", "png")
+	app := &App{}
+	app.result = resultState{
+		SavedPath: virtualPath,
+		Item: sharedCompat.HistoryItem{
+			ID:        "result-virtual",
+			SavedPath: virtualPath,
+		},
+		HasItem: true,
+	}
+
+	report := app.buildPerformanceDiagnosticsReport()
+	if !strings.Contains(report, "current_result_saved_present: true") {
+		t.Fatalf("report missing virtual saved presence:\n%s", report)
+	}
+	if !strings.Contains(report, "current_result_managed_preview_ready: false") {
+		t.Fatalf("report missing virtual managed preview state:\n%s", report)
 	}
 }

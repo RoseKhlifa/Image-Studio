@@ -176,6 +176,10 @@ type Options struct {
 	// This is useful for some NewAPI-style relays that reject streaming fields.
 	ImagesNewAPICompat bool
 
+	// AllowInsecureConnection permits remote HTTP and disables HTTPS/WSS
+	// certificate verification for this upstream. It must remain opt-in.
+	AllowInsecureConnection bool
+
 	MaskB64 string // optional, reserved for Phase 3 GUI; omitted from payload when empty
 
 	// Seed pins the random source so users can reproduce a result. 0 means

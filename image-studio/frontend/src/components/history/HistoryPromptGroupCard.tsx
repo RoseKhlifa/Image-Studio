@@ -3,7 +3,7 @@ import type React from "react";
 import type { HistoryItem } from "../../types/domain";
 import { HistoryPromptThumbnailStack } from "./HistoryPromptThumbnailStack";
 import type { HistoryPromptGroup } from "./historyPromptGroups";
-import { historyPromptGroupContains, historyPromptGroupLabel } from "./historyPromptGroups";
+import { historyPromptGroupContains, historyPromptGroupIndexSummary, historyPromptGroupLabel } from "./historyPromptGroups";
 import { qualityLabel, sizeLabel } from "./historyLabels";
 
 export function HistoryPromptGroupCard({
@@ -66,6 +66,7 @@ export function HistoryPromptGroupCard({
             <Layers3 className="h-3.5 w-3.5" />
             同提示词
             <span>{group.items.length} 张</span>
+            <span>{historyPromptGroupIndexSummary(group)}</span>
           </span>
           <strong>{label}</strong>
           <small>{sizeLabel(latest.size)} · {qualityLabel(latest.quality)}</small>

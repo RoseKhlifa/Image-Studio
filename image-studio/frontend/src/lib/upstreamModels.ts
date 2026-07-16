@@ -42,6 +42,9 @@ function uniqueModels(input: UpstreamModelDescriptorLike[] = []): UpstreamModelD
 function looksLikeImageModel(model: UpstreamModelDescriptor): boolean {
   const haystack = `${model.id} ${model.displayName} ${model.object} ${model.ownedBy}`.toLowerCase();
   return haystack.includes("gpt-image")
+    || haystack.includes("gemini-")
+    || haystack.includes("imagen-")
+    || haystack.includes("nano-banana")
     || haystack.includes("image-")
     || haystack.includes("images")
     || haystack.includes("dall-e")
@@ -68,7 +71,10 @@ function scoreImageModel(model: UpstreamModelDescriptor): number {
   if (id === "gpt-image-2") return 0;
   if (id === "gpt-image-1") return 1;
   if (id.startsWith("gpt-image")) return 2;
-  if (id.startsWith("dall-e")) return 3;
+  if (id.startsWith("gemini-3.1-flash-image")) return 3;
+  if (id.startsWith("gemini-")) return 4;
+  if (id.startsWith("imagen-")) return 5;
+  if (id.startsWith("dall-e")) return 6;
   return 100;
 }
 

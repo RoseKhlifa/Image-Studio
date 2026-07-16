@@ -1,7 +1,7 @@
 import {
   Brush, Crop, Eraser, FlipHorizontal, FlipVertical, Hand,
   Info, MoveRight, Pencil, RotateCcw, RotateCw, Save, Square,
-  Trash2, Maximize, Minimize, Type as TypeIcon,
+  Trash2, Maximize, Minimize, Type as TypeIcon, Upload,
 } from "lucide-react";
 import { ANNOTATION_COLORS } from "../../types/domain";
 import { fullscreenShortcutLabel, redoShortcutLabel, undoShortcutLabel } from "../../platform";
@@ -66,6 +66,7 @@ export function ContextualSection({
   annotationColor,
   onSetBrushMode,
   onSetBrushSize,
+  onImportMask,
   onResetMask,
   onSetAnnotationKind,
   onSetAnnotationColor,
@@ -81,6 +82,7 @@ export function ContextualSection({
   annotationColor: string;
   onSetBrushMode: (mode: "paint" | "erase") => void;
   onSetBrushSize: (size: number) => void;
+  onImportMask: () => void | Promise<void>;
   onResetMask: () => void;
   onSetAnnotationKind: (kind: "rect" | "arrow" | "freehand" | "text") => void;
   onSetAnnotationColor: (color: string) => void;
@@ -97,6 +99,9 @@ export function ContextualSection({
           </ToolBtn>
           <ToolBtn active={brushMode === "erase"} onClick={() => onSetBrushMode("erase")} title="橡皮(取消蒙版)" label={isMac ? "橡皮" : undefined}>
             <Eraser className="w-3.5 h-3.5" />
+          </ToolBtn>
+          <ToolBtn onClick={() => void onImportMask()} title="导入蒙版图片" label={isMac ? "导入" : undefined}>
+            <Upload className="w-3.5 h-3.5" />
           </ToolBtn>
           <span className="ml-1 text-[11px] text-zinc-500">大小</span>
           <input

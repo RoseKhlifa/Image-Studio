@@ -197,6 +197,7 @@ export function saveActiveWorkspaceSnapshot(s: StudioState): Workspace[] {
       batchCount: s.batchCount,
       selectedPresetId: s.selectedPresetId,
       editSourceMode: s.editSourceMode,
+      editAutoAspectResolution: s.editAutoAspectResolution,
       batchProcess: normalizeBatchProcessConfig(s.batchProcess),
       loopGeneration: normalizeLoopGenerationConfig(s.loopGeneration),
       sources: s.sources,

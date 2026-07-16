@@ -121,6 +121,22 @@ export function AndroidUpstreamProfileForm({
         {baseURLError ? <p className="android-upstream-error">{baseURLError}</p> : null}
       </AndroidField>
 
+      <AndroidField label="连接安全" hint="仅在可信网络中使用；API Key、提示词和图片可能被窃听或篡改。">
+        <button
+          type="button"
+          role="switch"
+          aria-checked={draft.allowInsecureConnection === true}
+          className={`android-upstream-compat-toggle ${draft.allowInsecureConnection ? "active" : ""}`}
+          onClick={() => onPatchDraft({ allowInsecureConnection: !(draft.allowInsecureConnection === true) })}
+        >
+          <span>
+            <strong>允许不安全连接</strong>
+            <small>允许远程 HTTP，并忽略 HTTPS / WSS 证书错误。</small>
+          </span>
+          <em>{draft.allowInsecureConnection ? "已开启" : "已关闭"}</em>
+        </button>
+      </AndroidField>
+
       <AndroidField label="API Key" required hint="密钥写入系统凭据存储，不进入 localStorage。">
         <div className="android-upstream-secret">
           <input

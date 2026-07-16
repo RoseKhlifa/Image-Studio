@@ -3,6 +3,7 @@ package client
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -36,24 +37,26 @@ func (e *responsesWebSocketFallbackError) Unwrap() error {
 }
 
 type ResponsesWSRunStateSnapshot struct {
-	AttemptIndex       int
-	SocketEpoch        int
-	CreatedAt          time.Time
-	LastActivityAt     time.Time
-	RequestPayload     []byte
-	ResponseID         string
-	LatestEventType    string
+	AttemptIndex        int
+	SocketEpoch         int
+	CreatedAt           time.Time
+	LastActivityAt      time.Time
+	RequestPayload      []byte
+	ResponseID          string
+	LatestEventType     string
+	ReceivedBytes       int64
 	PartialPreviewCount int
-	HasFinalImage      bool
-	Cancelled          bool
-	Completed          bool
+	HasFinalImage       bool
+	Cancelled           bool
+	Completed           bool
 }
 
 type ProbeResponsesWebSocketOptions struct {
-	BaseURL string
-	APIKey  string
-	Proxy   ProxyConfig
-	Model   string
+	BaseURL                 string
+	APIKey                  string
+	Proxy                   ProxyConfig
+	Model                   string
+	AllowInsecureConnection bool
 }
 
 func requestResponsesWithWebSocketReplay(
@@ -95,7 +98,6 @@ func requestResponsesWithWebSocketReplay(
 		}
 		ticker := time.NewTicker(time.Duration(StatusIntervalSecond) * time.Second)
 		defer ticker.Stop()
-		lastBytes := int64(0)
 		lastStage := "等待接口响应"
 		for {
 			select {
@@ -110,20 +112,20 @@ func requestResponsesWithWebSocketReplay(
 						lastStage = "模型处理中"
 					}
 				}
-				onProgress(lastStage, int(time.Since(startedAt).Seconds()), lastBytes)
+				onProgress(lastStage, int(time.Since(startedAt).Seconds()), snapshot.ReceivedBytes)
 			}
 		}
 	}()
 	if onLog != nil {
 		onLog("使用 Responses WebSocket mode 发起请求...")
 	}
-	result, err := requestResponsesOverWebSocket(ctx, baseURL, opts.APIKey, opts.Proxy, payload, rawSink, onPartial, snapshot)
+	result, err := requestResponsesOverWebSocket(ctx, baseURL, opts.APIKey, opts.Proxy, opts.AllowInsecureConnection, payload, rawSink, onPartial, snapshot, startedAt, onProgress)
 	var fallbackErr *responsesWebSocketFallbackError
 	if errors.As(err, &fallbackErr) {
 		if onLog != nil {
 			onLog("Responses WebSocket 握手失败，当前上游不兼容该 WS 路径，自动切回 HTTP SSE...")
 		}
-		transport, terr := PickTransportWithProxy(opts.Proxy)
+		transport, terr := PickTransportWithProxyAndSecurity(opts.Proxy, opts.AllowInsecureConnection)
 		if terr != nil {
 			return ImageResult{}, terr
 		}
@@ -167,7 +169,7 @@ func ProbeResponsesWebSocket(ctx context.Context, opts ProbeResponsesWebSocketOp
 	if err != nil {
 		return err
 	}
-	return probeResponsesWebSocketOnce(ctx, opts.BaseURL, opts.APIKey, opts.Proxy, payload)
+	return probeResponsesWebSocketOnce(ctx, opts.BaseURL, opts.APIKey, opts.Proxy, opts.AllowInsecureConnection, payload)
 }
 
 func requestResponsesOverWebSocket(
@@ -175,10 +177,13 @@ func requestResponsesOverWebSocket(
 	baseURL string,
 	apiKey string,
 	proxy ProxyConfig,
+	allowInsecureConnection bool,
 	payload []byte,
 	rawSink io.Writer,
 	onPartial func(PartialImage),
 	snapshot *ResponsesWSRunStateSnapshot,
+	startedAt time.Time,
+	onProgress func(stage string, elapsedSeconds int, bytesReceived int64),
 ) (ImageResult, error) {
 	if snapshot == nil {
 		snapshot = &ResponsesWSRunStateSnapshot{}
@@ -195,7 +200,7 @@ func requestResponsesOverWebSocket(
 				_, _ = io.WriteString(rawSink, fmt.Sprintf("--- websocket-reconnect-%d ---\n", reconnect))
 			}
 		}
-		result, err := requestResponsesOverWebSocketOnce(ctx, baseURL, apiKey, proxy, payload, rawSink, onPartial, snapshot)
+		result, err := requestResponsesOverWebSocketOnce(ctx, baseURL, apiKey, proxy, allowInsecureConnection, payload, rawSink, onPartial, snapshot, startedAt, onProgress)
 		if err == nil {
 			return result, nil
 		}
@@ -221,16 +226,19 @@ func requestResponsesOverWebSocketOnce(
 	baseURL string,
 	apiKey string,
 	proxy ProxyConfig,
+	allowInsecureConnection bool,
 	payload []byte,
 	rawSink io.Writer,
 	onPartial func(PartialImage),
 	snapshot *ResponsesWSRunStateSnapshot,
+	startedAt time.Time,
+	onProgress func(stage string, elapsedSeconds int, bytesReceived int64),
 ) (ImageResult, error) {
-	wsURL, err := responsesWebSocketURL(baseURL)
+	wsURL, err := responsesWebSocketURL(baseURL, allowInsecureConnection)
 	if err != nil {
 		return ImageResult{}, err
 	}
-	dialer, err := newResponsesWebSocketDialer(proxy)
+	dialer, err := newResponsesWebSocketDialer(proxy, allowInsecureConnection)
 	if err != nil {
 		return ImageResult{}, err
 	}
@@ -290,10 +298,18 @@ func requestResponsesOverWebSocketOnce(
 			continue
 		}
 		_, _ = collector.Write(append([]byte("data: "), append(line, '\n')...))
+		snapshot.ReceivedBytes = collector.bytesReceived()
 		var ev Event
 		if err := decodeEvent(string(line), &ev); err == nil {
 			if evType, _ := ev["type"].(string); evType != "" {
 				snapshot.LatestEventType = evType
+				if onProgress != nil {
+					stage := SummarizeSSELine(`data: {"type":"` + evType + `"}`)
+					if stage == "" {
+						stage = "模型处理中"
+					}
+					onProgress(stage, int(time.Since(startedAt).Seconds()), snapshot.ReceivedBytes)
+				}
 				switch evType {
 				case "response.created":
 					if responseAny, ok := ev["response"].(map[string]any); ok {
@@ -350,8 +366,8 @@ func responsesWebSocketKeepalive(ctx context.Context, conn *websocket.Conn, done
 	}
 }
 
-func responsesWebSocketURL(baseURL string) (string, error) {
-	normalized, err := ValidateBaseURL(baseURL)
+func responsesWebSocketURL(baseURL string, allowInsecureConnection bool) (string, error) {
+	normalized, err := ValidateBaseURLWithSecurity(baseURL, allowInsecureConnection)
 	if err != nil {
 		return "", err
 	}
@@ -371,15 +387,20 @@ func responsesWebSocketURL(baseURL string) (string, error) {
 	return parsed.String(), nil
 }
 
-func newResponsesWebSocketDialer(proxy ProxyConfig) (*websocket.Dialer, error) {
+func newResponsesWebSocketDialer(proxy ProxyConfig, allowInsecureConnection bool) (*websocket.Dialer, error) {
 	proxyFn, err := proxyFunc(proxy)
 	if err != nil {
 		return nil, err
 	}
-	return &websocket.Dialer{
+	dialer := &websocket.Dialer{
 		Proxy:            proxyFn,
 		HandshakeTimeout: 30 * time.Second,
-	}, nil
+	}
+	if allowInsecureConnection {
+		// #nosec G402 -- this is restricted to an explicit per-upstream opt-in.
+		dialer.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: true}
+	}
+	return dialer, nil
 }
 
 func buildResponsesWebSocketCreatePayload(httpPayload []byte) ([]byte, error) {
@@ -402,13 +423,14 @@ func probeResponsesWebSocketOnce(
 	baseURL string,
 	apiKey string,
 	proxy ProxyConfig,
+	allowInsecureConnection bool,
 	payload []byte,
 ) error {
-	wsURL, err := responsesWebSocketURL(baseURL)
+	wsURL, err := responsesWebSocketURL(baseURL, allowInsecureConnection)
 	if err != nil {
 		return err
 	}
-	dialer, err := newResponsesWebSocketDialer(proxy)
+	dialer, err := newResponsesWebSocketDialer(proxy, allowInsecureConnection)
 	if err != nil {
 		return err
 	}
