@@ -19,8 +19,12 @@ func PickTransport() (Transport, error) {
 }
 
 func PickTransportWithProxy(proxy ProxyConfig) (Transport, error) {
+	return PickTransportWithProxyAndSecurity(proxy, false)
+}
+
+func PickTransportWithProxyAndSecurity(proxy ProxyConfig, allowInsecureConnection bool) (Transport, error) {
 	if _, err := NormalizeProxyConfig(proxy.Mode, proxy.URL); err != nil {
 		return nil, err
 	}
-	return &NativeTransport{Proxy: proxy}, nil
+	return &NativeTransport{Proxy: proxy, AllowInsecureConnection: allowInsecureConnection}, nil
 }

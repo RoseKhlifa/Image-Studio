@@ -3,17 +3,21 @@ package ui
 import (
 	"context"
 	"image"
+	"image/color"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	gioCompat "image-studio/gio-client/internal/compat"
+	"image-studio/gio-client/internal/desktopstate"
 	"image-studio/gio-client/internal/kernel"
 	sharedCompat "image-studio/shared/compat"
 
 	"gioui.org/app"
 	"gioui.org/gesture"
+	"gioui.org/io/pointer"
+	"gioui.org/io/system"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/paint"
@@ -47,7 +51,9 @@ type snapshot struct {
 	TodayHistoryCount         int
 	History                   []sharedCompat.HistoryItem
 	BatchResults              []sharedCompat.HistoryItem
+	BatchPreviewItems         []sharedCompat.HistoryItem
 	BatchTotal                int
+	BatchLiveSlotCount        int
 	Profiles                  []sharedCompat.UpstreamProfile
 	ActiveProfileID           string
 	SettingsSelectedProfileID string
@@ -66,6 +72,8 @@ type snapshot struct {
 	Fullscreen                bool
 	LastErrorMessage          string
 	LastRunAvailable          bool
+	LastRunWorkflowWorkspace  string
+	LastRunWorkflowOutput     string
 	LastLowFPSSnapshotPath    string
 	RawResponseModalPath      string
 	RawResponseModalText      string
@@ -75,6 +83,7 @@ type snapshot struct {
 	CompareSplit              float32
 	Result                    resultState
 	SavePromptVisible         bool
+	SavePromptBatchItems      []sharedCompat.HistoryItem
 	PromptImportVisible       bool
 	PromptImportLoading       bool
 	PromptImportToken         string
@@ -83,6 +92,8 @@ type snapshot struct {
 	PromptImportRegisterOpen  bool
 	PromptImportRegisterBusy  bool
 	PromptImportRegisterNote  string
+	HistoryActionMenuItem     sharedCompat.HistoryItem
+	HistoryActionMenuContext  string
 }
 
 type cachedImage struct {
@@ -120,127 +131,156 @@ type historyGroupLookupCache struct {
 }
 
 type workspaceState struct {
-	ID                  string
-	Name                string
-	Prompt              string
-	NegativePrompt      string
-	Mode                string
-	Size                string
-	Quality             string
-	OutputFormat        string
-	Background          string
-	OutputCompression   string
-	InputFidelity       string
-	ImageStyle          string
-	Moderation          string
-	UserIdentifier      string
-	PartialImages       string
-	StyleTag            string
-	SeedText            string
-	BatchCount          int
-	LoopEnabled         bool
-	LoopTotalCount      int
-	LoopConcurrency     int
-	LoopAutoSave        bool
-	LoopAutoSaveDir     string
-	LoopLivePreview     bool
-	BatchMode           bool
-	BatchInputDir       string
-	BatchOutputDir      string
-	BatchRetryOnFail    bool
-	BatchAutoAspect     string
-	SourcePathsText     string
-	ResultSavedPath     string
-	ResultRawPath       string
-	ResultRevisedPrompt string
-	ResultSourceEvent   string
-	ResultItem          sharedCompat.HistoryItem
-	ResultHasItem       bool
-	SelectedHistoryID   string
-	BatchResultIDs      []string
-	ResultGridOpen      bool
-	CompareHistoryID    string
-	CompareSplit        float32
+	ID                       string
+	Name                     string
+	Prompt                   string
+	NegativePrompt           string
+	Mode                     string
+	Size                     string
+	Quality                  string
+	OutputFormat             string
+	Background               string
+	OutputCompression        string
+	InputFidelity            string
+	ImageStyle               string
+	Moderation               string
+	UserIdentifier           string
+	PartialImages            string
+	StyleTag                 string
+	SeedText                 string
+	BatchCount               int
+	LoopEnabled              bool
+	LoopTotalCount           int
+	LoopConcurrency          int
+	LoopAutoSave             bool
+	LoopAutoSaveDir          string
+	LoopLivePreview          bool
+	BatchMode                bool
+	BatchInputDir            string
+	BatchOutputDir           string
+	BatchOutputMode          string
+	BatchOutputPrefix        string
+	BatchConcurrency         int
+	BatchRetryOnFail         bool
+	BatchAutoAspect          string
+	EditAutoAspectResolution string
+	SourcePathsText          string
+	ResultSavedPath          string
+	ResultRawPath            string
+	ResultRevisedPrompt      string
+	ResultSourceEvent        string
+	ResultItem               sharedCompat.HistoryItem
+	ResultHasItem            bool
+	SelectedHistoryID        string
+	SelectedPresetID         string
+	BatchResultIDs           []string
+	BatchPreviewItems        []sharedCompat.HistoryItem
+	ResultGridOpen           bool
+	CompareHistoryID         string
+	CompareSplit             float32
 }
 
 type App struct {
 	th     *material.Theme
 	runner kernel.Runner
 
-	controlsList        widget.List
-	logList             widget.List
-	historyList         widget.List
-	historyTimelineList widget.List
-	promptGroupList     widget.List
-	promptHelperList    widget.List
-	settingsProfileList widget.List
-	settingsList        widget.List
-	workspaceList       widget.List
+	controlsList          widget.List
+	logList               widget.List
+	historyList           widget.List
+	historyTimelineList   widget.List
+	advancedList          widget.List
+	promptGroupList       widget.List
+	promptHelperList      widget.List
+	settingsProfileList   widget.List
+	settingsList          widget.List
+	workspaceList         widget.List
+	workflowLibraryList   widget.List
+	workflowInspectorList widget.List
 
-	apiKeyInput               widget.Editor
-	baseURLInput              widget.Editor
-	textModelInput            widget.Editor
-	imageModelInput           widget.Editor
-	profileNameInput          widget.Editor
-	concurrencyLimitInput     widget.Editor
-	promptInput               widget.Editor
-	sourcePathsInput          widget.Editor
-	outputDirInput            widget.Editor
-	seedInput                 widget.Editor
-	negativePromptInput       widget.Editor
-	partialImagesInput        widget.Editor
-	outputCompressionInput    widget.Editor
-	proxyURLInput             widget.Editor
-	userIdentifierInput       widget.Editor
-	savePromptPathInput       widget.Editor
-	promptTemplateLabelInput  widget.Editor
-	promptTemplateTextInput   widget.Editor
-	presetNameInput           widget.Editor
-	loopTotalCountInput       widget.Editor
-	loopConcurrencyInput      widget.Editor
-	loopAutoSaveDirInput      widget.Editor
-	batchInputDirInput        widget.Editor
-	batchOutputDirInput       widget.Editor
-	upstreamQuickImportInput  widget.Editor
-	rawResponseViewerInput    widget.Editor
-	historyQueryInput         widget.Editor
-	historyTimelineQueryInput widget.Editor
-	workspaceNameInput        widget.Editor
+	apiKeyInput                    widget.Editor
+	baseURLInput                   widget.Editor
+	textModelInput                 widget.Editor
+	imageModelInput                widget.Editor
+	profileNameInput               widget.Editor
+	concurrencyLimitInput          widget.Editor
+	promptInput                    widget.Editor
+	sourcePathsInput               widget.Editor
+	outputDirInput                 widget.Editor
+	seedInput                      widget.Editor
+	negativePromptInput            widget.Editor
+	partialImagesInput             widget.Editor
+	outputCompressionInput         widget.Editor
+	proxyURLInput                  widget.Editor
+	userIdentifierInput            widget.Editor
+	savePromptPathInput            widget.Editor
+	promptTemplateLabelInput       widget.Editor
+	promptTemplateTextInput        widget.Editor
+	presetNameInput                widget.Editor
+	presetSizeInput                widget.Editor
+	presetQualityInput             widget.Editor
+	presetOutputFormatInput        widget.Editor
+	presetBatchCountInput          widget.Editor
+	presetStyleTagInput            widget.Editor
+	loopTotalCountInput            widget.Editor
+	loopConcurrencyInput           widget.Editor
+	loopAutoSaveDirInput           widget.Editor
+	batchInputDirInput             widget.Editor
+	batchOutputDirInput            widget.Editor
+	batchOutputPrefixInput         widget.Editor
+	batchConcurrencyInput          widget.Editor
+	upstreamQuickImportInput       widget.Editor
+	rawResponseViewerInput         widget.Editor
+	historyQueryInput              widget.Editor
+	historyTimelineQueryInput      widget.Editor
+	historyTimelinePickedDateInput widget.Editor
+	workspaceNameInput             widget.Editor
+	canvasAnnotationTextInput      widget.Editor
+	customSizeWidthInput           widget.Editor
+	customSizeHeightInput          widget.Editor
 
-	mode                 string
-	api                  string
-	size                 string
-	quality              string
-	format               string
-	policy               string
-	responsesTransport   string
-	reasoningEffort      string
-	fallbackProfileID    string
-	proxy                string
-	background           string
-	inputFidelity        string
-	imageStyle           string
-	moderation           string
-	styleTag             string
-	protectStreamPreview bool
-	autoRetryEnabled     bool
-	autoRetryCount       int
-	loopEnabled          bool
-	loopTotalCount       int
-	loopConcurrency      int
-	loopAutoSave         bool
-	loopAutoSaveDir      string
-	loopLivePreview      bool
-	batchMode            bool
-	batchInputDir        string
-	batchOutputDir       string
-	batchRetryOnFail     bool
-	batchAutoAspect      string
-	themeMode            string
-	fontScale            float64
-	reducedEffects       bool
-	imagesNewAPICompat   bool
-	batchCount           int
+	mode                     string
+	api                      string
+	size                     string
+	quality                  string
+	format                   string
+	policy                   string
+	responsesTransport       string
+	reasoningEffort          string
+	fallbackProfileID        string
+	proxy                    string
+	background               string
+	inputFidelity            string
+	imageStyle               string
+	moderation               string
+	styleTag                 string
+	protectStreamPreview     bool
+	autoRetryEnabled         bool
+	autoRetryCount           int
+	loopEnabled              bool
+	loopTotalCount           int
+	loopConcurrency          int
+	loopAutoSave             bool
+	loopAutoSaveDir          string
+	loopLivePreview          bool
+	batchMode                bool
+	batchInputDir            string
+	batchOutputDir           string
+	batchOutputMode          string
+	batchConcurrency         int
+	batchRetryOnFail         bool
+	batchAutoAspect          string
+	editAutoAspectResolution string
+	themeMode                string
+	resolvedThemeMode        string
+	desktopStyle             string
+	experienceMode           string
+	fontScale                float64
+	reducedEffects           bool
+	macSidebarHidden         bool
+	macInspectorHidden       bool
+	imagesNewAPICompat       bool
+	allowInsecureConnection  bool
+	batchCount               int
 
 	modeButtons                              []widget.Clickable
 	apiButtons                               []widget.Clickable
@@ -279,7 +319,31 @@ type App struct {
 	copyRawResponseButton                    widget.Clickable
 	clearLogButton                           widget.Clickable
 	saveAsButton                             widget.Clickable
+	dragOutButton                            widget.Clickable
+	panToolButton                            widget.Clickable
+	maskToolButton                           widget.Clickable
+	annotateToolButton                       widget.Clickable
+	undoCanvasButton                         widget.Clickable
+	redoCanvasButton                         widget.Clickable
+	maskPaintButton                          widget.Clickable
+	maskEraseButton                          widget.Clickable
+	maskBrushSizeDownButton                  widget.Clickable
+	maskBrushSizeUpButton                    widget.Clickable
+	importMaskButton                         widget.Clickable
+	clearMaskButton                          widget.Clickable
+	annotateRectButton                       widget.Clickable
+	annotateArrowButton                      widget.Clickable
+	annotateFreehandButton                   widget.Clickable
+	annotateTextButton                       widget.Clickable
+	clearAnnotationsButton                   widget.Clickable
+	annotateColorButtons                     []widget.Clickable
+	canvasAnnotationTextConfirmButton        widget.Clickable
+	canvasAnnotationTextCancelButton         widget.Clickable
+	toggleResultGridButton                   widget.Clickable
+	previousBatchResultButton                widget.Clickable
+	nextBatchResultButton                    widget.Clickable
 	latestResultButton                       widget.Clickable
+	resetViewButton                          widget.Clickable
 	currentGroupButton                       widget.Clickable
 	closeCompareButton                       widget.Clickable
 	closeResultGridButton                    widget.Clickable
@@ -287,22 +351,29 @@ type App struct {
 	rotateRightButton                        widget.Clickable
 	flipHorizontalButton                     widget.Clickable
 	flipVerticalButton                       widget.Clickable
+	cropSelectionButton                      widget.Clickable
 	clearCurrentButton                       widget.Clickable
 	clearSourcesButton                       widget.Clickable
 	addSourceFilesButton                     widget.Clickable
 	addSourceStripButton                     widget.Clickable
 	chooseBatchInputDirButton                widget.Clickable
 	chooseBatchFilesButton                   widget.Clickable
+	refreshBatchInputDirButton               widget.Clickable
 	chooseBatchOutputDirButton               widget.Clickable
 	toggleLoopButton                         widget.Clickable
+	openLoopModalButton                      widget.Clickable
+	closeLoopModalButton                     widget.Clickable
+	toggleLoopEnabledButton                  widget.Clickable
 	chooseLoopAutoSaveDirButton              widget.Clickable
+	useLoopOutputDirButton                   widget.Clickable
 	emptyStateImportButton                   widget.Clickable
 	promptHelperButton                       widget.Clickable
 	promptHelperTemplatesButton              widget.Clickable
-	promptHelperPresetsButton                widget.Clickable
 	promptHelperHistoryButton                widget.Clickable
+	closePresetPickerButton                  widget.Clickable
 	openPromptTemplateManagerButton          widget.Clickable
-	openPresetManagerFromPromptButton        widget.Clickable
+	openPresetManagerSummaryButton           widget.Clickable
+	openPresetManagerPickerButton            widget.Clickable
 	newPromptTemplateButton                  widget.Clickable
 	savePromptTemplateButton                 widget.Clickable
 	deletePromptTemplateButton               widget.Clickable
@@ -317,8 +388,11 @@ type App struct {
 	deletePresetButton                       widget.Clickable
 	presetListButtons                        map[string]*widget.Clickable
 	openCustomAspectRatioManagerButton       widget.Clickable
+	openCustomSizeModalButton                widget.Clickable
 	addCustomAspectRatioButton               widget.Clickable
 	deleteCustomAspectRatioButton            widget.Clickable
+	applyCustomSizeButton                    widget.Clickable
+	closeCustomSizeModalButton               widget.Clickable
 	customAspectRatioListButtons             map[string]*widget.Clickable
 	closePromptHelperButton                  widget.Clickable
 	optimizePromptButton                     widget.Clickable
@@ -326,6 +400,7 @@ type App struct {
 	settingsTestUpstreamButton               widget.Clickable
 	loadUpstreamModelsButton                 widget.Clickable
 	settingsImagesCompatButton               widget.Clickable
+	settingsAllowInsecureButton              widget.Clickable
 	syncCodexConfigButton                    widget.Clickable
 	exportUpstreamConfigsButton              widget.Clickable
 	importUpstreamConfigsButton              widget.Clickable
@@ -353,6 +428,7 @@ type App struct {
 	useGeneralLoopOutputDirButton            widget.Clickable
 	chooseGeneralBatchInputButton            widget.Clickable
 	chooseGeneralBatchFilesButton            widget.Clickable
+	refreshGeneralBatchInputButton           widget.Clickable
 	chooseGeneralBatchOutputButton           widget.Clickable
 	resetGeneralOutputButton                 widget.Clickable
 	triggerGeneralHistoryMediaBackfillButton widget.Clickable
@@ -393,12 +469,16 @@ type App struct {
 	generalLoopAutoSaveButtons               []widget.Clickable
 	generalLoopPreviewButtons                []widget.Clickable
 	generalBatchButtons                      []widget.Clickable
+	generalBatchOutputModeButtons            []widget.Clickable
 	generalBatchRetryButtons                 []widget.Clickable
 	generalBatchAutoAspectButtons            []widget.Clickable
 	generalBatchAutoAspectResolutionButtons  []widget.Clickable
 	composeBatchRetryButtons                 []widget.Clickable
+	composeBatchOutputModeButtons            []widget.Clickable
 	composeBatchAutoAspectButtons            []widget.Clickable
 	composeBatchAutoAspectResolutionButtons  []widget.Clickable
+	composeEditAutoAspectButtons             []widget.Clickable
+	composeEditAutoAspectResolutionButtons   []widget.Clickable
 	composeLoopButtons                       []widget.Clickable
 	composeLoopCountButtons                  []widget.Clickable
 	composeLoopConcurrencyButtons            []widget.Clickable
@@ -406,13 +486,64 @@ type App struct {
 	composeLoopPreviewButtons                []widget.Clickable
 	generalProxyButtons                      []widget.Clickable
 	generalKeepLogsButtons                   []widget.Clickable
+	experienceModeButtons                    []widget.Clickable
+	desktopStyleButtons                      []widget.Clickable
+	generalStartupModeButtons                []widget.Clickable
+	generalWindowLayoutButtons               []widget.Clickable
+	generalAutoProgressToggle                widget.Clickable
+	generalReopenWindowsToggle               widget.Clickable
+	generalRestoreSessionToggle              widget.Clickable
+	workflowModeButtons                      []widget.Clickable
+	workflowQualityButtons                   []widget.Clickable
+	workflowFormatButtons                    []widget.Clickable
+	workflowSizeButtons                      []widget.Clickable
+	workflowBatchCountButtons                []widget.Clickable
+	workflowBottomTabButtons                 []widget.Clickable
+	workflowPreviewButtons                   []widget.Clickable
+	workflowZoomOutButton                    widget.Clickable
+	workflowZoomInButton                     widget.Clickable
+	workflowFitButton                        widget.Clickable
+	workflowUndoButton                       widget.Clickable
+	workflowRedoButton                       widget.Clickable
+	workflowSaveButton                       widget.Clickable
+	workflowLoadButton                       widget.Clickable
+	workflowRunButton                        widget.Clickable
+	workflowCancelButton                     widget.Clickable
+	workflowDetachCanvasButton               widget.Clickable
+	workflowDetachConsoleButton              widget.Clickable
+	workflowDockDetachConsoleButton          widget.Clickable
+	workflowOpenProgressButton               widget.Clickable
+	workflowToggleConsoleButton              widget.Clickable
+	workflowResetGraphButton                 widget.Clickable
+	workflowCopyLogsButton                   widget.Clickable
+	workflowAddWorkspaceButton               widget.Clickable
+	workflowImportNodeButton                 widget.Clickable
+	workflowAddSourcesButton                 widget.Clickable
+	workflowClearSourcesButton               widget.Clickable
+	workflowOpenOutputButton                 widget.Clickable
+	workflowDeleteNodeButton                 widget.Clickable
+	workflowDuplicateNodeButton              widget.Clickable
+	workflowToggleNodeButton                 widget.Clickable
+	workflowNodeTitleInput                   widget.Editor
+	workflowEditingNodeKey                   string
+	workflowNodeButtons                      map[string]*widget.Clickable
+	workflowAddNodeButtons                   map[string]*widget.Clickable
+	workflowConnectionButtons                map[string]*widget.Clickable
+	workflowSidebarWorkspaceButtons          map[string]*widget.Clickable
+	workflowWorkspaceWindowButtons           map[string]*widget.Clickable
+	workflowCustomNodeTemplates              []workflowNodeModel
+	workflowNodeManifestDir                  string
 	headerAddWorkspaceButton                 widget.Clickable
 	headerQuoteButton                        widget.Clickable
 	githubButton                             widget.Clickable
 	headerStarButton                         widget.Clickable
 	settingsButton                           widget.Clickable
+	macToggleSidebarButton                   widget.Clickable
+	macToggleInspectorButton                 widget.Clickable
+	macCanvasMoreButton                      widget.Clickable
 	fullscreenButton                         widget.Clickable
 	resultDetailButton                       widget.Clickable
+	batchGridDragOutButton                   widget.Clickable
 	footerOutputButton                       widget.Clickable
 	footerGithubButton                       widget.Clickable
 	footerFeedbackButton                     widget.Clickable
@@ -427,7 +558,12 @@ type App struct {
 	settingsActivateProfileButton            widget.Clickable
 	closeResultDetailButton                  widget.Clickable
 	resultDetailSaveAsButton                 widget.Clickable
+	resultDetailDragOutButton                widget.Clickable
 	resultDetailUseSourceButton              widget.Clickable
+	resultDetailApplyParamsButton            widget.Clickable
+	resultDetailRegenerateButton             widget.Clickable
+	resultDetailCompareButton                widget.Clickable
+	resultDetailOpenRawButton                widget.Clickable
 	resultDetailUsePromptButton              widget.Clickable
 	resultDetailUseRevisedButton             widget.Clickable
 	resultDetailOpenPathButton               widget.Clickable
@@ -437,6 +573,11 @@ type App struct {
 	resultDetailDeleteButton                 widget.Clickable
 	composeToggleButton                      widget.Clickable
 	advancedToggleButton                     widget.Clickable
+	advancedCloseButton                      widget.Clickable
+	advancedCoreGroupButton                  widget.Clickable
+	advancedOutputGroupButton                widget.Clickable
+	advancedStrategyGroupButton              widget.Clickable
+	advancedStreamGroupButton                widget.Clickable
 	copyPerformanceDiagnosticsButton         widget.Clickable
 	profilePickerButton                      widget.Clickable
 	manageUpstreamButton                     widget.Clickable
@@ -445,123 +586,165 @@ type App struct {
 	openHistoryTimelineButton                widget.Clickable
 	openHistoryTimelineMoreButton            widget.Clickable
 	closeHistoryTimelineButton               widget.Clickable
+	closeHistoryActionMenuButton             widget.Clickable
 	savePromptSaveButton                     widget.Clickable
 	savePromptSkipButton                     widget.Clickable
+	savePromptSelectAllButton                widget.Clickable
+	savePromptClearSelectionButton           widget.Clickable
+	savePromptChooseDirButton                widget.Clickable
 	savePromptNeverAsk                       widget.Bool
 	promptImportConfirmButton                widget.Clickable
 	promptImportCloseButton                  widget.Clickable
 	promptImportRegisterNowButton            widget.Clickable
 	promptImportRegisterLaterButton          widget.Clickable
 
-	mu                           sync.Mutex
-	running                      bool
-	cancel                       context.CancelFunc
-	status                       string
-	logs                         []string
-	logsRev                      int
-	logsSnapshotRev              int
-	logsSnapshotCache            []string
-	history                      []sharedCompat.HistoryItem
-	profiles                     []sharedCompat.UpstreamProfile
-	promptHistory                []string
-	promptTemplates              []sharedCompat.PromptTemplate
-	promptHistoryRev             int
-	presets                      []sharedCompat.Preset
-	customAspectRatios           []sharedCompat.CustomAspectRatio
-	historyThumbBackfillInFlight map[string]struct{}
-	activeProfileID              string
-	selectedHistoryID            string
-	optimizingPrompt             bool
-	testingUpstream              bool
-	syncingCodexConfig           bool
-	processingImageTransform     bool
-	lastProbeSummary             string
-	lastProbeModels              []kernel.UpstreamModelDescriptor
-	fullscreen                   bool
-	activeResultDetail           sharedCompat.HistoryItem
-	result                       resultState
-	compare                      resultState
-	imageOp                      paint.ImageOp
-	imageOpRev                   int
-	compareImageOp               paint.ImageOp
-	compareImageOpRev            int
-	canvasDisplayScale           float32
-	imageCache                   map[string]cachedImage
-	imageLoadWaiters             map[string]chan struct{}
-	checkerboard                 checkerboardCache
-	snapshotCache                snapshot
-	snapshotReady                bool
-	historyRev                   int
-	batchResultsRev              int
-	batchResultsKey              string
-	batchResultsSnapshot         []sharedCompat.HistoryItem
-	historyTodayRev              int
-	historyTodayDay              string
-	historyTodayCount            int
-	historyPanelCache            historyPanelCache
-	historyTimelineCache         historyTimelineCache
-	historyGroupLookup           historyGroupLookupCache
-	promptSuggestionsCache       promptSuggestionsCache
-	historyItemDisplayCache      historyItemDisplayCache
-	sourcePathParseCache         map[string][]string
-	composeSummaryCacheKey       string
-	composeSummaryCache          string
-	advancedSummaryCacheKey      string
-	advancedSummaryCache         string
-	promptLabelCacheKey          string
-	promptLabelCacheItems        []promptHelperItem
-	presetLabelCacheKey          string
-	presetLabelCacheItems        []promptHelperItem
-	promptTextMetricsKey         string
-	promptTextMetricsTrimmed     string
-	promptTextMetricsLen         int
-	renderBackend                string
-	frameRawIntervalEMA          time.Duration
-	frameRawFPS                  float64
-	frameIntervalEMA             time.Duration
-	frameFPS                     float64
-	layoutShellEMA               time.Duration
-	layoutControlsEMA            time.Duration
-	layoutSubmitDockEMA          time.Duration
-	layoutActionsEMA             time.Duration
-	layoutPromptCardEMA          time.Duration
-	layoutComposeCardEMA         time.Duration
-	layoutAdvancedCardEMA        time.Duration
-	layoutCanvasEMA              time.Duration
-	layoutCanvasToolbarEMA       time.Duration
-	layoutResultSurfaceEMA       time.Duration
-	layoutCanvasStatusEMA        time.Duration
-	layoutHistoryRailEMA         time.Duration
-	layoutUpstreamCardEMA        time.Duration
-	layoutHistorySummaryEMA      time.Duration
-	layoutLatestHistoryEMA       time.Duration
-	layoutHistoryResultsEMA      time.Duration
-	layoutTimelineModalEMA       time.Duration
-	layoutPeaks                  [layoutTimingCount]time.Duration
-	frameLastAt                  time.Time
-	renderActive                 bool
-	lastRenderActivityAt         time.Time
-	lastFrameSize                image.Point
-	lowFPSLastLoggedAt           time.Time
-	lowFPSStreak                 int
-	lastLowFPSDiagnosticsPath    string
-	lastHistoryThumbPrewarmAt    time.Time
-	lastHistoryThumbPrewarmMs    time.Duration
-	lastHistoryThumbPrewarmLoad  int
-	lastHistoryThumbPrewarmFail  int
-	lowFPSSnapshotInFlight       bool
-	invalidateQueued             bool
-	lastRunConfig                kernel.Config
-	lastRunBatchCount            int
-	lastRunValid                 bool
-	lastErrorMessage             string
-	rawResponseModalPath         string
-	rawResponseModalText         string
-	rawResponseModalError        string
-	batchResultIDs               []string
-	resultGridOpen               bool
-	compareSplitSlider           widget.Float
-	compareSplitDrag             gesture.Drag
+	mu                             sync.Mutex
+	running                        bool
+	cancel                         context.CancelFunc
+	status                         string
+	logs                           []string
+	logsRev                        int
+	logsSnapshotRev                int
+	logsSnapshotCache              []string
+	history                        []sharedCompat.HistoryItem
+	profiles                       []sharedCompat.UpstreamProfile
+	promptHistory                  []string
+	promptTemplates                []sharedCompat.PromptTemplate
+	promptHistoryRev               int
+	presets                        []sharedCompat.Preset
+	customAspectRatios             []sharedCompat.CustomAspectRatio
+	historyThumbBackfillInFlight   map[string]struct{}
+	activeProfileID                string
+	selectedHistoryID              string
+	optimizingPrompt               bool
+	testingUpstream                bool
+	syncingCodexConfig             bool
+	processingImageTransform       bool
+	lastProbeSummary               string
+	lastProbeModels                []kernel.UpstreamModelDescriptor
+	fullscreen                     bool
+	activeResultDetail             sharedCompat.HistoryItem
+	result                         resultState
+	compare                        resultState
+	imageOp                        paint.ImageOp
+	imageOpRev                     int
+	compareImageOp                 paint.ImageOp
+	compareImageOpRev              int
+	canvasDisplayScale             float32
+	canvasViewScale                float32
+	canvasViewOffset               image.Point
+	canvasViewKey                  string
+	canvasViewDragging             bool
+	canvasViewLastDragPos          image.Point
+	canvasSpacePan                 bool
+	canvasTool                     canvasToolMode
+	canvasBrushMode                canvasBrushMode
+	canvasBrushSize                int
+	canvasImportedMaskB64          string
+	canvasMaskStrokes              []canvasMaskStroke
+	canvasMaskDraft                *canvasMaskStroke
+	canvasMaskUndo                 [][]canvasMaskStroke
+	canvasMaskRedo                 [][]canvasMaskStroke
+	canvasMaskUndoAt               []time.Time
+	canvasMaskRedoAt               []time.Time
+	canvasAnnotationKind           canvasAnnotationKind
+	canvasAnnotationColor          color.NRGBA
+	canvasAnnotations              []canvasAnnotation
+	canvasAnnotationDraft          *canvasAnnotationDraft
+	canvasSelectedAnnotationID     string
+	canvasAnnotationUndo           [][]canvasAnnotation
+	canvasAnnotationRedo           [][]canvasAnnotation
+	canvasAnnotationUndoAt         []time.Time
+	canvasAnnotationRedoAt         []time.Time
+	canvasAnnotationTextPromptOpen bool
+	canvasAnnotationTextPoint      image.Point
+	imageCache                     map[string]cachedImage
+	imageLoadWaiters               map[string]chan struct{}
+	checkerboard                   checkerboardCache
+	snapshotCache                  snapshot
+	snapshotReady                  bool
+	historyRev                     int
+	batchResultsRev                int
+	batchResultsKey                string
+	batchResultsSnapshot           []sharedCompat.HistoryItem
+	historyTodayRev                int
+	historyTodayDay                string
+	historyTodayCount              int
+	historyPanelCache              historyPanelCache
+	historyTimelineCache           historyTimelineCache
+	historyGroupLookup             historyGroupLookupCache
+	promptSuggestionsCache         promptSuggestionsCache
+	historyItemDisplayCache        historyItemDisplayCache
+	sourcePathParseCache           map[string][]string
+	composeSummaryCacheKey         string
+	composeSummaryCache            string
+	advancedSummaryCacheKey        string
+	advancedSummaryCache           string
+	promptLabelCacheKey            string
+	promptLabelCacheItems          []promptHelperItem
+	presetLabelCacheKey            string
+	presetLabelCacheItems          []promptHelperItem
+	promptTextMetricsKey           string
+	promptTextMetricsTrimmed       string
+	promptTextMetricsLen           int
+	renderBackend                  string
+	frameRawIntervalEMA            time.Duration
+	frameRawFPS                    float64
+	frameIntervalEMA               time.Duration
+	frameFPS                       float64
+	layoutShellEMA                 time.Duration
+	layoutControlsEMA              time.Duration
+	layoutSubmitDockEMA            time.Duration
+	layoutActionsEMA               time.Duration
+	layoutPromptCardEMA            time.Duration
+	layoutComposeCardEMA           time.Duration
+	layoutAdvancedCardEMA          time.Duration
+	layoutCanvasEMA                time.Duration
+	layoutCanvasToolbarEMA         time.Duration
+	layoutResultSurfaceEMA         time.Duration
+	layoutCanvasStatusEMA          time.Duration
+	layoutHistoryRailEMA           time.Duration
+	layoutUpstreamCardEMA          time.Duration
+	layoutHistorySummaryEMA        time.Duration
+	layoutLatestHistoryEMA         time.Duration
+	layoutHistoryResultsEMA        time.Duration
+	layoutTimelineModalEMA         time.Duration
+	layoutPeaks                    [layoutTimingCount]time.Duration
+	frameLastAt                    time.Time
+	renderActive                   bool
+	lastRenderActivityAt           time.Time
+	lastFrameSize                  image.Point
+	lowFPSLastLoggedAt             time.Time
+	lowFPSStreak                   int
+	lastLowFPSDiagnosticsPath      string
+	lastHistoryThumbPrewarmAt      time.Time
+	lastHistoryThumbPrewarmMs      time.Duration
+	lastHistoryThumbPrewarmLoad    int
+	lastHistoryThumbPrewarmFail    int
+	lowFPSSnapshotInFlight         bool
+	invalidateQueued               bool
+	lastRunConfig                  kernel.Config
+	lastRunBatchCount              int
+	lastRunConcurrency             int
+	lastRunValid                   bool
+	lastRunWorkflowWorkspace       string
+	lastRunWorkflowOutput          string
+	lastErrorMessage               string
+	rawResponseModalPath           string
+	rawResponseModalText           string
+	rawResponseModalError          string
+	batchResultIDs                 []string
+	batchPreviewItems              map[int]sharedCompat.HistoryItem
+	resultGridOpen                 bool
+	keyboardShortcutTag            struct{}
+	advancedPanelEventTag          struct{}
+	globalPointerTag               struct{}
+	promptHelperEventTag           struct{}
+	presetPickerEventTag           struct{}
+	historyActionMenuEventTag      struct{}
+	canvasPointerTag               struct{}
+	compareSplitSlider             widget.Float
+	compareSplitDrag               gesture.Drag
 
 	savePromptVisible                bool
 	savePromptSuppressed             bool
@@ -573,6 +756,10 @@ type App struct {
 	windowFocused                    bool
 	kernelRuntimeMode                string
 	savePromptSourcePath             string
+	savePromptSourceImageB64         string
+	savePromptSuggestedName          string
+	savePromptBatchItems             []sharedCompat.HistoryItem
+	savePromptBatchSelection         map[string]bool
 	promptImportOpen                 bool
 	promptImportLoading              bool
 	promptImportToken                string
@@ -584,6 +771,14 @@ type App struct {
 	promptImportRegisterNote         string
 	composeOpen                      bool
 	advancedOpen                     bool
+	advancedCoreGroupOpen            bool
+	advancedOutputGroupOpen          bool
+	advancedStrategyGroupOpen        bool
+	advancedStreamGroupOpen          bool
+	advancedPanelPos                 image.Point
+	advancedPanelDragActive          bool
+	advancedPanelDragPointerID       pointer.ID
+	advancedPanelDragOffset          image.Point
 	profilePickerOpen                bool
 	historyRailCollapsed             bool
 	historyModeFilter                string
@@ -593,20 +788,33 @@ type App struct {
 	historyTimelineDateFilter        string
 	historyTimelineModePickerOpen    bool
 	historyTimelineDatePickerOpen    bool
+	historyActionMenuItem            sharedCompat.HistoryItem
+	historyActionMenuContext         string
+	historyActionMenuPos             image.Point
 	profileButtons                   map[string]*widget.Clickable
 	settingsProfileButtons           map[string]*widget.Clickable
 	historyButtons                   map[string]*widget.Clickable
 	promptButtons                    map[string]*widget.Clickable
+	presetQuickButtons               map[string]*widget.Clickable
 	sourceButtons                    map[string]*widget.Clickable
+	savePromptSelectionButtons       map[string]*widget.Clickable
 	historyActionButtons             map[string]*widget.Clickable
+	historyPointerTargets            map[string]*historyPointerTarget
 	expandedPromptGroups             map[string]bool
 	promptHelperOpen                 bool
 	promptHelperTab                  string
+	promptHelperAnchorRect           image.Rectangle
+	promptHelperButtonSize           image.Point
 	promptTemplateManagerOpen        bool
 	selectedPromptTemplateID         string
+	presetPickerOpen                 bool
+	presetPickerAnchorRect           image.Rectangle
+	presetPickerButtonSize           image.Point
 	presetManagerOpen                bool
 	selectedPresetID                 string
 	customAspectRatioManagerOpen     bool
+	customSizeModalOpen              bool
+	loopModalOpen                    bool
 	customAspectWidthInput           widget.Editor
 	customAspectHeightInput          widget.Editor
 	selectedCustomAspectRatioID      string
@@ -631,6 +839,34 @@ type App struct {
 	workspaceLastClickID             string
 	workspaceLastClickAt             time.Time
 	headerQuoteIndex                 int
+	workflowGraphs                   map[string]workflowGraphModel
+	workflowGraphHistories           map[string]*workflowGraphHistory
+	workflowSelectedNodes            map[string]string
+	workflowCanvas                   workflowCanvasViewState
+	workflowConsoleList              widget.List
+	macCanvasToolbarList             widget.List
+	workflowConsoleOpen              bool
+	workflowBottomTab                string
+	desktopStore                     *desktopstate.Store
+	desktopState                     desktopstate.State
+	desktopWindows                   DesktopWindowController
+	desktopPublishMu                 sync.RWMutex
+	desktopPublished                 desktopPublication
+	desktopPublishRevision           uint64
+	desktopDraftModels               map[string]desktopDraftModel
+	desktopCommands                  chan desktopCommand
+	desktopQueuedWorkspaceRuns       []string
+	desktopPendingMoveMu             sync.Mutex
+	desktopPendingMoves              map[string]desktopCommand
+	desktopWindowSizeMu              sync.RWMutex
+	desktopWindowSizes               map[string]image.Point
+	desktopSessionMu                 sync.Mutex
+	desktopSession                   *desktopSessionActor
+	desktopSessionClosed             bool
+	raiseMainWindow                  func()
+	darwinAppKitView                 uintptr
+	lastGlobalPointer                image.Point
+	lastGlobalPressPos               image.Point
 
 	invalidate func()
 	window     *app.Window
@@ -643,8 +879,16 @@ func New() *App {
 		cfg = gioCompat.ConfigFromState(cfg, compatState)
 	}
 	themeMode := normalizeThemeMode(compatState.Settings.Theme)
+	resolvedThemeMode := resolveThemeMode(themeMode)
+	desktopStore, desktopState, desktopStateErr := loadGioDesktopState()
+	desktopStyle := normalizeDesktopStyle(string(desktopState.Preferences.InterfaceStyle))
+	if desktopState.Revision == 0 && desktopState.UpdatedAt == 0 {
+		desktopStyle = normalizeDesktopStyle("")
+		desktopState.Preferences.InterfaceStyle = desktopstate.InterfaceStyle(desktopStyle)
+	}
+	experienceMode := normalizeExperienceMode(string(desktopState.Preferences.ExperienceMode))
 	fontScale := normalizeFontScale(compatState.Settings.FontScale)
-	fluent = themePalette(resolveThemeMode(themeMode))
+	installDesktopThemeSpec(desktopStyle, resolvedThemeMode)
 	th := material.NewTheme()
 	collection := bundledFontCollection()
 	if len(collection) > 0 {
@@ -652,12 +896,12 @@ func New() *App {
 	} else {
 		th.Shaper = text.NewShaper()
 	}
-	th.Face = uiSansTypeface
+	th.Face = desktopSansTypeface(desktopStyle)
 	th.Palette = material.Palette{
 		Bg:         fluent.bg,
 		Fg:         fluent.text,
 		ContrastBg: fluent.accent,
-		ContrastFg: fluent.white,
+		ContrastFg: desktopReadableText(fluent.accent),
 	}
 	th.TextSize = unit.Sp(float32(14) * float32(fontScale))
 	a := &App{
@@ -689,21 +933,34 @@ func New() *App {
 		batchMode:                               false,
 		batchInputDir:                           "",
 		batchOutputDir:                          "",
+		batchOutputMode:                         batchOutputModeSourceDir,
+		batchConcurrency:                        defaultBatchProcessConcurrency,
 		batchRetryOnFail:                        false,
 		batchAutoAspect:                         "",
+		editAutoAspectResolution:                "",
 		themeMode:                               themeMode,
+		resolvedThemeMode:                       resolvedThemeMode,
+		desktopStyle:                            desktopStyle,
+		experienceMode:                          experienceMode,
 		fontScale:                               fontScale,
 		reducedEffects:                          compatState.Settings.ReducedEffects,
 		imagesNewAPICompat:                      cfg.ImagesNewAPICompat,
+		allowInsecureConnection:                 cfg.AllowInsecureConnection,
 		kernelRuntimeMode:                       normalizeKernelRuntimeMode(compatState.Settings.KernelRuntimeMode),
 		completionSound:                         normaliseCompletionSoundSettings(compatState.Settings.CompletionSound),
 		completionNotification:                  normaliseCompletionNotificationSettings(compatState.Settings.CompletionNotification),
 		completionNotificationPermission:        readSystemNotificationPermission(),
 		cleanupPreviewCacheOnExit:               compatState.Settings.CleanupPreviewCacheOnExit,
 		windowFocused:                           true,
+		canvasTool:                              canvasToolPan,
+		canvasBrushMode:                         canvasBrushPaint,
+		canvasBrushSize:                         30,
+		canvasAnnotationKind:                    canvasAnnotationKindRect,
+		canvasAnnotationColor:                   canvasAnnotationColors[0],
 		ignoredReleaseTag:                       strings.TrimSpace(compatState.Settings.IgnoredReleaseTag),
 		batchCount:                              1,
 		themeButtons:                            make([]widget.Clickable, 3),
+		annotateColorButtons:                    make([]widget.Clickable, len(canvasAnnotationColors)),
 		generalThemeButtons:                     make([]widget.Clickable, 3),
 		generalRuntimeButtons:                   make([]widget.Clickable, 3),
 		generalFontScaleButtons:                 make([]widget.Clickable, 3),
@@ -720,12 +977,16 @@ func New() *App {
 		generalLoopAutoSaveButtons:              make([]widget.Clickable, 2),
 		generalLoopPreviewButtons:               make([]widget.Clickable, 2),
 		generalBatchButtons:                     make([]widget.Clickable, 2),
+		generalBatchOutputModeButtons:           make([]widget.Clickable, 2),
 		generalBatchRetryButtons:                make([]widget.Clickable, 2),
 		generalBatchAutoAspectButtons:           make([]widget.Clickable, 2),
 		generalBatchAutoAspectResolutionButtons: make([]widget.Clickable, 5),
 		composeBatchRetryButtons:                make([]widget.Clickable, 2),
+		composeBatchOutputModeButtons:           make([]widget.Clickable, 2),
 		composeBatchAutoAspectButtons:           make([]widget.Clickable, 2),
 		composeBatchAutoAspectResolutionButtons: make([]widget.Clickable, 5),
+		composeEditAutoAspectButtons:            make([]widget.Clickable, 2),
+		composeEditAutoAspectResolutionButtons:  make([]widget.Clickable, 5),
 		composeLoopButtons:                      make([]widget.Clickable, 2),
 		composeLoopCountButtons:                 make([]widget.Clickable, 5),
 		composeLoopConcurrencyButtons:           make([]widget.Clickable, 4),
@@ -733,6 +994,17 @@ func New() *App {
 		composeLoopPreviewButtons:               make([]widget.Clickable, 2),
 		generalProxyButtons:                     make([]widget.Clickable, len(proxyChoices)),
 		generalKeepLogsButtons:                  make([]widget.Clickable, 2),
+		experienceModeButtons:                   make([]widget.Clickable, 2),
+		desktopStyleButtons:                     make([]widget.Clickable, 2),
+		generalStartupModeButtons:               make([]widget.Clickable, 2),
+		generalWindowLayoutButtons:              make([]widget.Clickable, 3),
+		workflowModeButtons:                     make([]widget.Clickable, len(modeChoices)),
+		workflowQualityButtons:                  make([]widget.Clickable, len(qualityChoices)),
+		workflowFormatButtons:                   make([]widget.Clickable, len(formatChoices)),
+		workflowSizeButtons:                     make([]widget.Clickable, len(sizeChoices)),
+		workflowBatchCountButtons:               make([]widget.Clickable, len(batchCountChoices)),
+		workflowBottomTabButtons:                make([]widget.Clickable, 4),
+		workflowPreviewButtons:                  make([]widget.Clickable, len(partialPreviewChoices)),
 		pruneGeneralHistoryButtons:              make([]widget.Clickable, 2),
 		modeButtons:                             make([]widget.Clickable, len(modeChoices)),
 		apiButtons:                              make([]widget.Clickable, len(apiChoices)),
@@ -757,7 +1029,7 @@ func New() *App {
 		historyModeButtons:                      make([]widget.Clickable, 3),
 		historyDateButtons:                      make([]widget.Clickable, 3),
 		historyTimelineModeButtons:              make([]widget.Clickable, 3),
-		historyTimelineDateButtons:              make([]widget.Clickable, 3),
+		historyTimelineDateButtons:              make([]widget.Clickable, 4),
 		status:                                  "Gio 原生客户端就绪",
 		logs:                                    []string{"独立 Gio 高性能测试客户端已启动。"},
 		logsRev:                                 1,
@@ -776,6 +1048,10 @@ func New() *App {
 		historyRev:                              1,
 		composeOpen:                             false,
 		advancedOpen:                            false,
+		advancedCoreGroupOpen:                   true,
+		advancedOutputGroupOpen:                 false,
+		advancedStrategyGroupOpen:               false,
+		advancedStreamGroupOpen:                 false,
 		profilePickerOpen:                       false,
 		historyRailCollapsed:                    false,
 		historyModeFilter:                       "all",
@@ -786,6 +1062,7 @@ func New() *App {
 		settingsProfileButtons:                  map[string]*widget.Clickable{},
 		historyButtons:                          map[string]*widget.Clickable{},
 		promptButtons:                           map[string]*widget.Clickable{},
+		presetQuickButtons:                      map[string]*widget.Clickable{},
 		promptTemplateListButtons:               map[string]*widget.Clickable{},
 		presetListButtons:                       map[string]*widget.Clickable{},
 		customAspectRatioListButtons:            map[string]*widget.Clickable{},
@@ -793,9 +1070,25 @@ func New() *App {
 		historyActionButtons:                    map[string]*widget.Clickable{},
 		workspaceButtons:                        map[string]*widget.Clickable{},
 		closeWorkspaceButtons:                   map[string]*widget.Clickable{},
+		workflowNodeButtons:                     map[string]*widget.Clickable{},
+		workflowAddNodeButtons:                  map[string]*widget.Clickable{},
+		workflowConnectionButtons:               map[string]*widget.Clickable{},
+		workflowWorkspaceWindowButtons:          map[string]*widget.Clickable{},
+		workflowGraphs:                          map[string]workflowGraphModel{},
+		workflowGraphHistories:                  map[string]*workflowGraphHistory{},
+		workflowSelectedNodes:                   map[string]string{},
+		workflowConsoleOpen:                     false,
+		workflowBottomTab:                       "console",
+		desktopStore:                            desktopStore,
+		desktopState:                            desktopState,
+		workflowNodeManifestDir:                 workflowNodeManifestDir(desktopStore),
+		desktopCommands:                         make(chan desktopCommand, 256),
+		desktopPendingMoves:                     map[string]desktopCommand{},
+		workflowSidebarWorkspaceButtons:         map[string]*widget.Clickable{},
 		expandedPromptGroups:                    map[string]bool{},
 		promptHelperOpen:                        false,
 		promptHelperTab:                         "templates",
+		presetPickerOpen:                        false,
 		headerQuoteIndex:                        initialHeaderQuoteIndex(time.Now()),
 	}
 	if profile, ok := gioCompat.ActiveProfile(compatState); ok {
@@ -813,19 +1106,47 @@ func New() *App {
 	if compatErr != nil {
 		a.appendLogLocked("兼容状态读取失败: " + compatErr.Error())
 	}
+	if desktopStateErr != nil {
+		a.appendLogLocked("Gio 桌面会话读取失败，已使用安全默认值: " + desktopStateErr.Error())
+	}
+	if prefs := compatState.Settings.AdvancedFloatingPanel; prefs != nil {
+		if prefs.X != nil {
+			a.advancedPanelPos.X = *prefs.X
+		}
+		if prefs.Y != nil {
+			a.advancedPanelPos.Y = *prefs.Y
+		}
+		a.applyAdvancedPanelGroupPrefs(prefs.Groups)
+	}
 	a.controlsList.List.Axis = layout.Vertical
 	a.logList.List.Axis = layout.Vertical
 	a.historyList.List.Axis = layout.Vertical
 	a.historyTimelineList.List.Axis = layout.Vertical
+	a.advancedList.List.Axis = layout.Vertical
 	a.promptGroupList.List.Axis = layout.Vertical
 	a.promptHelperList.List.Axis = layout.Vertical
 	a.settingsProfileList.List.Axis = layout.Vertical
 	a.settingsList.List.Axis = layout.Vertical
 	a.workspaceList.List.Axis = layout.Horizontal
+	a.workspaceList.List.Alignment = layout.Middle
+	a.workspaceList.List.ScrollAnyAxis = true
+	a.workflowConsoleList.List.Axis = layout.Vertical
+	a.macCanvasToolbarList.List.Axis = layout.Horizontal
+	a.macCanvasToolbarList.List.ScrollAnyAxis = true
+	a.workflowLibraryList.List.Axis = layout.Vertical
+	a.workflowInspectorList.List.Axis = layout.Vertical
+	a.workflowNodeTitleInput.SingleLine = true
 	a.compareSplitSlider.Value = 0.5
 	a.configureEditors(cfg)
 	a.historyQueryInput.SingleLine = true
 	a.historyTimelineQueryInput.SingleLine = true
+	a.historyTimelinePickedDateInput.SingleLine = true
+	a.batchConcurrencyInput.SingleLine = true
+	a.batchConcurrencyInput.SetText(strconv.Itoa(normalizeBatchProcessConcurrency(a.batchConcurrency)))
+	a.batchOutputPrefixInput.SetText(defaultBatchOutputPrefix)
+	for _, warning := range a.reloadWorkflowNodeCatalog() {
+		a.appendLogLocked("自定义节点目录警告: " + warning.Error())
+	}
 	a.runStartupHistoryThumbPrewarm()
 	a.startHistoryPreviewWarmup()
 	if latest, ok := newestHistoryItem(a.history); ok {
@@ -858,14 +1179,25 @@ func (a *App) configureEditors(cfg kernel.Config) {
 		&a.savePromptPathInput,
 		&a.promptTemplateLabelInput,
 		&a.presetNameInput,
+		&a.presetSizeInput,
+		&a.presetQualityInput,
+		&a.presetOutputFormatInput,
+		&a.presetBatchCountInput,
+		&a.presetStyleTagInput,
 		&a.loopTotalCountInput,
 		&a.loopConcurrencyInput,
 		&a.loopAutoSaveDirInput,
 		&a.batchInputDirInput,
 		&a.batchOutputDirInput,
+		&a.batchOutputPrefixInput,
+		&a.batchConcurrencyInput,
 		&a.historyQueryInput,
 		&a.historyTimelineQueryInput,
+		&a.historyTimelinePickedDateInput,
 		&a.workspaceNameInput,
+		&a.canvasAnnotationTextInput,
+		&a.customSizeWidthInput,
+		&a.customSizeHeightInput,
 	}
 	for _, editor := range singleLine {
 		editor.SingleLine = true
@@ -879,6 +1211,11 @@ func (a *App) configureEditors(cfg kernel.Config) {
 	a.concurrencyLimitInput.Filter = "0123456789"
 	a.loopTotalCountInput.Filter = "0123456789"
 	a.loopConcurrencyInput.Filter = "0123456789"
+	a.batchConcurrencyInput.Filter = "0123456789"
+	a.presetBatchCountInput.Filter = "0123456789"
+	a.historyTimelinePickedDateInput.Filter = "0123456789-"
+	a.customSizeWidthInput.Filter = "0123456789"
+	a.customSizeHeightInput.Filter = "0123456789"
 	a.apiKeyInput.SetText(cfg.APIKey)
 	a.baseURLInput.SetText(cfg.BaseURL)
 	a.textModelInput.SetText(cfg.TextModelID)
@@ -917,6 +1254,7 @@ func (a *App) applyRuntimeConfig(cfg kernel.Config) {
 	a.outputCompressionInput.SetText(strconv.Itoa(cfg.OutputCompression))
 	a.userIdentifierInput.SetText(cfg.UserIdentifier)
 	a.imagesNewAPICompat = cfg.ImagesNewAPICompat
+	a.allowInsecureConnection = cfg.AllowInsecureConnection
 	if strings.TrimSpace(cfg.OutputFormat) != "" {
 		a.format = cfg.OutputFormat
 	}
@@ -931,15 +1269,35 @@ func (a *App) applyRuntimeConfig(cfg kernel.Config) {
 func (a *App) Run(w *app.Window) error {
 	a.window = w
 	a.invalidate = w.Invalidate
+	a.raiseMainWindow = func() {
+		w.Perform(system.ActionRaise)
+		w.Invalidate()
+	}
+	session := a.startDesktopSessionActor(w.Invalidate)
+	defer a.stopDesktopSessionActor(session)
 	var ops op.Ops
 	for {
-		switch e := w.Event().(type) {
+		event := w.Event()
+		if _, destroying := event.(app.DestroyEvent); !destroying {
+			a.handleDesktopSessionEvent(session)
+		}
+		switch e := event.(type) {
+		case app.ViewEvent:
+			a.handlePlatformViewEvent(e)
 		case app.ConfigEvent:
 			a.mu.Lock()
+			wasFocused := a.windowFocused
 			a.windowFocused = e.Config.Focused
 			a.mu.Unlock()
+			if e.Config.Focused && !wasFocused {
+				a.refreshSystemTheme()
+			}
 		case app.DestroyEvent:
+			a.stopDesktopSessionActor(session)
 			a.saveCurrentConfig()
+			if err := a.saveGioDesktopState(); err != nil {
+				a.appendLog("保存 Gio 桌面会话失败: " + err.Error())
+			}
 			a.cancelRun()
 			a.cleanupRuntimeArtifactsOnExit()
 			return e.Err

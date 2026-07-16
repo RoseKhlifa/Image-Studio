@@ -3,7 +3,7 @@ package ui
 import (
 	"encoding/json"
 	"fmt"
-	"image-studio/gio-client/internal/kernel"
+	"image"
 	"os"
 	"path/filepath"
 	"sort"
@@ -12,6 +12,7 @@ import (
 
 	"github.com/yuanhua/image-gptcodex/pkg/client"
 	gioCompat "image-studio/gio-client/internal/compat"
+	"image-studio/gio-client/internal/kernel"
 	sharedCompat "image-studio/shared/compat"
 )
 
@@ -151,45 +152,47 @@ func (a *App) importHistoryJSON() {
 		a.appendLog("导入历史失败: " + err.Error())
 		return
 	}
-	state, _, err := gioCompat.LoadState()
-	if err != nil {
-		a.appendLog("导入历史失败: " + err.Error())
-		return
-	}
-	state = sharedCompat.Normalize(state)
-	existing := make(map[string]struct{}, len(state.History))
-	for _, item := range state.History {
-		existing[strings.TrimSpace(item.ID)] = struct{}{}
-	}
 	added := 0
-	for _, item := range incoming {
-		item = normalizeImportedHistoryItem(item)
-		if item.ID == "" || item.CreatedAt == 0 {
-			continue
+	var updatedHistory []sharedCompat.HistoryItem
+	err = gioCompat.UpdateState(func(state *sharedCompat.State) error {
+		*state = sharedCompat.Normalize(*state)
+		existing := make(map[string]struct{}, len(state.History))
+		for _, item := range state.History {
+			existing[strings.TrimSpace(item.ID)] = struct{}{}
 		}
-		if _, ok := existing[item.ID]; ok {
-			continue
+		for _, item := range incoming {
+			item = normalizeImportedHistoryItem(item)
+			if item.ID == "" || item.CreatedAt == 0 {
+				continue
+			}
+			if _, ok := existing[item.ID]; ok {
+				continue
+			}
+			existing[item.ID] = struct{}{}
+			state.History = append(state.History, item)
+			added++
 		}
-		existing[item.ID] = struct{}{}
-		state.History = append(state.History, item)
-		added++
+		sort.Slice(state.History, func(i, j int) bool {
+			return state.History[i].CreatedAt > state.History[j].CreatedAt
+		})
+		if added > 0 {
+			state.UpdatedAt = time.Now().UnixMilli()
+		}
+		updatedHistory = append([]sharedCompat.HistoryItem(nil), state.History...)
+		return nil
+	})
+	if err != nil {
+		a.appendLog("保存导入后的历史失败: " + err.Error())
+		return
 	}
 	if added == 0 {
 		a.appendLog("导入完成，但没有新增历史项")
 		return
 	}
-	sort.Slice(state.History, func(i, j int) bool {
-		return state.History[i].CreatedAt > state.History[j].CreatedAt
-	})
-	state.UpdatedAt = time.Now().UnixMilli()
-	if err := gioCompat.SaveState(state); err != nil {
-		a.appendLog("保存导入后的历史失败: " + err.Error())
-		return
-	}
 	a.mu.Lock()
-	a.setHistoryLocked(state.History)
+	a.setHistoryLocked(updatedHistory)
 	a.mu.Unlock()
-	if latest, ok := newestHistoryItem(state.History); ok {
+	if latest, ok := newestHistoryItem(updatedHistory); ok {
 		if err := a.loadHistoryPreview(latest, false); err != nil && !isMissingPreview(err) {
 			a.appendLog("载入导入后的最近历史失败: " + err.Error())
 		}
@@ -212,20 +215,22 @@ func (a *App) clearCurrentProfileAPIKey() {
 }
 
 func (a *App) clearAllHistory() {
-	state, _, err := gioCompat.LoadState()
+	hadHistory := false
+	err := gioCompat.UpdateState(func(state *sharedCompat.State) error {
+		*state = sharedCompat.Normalize(*state)
+		hadHistory = len(state.History) > 0
+		state.History = nil
+		if hadHistory {
+			state.UpdatedAt = time.Now().UnixMilli()
+		}
+		return nil
+	})
 	if err != nil {
 		a.appendLog("清空历史失败: " + err.Error())
 		return
 	}
-	state = sharedCompat.Normalize(state)
-	if len(state.History) == 0 {
-		a.appendLog("当前没有历史记录可清空")
-		return
-	}
-	state.History = nil
-	state.UpdatedAt = time.Now().UnixMilli()
-	if err := gioCompat.SaveState(state); err != nil {
-		a.appendLog("清空历史失败: " + err.Error())
+	if !hadHistory {
+		a.replaceHistoryState(nil, "当前没有历史记录可清空")
 		return
 	}
 	a.replaceHistoryState(nil, "已清空全部历史记录")
@@ -235,34 +240,37 @@ func (a *App) pruneHistoryOlderThanDays(days int) {
 	if days <= 0 {
 		return
 	}
-	state, _, err := gioCompat.LoadState()
+	cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour).UnixMilli()
+	var next []sharedCompat.HistoryItem
+	removed := 0
+	hadHistory := false
+	err := gioCompat.UpdateState(func(state *sharedCompat.State) error {
+		*state = sharedCompat.Normalize(*state)
+		hadHistory = len(state.History) > 0
+		next = make([]sharedCompat.HistoryItem, 0, len(state.History))
+		for _, item := range state.History {
+			if item.CreatedAt > 0 && item.CreatedAt < cutoff {
+				removed++
+				continue
+			}
+			next = append(next, item)
+		}
+		if removed > 0 {
+			state.History = next
+			state.UpdatedAt = time.Now().UnixMilli()
+		}
+		return nil
+	})
 	if err != nil {
 		a.appendLog("清理历史失败: " + err.Error())
 		return
 	}
-	state = sharedCompat.Normalize(state)
-	if len(state.History) == 0 {
+	if !hadHistory {
 		a.appendLog("当前没有历史记录可清理")
 		return
 	}
-	cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour).UnixMilli()
-	next := make([]sharedCompat.HistoryItem, 0, len(state.History))
-	removed := 0
-	for _, item := range state.History {
-		if item.CreatedAt > 0 && item.CreatedAt < cutoff {
-			removed++
-			continue
-		}
-		next = append(next, item)
-	}
 	if removed == 0 {
 		a.appendLog(fmt.Sprintf("没有 %d 天前的历史需要清理", days))
-		return
-	}
-	state.History = next
-	state.UpdatedAt = time.Now().UnixMilli()
-	if err := gioCompat.SaveState(state); err != nil {
-		a.appendLog("清理历史失败: " + err.Error())
 		return
 	}
 	a.replaceHistoryState(next, fmt.Sprintf("已清理 %d 条 %d 天前的历史", removed, days))
@@ -271,9 +279,26 @@ func (a *App) pruneHistoryOlderThanDays(days int) {
 func (a *App) replaceHistoryState(next []sharedCompat.HistoryItem, logMessage string) {
 	kept := make(map[string]struct{}, len(next))
 	for _, item := range next {
-		kept[item.ID] = struct{}{}
+		if id := strings.TrimSpace(item.ID); id != "" {
+			kept[id] = struct{}{}
+		}
 	}
 	a.mu.Lock()
+	removed := make(map[string]struct{}, len(a.history))
+	removedPaths := make(map[string]struct{}, len(a.history))
+	for _, item := range a.history {
+		id := strings.TrimSpace(item.ID)
+		if id == "" {
+			continue
+		}
+		if _, ok := kept[id]; ok {
+			continue
+		}
+		removed[id] = struct{}{}
+		if path := strings.TrimSpace(item.SavedPath); path != "" {
+			removedPaths[filepath.Clean(path)] = struct{}{}
+		}
+	}
 	a.setHistoryLocked(next)
 	if len(a.batchResultIDs) > 0 {
 		filtered := make([]string, 0, len(a.batchResultIDs))
@@ -320,11 +345,100 @@ func (a *App) replaceHistoryState(next []sharedCompat.HistoryItem, logMessage st
 			a.activePromptGroup = historyPromptGroup{}
 		}
 	}
+	for idx := range a.workspaces {
+		a.workspaces[idx] = pruneWorkspaceHistoryReferences(a.workspaces[idx], kept, removed)
+	}
+	if len(a.savePromptBatchItems) > 0 {
+		items := make([]sharedCompat.HistoryItem, 0, len(a.savePromptBatchItems))
+		selection := make(map[string]bool, len(a.savePromptBatchSelection))
+		for _, item := range a.savePromptBatchItems {
+			id := strings.TrimSpace(item.ID)
+			if id != "" {
+				if _, keep := kept[id]; !keep {
+					continue
+				}
+			}
+			items = append(items, item)
+			if a.savePromptBatchSelection[id] {
+				selection[id] = true
+			}
+		}
+		a.savePromptBatchItems = items
+		a.savePromptBatchSelection = selection
+		if len(items) == 0 {
+			a.resetSavePromptStateLocked()
+		}
+	} else if path := strings.TrimSpace(a.savePromptSourcePath); path != "" {
+		if _, drop := removedPaths[filepath.Clean(path)]; drop {
+			a.resetSavePromptStateLocked()
+		}
+	}
+	menuItemID := strings.TrimSpace(a.historyActionMenuItem.ID)
+	_, keepMenuItem := kept[menuItemID]
+	if menuItemID != "" && !keepMenuItem {
+		a.historyActionMenuItem = sharedCompat.HistoryItem{}
+		a.historyActionMenuContext = ""
+		a.historyActionMenuPos = image.Point{}
+	}
 	if strings.TrimSpace(logMessage) != "" {
 		a.appendLogLocked(logMessage)
 	}
 	a.mu.Unlock()
 	a.invalidateNow()
+}
+
+func pruneWorkspaceHistoryReferences(ws workspaceState, kept map[string]struct{}, removed map[string]struct{}) workspaceState {
+	keepID := func(id string) bool {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			return true
+		}
+		_, ok := kept[id]
+		return ok
+	}
+	if !keepID(ws.ResultItem.ID) {
+		ws.ResultSavedPath = ""
+		ws.ResultRawPath = ""
+		ws.ResultRevisedPrompt = ""
+		ws.ResultSourceEvent = ""
+		ws.ResultItem = sharedCompat.HistoryItem{}
+		ws.ResultHasItem = false
+	}
+	if !keepID(ws.SelectedHistoryID) {
+		ws.SelectedHistoryID = ""
+	}
+	if !keepID(ws.CompareHistoryID) {
+		ws.CompareHistoryID = ""
+		ws.CompareSplit = 0.5
+	}
+	filteredIDs := make([]string, 0, len(ws.BatchResultIDs))
+	for _, id := range ws.BatchResultIDs {
+		if keepID(id) {
+			filteredIDs = append(filteredIDs, id)
+		}
+	}
+	ws.BatchResultIDs = filteredIDs
+	filteredPreviews := make([]sharedCompat.HistoryItem, 0, len(ws.BatchPreviewItems))
+	for _, item := range ws.BatchPreviewItems {
+		if _, drop := removed[strings.TrimSpace(item.ID)]; drop {
+			continue
+		}
+		filteredPreviews = append(filteredPreviews, item)
+	}
+	ws.BatchPreviewItems = filteredPreviews
+	if len(ws.BatchResultIDs)+len(ws.BatchPreviewItems) <= 1 {
+		ws.ResultGridOpen = false
+	}
+	return ws
+}
+
+func (a *App) resetSavePromptStateLocked() {
+	a.savePromptVisible = false
+	a.savePromptSourcePath = ""
+	a.savePromptSourceImageB64 = ""
+	a.savePromptSuggestedName = ""
+	a.savePromptBatchItems = nil
+	a.savePromptBatchSelection = nil
 }
 
 func parseImportedHistoryItems(data []byte) ([]sharedCompat.HistoryItem, error) {

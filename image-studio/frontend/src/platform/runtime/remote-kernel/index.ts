@@ -19,6 +19,7 @@ import {
   shouldUseAndroidNativeHTTP,
   sleepWithSignal,
   sourceToDataURL,
+  validateRemoteBaseURL,
 } from "./common.ts";
 import { nativeHttpRequestText } from "./nativeHttp.ts";
 import { requestImagesOnce } from "./images.ts";
@@ -54,8 +55,10 @@ export async function runRemoteImageJob(
         imageModelID: request.payload.fallbackProfile.imageModelID || request.payload.imageModelID,
         reasoningEffort: request.payload.fallbackProfile.reasoningEffort || request.payload.reasoningEffort,
         apiMode: request.payload.fallbackProfile.apiMode || request.payload.apiMode,
+        responsesTransport: request.payload.fallbackProfile.responsesTransport || request.payload.responsesTransport,
         requestPolicy: request.payload.fallbackProfile.requestPolicy || request.payload.requestPolicy,
         imagesNewAPICompat: request.payload.fallbackProfile.imagesNewAPICompat === true,
+        allowInsecureConnection: request.payload.fallbackProfile.allowInsecureConnection === true,
         autoRetryCount: request.payload.autoRetryCount,
       },
     });
@@ -67,6 +70,13 @@ export async function runRemoteImageJob(
     }
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
+        validateRemoteBaseURL(
+          activeRequest.payload.baseURL,
+          activeRequest.payload.allowInsecureConnection === true,
+        );
+        if (activeRequest.payload.allowInsecureConnection && !shouldUseAndroidNativeHTTP()) {
+          throw new RemoteKernelError("允许不安全连接需要桌面本地内核或 Android 原生内核；浏览器不能绕过 HTTPS 证书校验");
+        }
         const apiMode = normalizeAPIMode(activeRequest.payload.apiMode);
         if (apiMode === "images") {
           return await requestImagesOnce(activeRequest, attempt, maxAttempts, callbacks);
@@ -133,6 +143,10 @@ export async function optimizePromptRemote(
   input: RemotePromptOptimizeInput,
   signal: AbortSignal,
 ): Promise<string> {
+  validateRemoteBaseURL(input.baseURL, input.allowInsecureConnection === true);
+  if (input.allowInsecureConnection && !shouldUseAndroidNativeHTTP()) {
+    throw new RemoteKernelError("允许不安全连接需要桌面本地内核或 Android 原生内核；浏览器不能绕过 HTTPS 证书校验");
+  }
   const mergedSources = input.sourceImages?.length
     ? input.sourceImages
     : [
@@ -156,6 +170,7 @@ export async function optimizePromptRemote(
     ? await nativeHttpRequestText(url, "POST", headers, body, signal, undefined, {
         proxyMode,
         proxyURL: input.proxyURL || "",
+        allowInsecureConnection: input.allowInsecureConnection === true,
       })
     : {
         status: 0,

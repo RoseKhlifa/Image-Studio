@@ -1,6 +1,7 @@
 package client
 
 import (
+	"crypto/tls"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -85,6 +86,10 @@ func proxyFunc(config ProxyConfig) (func(*http.Request) (*url.URL, error), error
 }
 
 func NewHTTPTransport(config ProxyConfig) (*http.Transport, error) {
+	return NewHTTPTransportWithSecurity(config, false)
+}
+
+func NewHTTPTransportWithSecurity(config ProxyConfig, allowInsecureConnection bool) (*http.Transport, error) {
 	base, ok := http.DefaultTransport.(*http.Transport)
 	if !ok {
 		base = &http.Transport{}
@@ -95,5 +100,16 @@ func NewHTTPTransport(config ProxyConfig) (*http.Transport, error) {
 		return nil, err
 	}
 	transport.Proxy = proxy
+	if allowInsecureConnection {
+		tlsConfig := transport.TLSClientConfig
+		if tlsConfig == nil {
+			tlsConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+		} else {
+			tlsConfig = tlsConfig.Clone()
+		}
+		// #nosec G402 -- this is restricted to an explicit per-upstream opt-in.
+		tlsConfig.InsecureSkipVerify = true
+		transport.TLSClientConfig = tlsConfig
+	}
 	return transport, nil
 }

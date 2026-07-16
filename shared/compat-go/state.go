@@ -21,6 +21,12 @@ type State struct {
 	HistoryFull   []HistoryFullItem `json:"historyFull,omitempty"`
 }
 
+type AdvancedFloatingPanelPrefs struct {
+	X      *int            `json:"x,omitempty"`
+	Y      *int            `json:"y,omitempty"`
+	Groups map[string]bool `json:"groups,omitempty"`
+}
+
 type Settings struct {
 	ProxyMode                 string                          `json:"proxyMode,omitempty"`
 	ProxyURL                  string                          `json:"proxyURL,omitempty"`
@@ -51,6 +57,7 @@ type Settings struct {
 	IgnoredReleaseTag         string                          `json:"ignoredReleaseTag,omitempty"`
 	CompletionSound           *CompletionSoundSettings        `json:"completionSound,omitempty"`
 	CompletionNotification    *CompletionNotificationSettings `json:"completionNotification,omitempty"`
+	AdvancedFloatingPanel     *AdvancedFloatingPanelPrefs     `json:"advancedFloatingPanel,omitempty"`
 }
 
 type CompletionSoundSettings struct {
@@ -65,20 +72,21 @@ type CompletionNotificationSettings struct {
 }
 
 type UpstreamProfile struct {
-	ID                 string `json:"id"`
-	Name               string `json:"name"`
-	APIMode            string `json:"apiMode"`
-	ResponsesTransport string `json:"responsesTransport,omitempty"`
-	RequestPolicy      string `json:"requestPolicy"`
-	ImagesNewAPICompat bool   `json:"imagesNewAPICompat,omitempty"`
-	BaseURL            string `json:"baseURL"`
-	TextModelID        string `json:"textModelID"`
-	ImageModelID       string `json:"imageModelID"`
-	ReasoningEffort    string `json:"reasoningEffort"`
-	ConcurrencyLimit   int    `json:"concurrencyLimit"`
-	FallbackProfileID  string `json:"fallbackProfileId,omitempty"`
-	CreatedAt          int64  `json:"createdAt"`
-	LastUsedAt         int64  `json:"lastUsedAt,omitempty"`
+	ID                      string `json:"id"`
+	Name                    string `json:"name"`
+	APIMode                 string `json:"apiMode"`
+	ResponsesTransport      string `json:"responsesTransport,omitempty"`
+	RequestPolicy           string `json:"requestPolicy"`
+	ImagesNewAPICompat      bool   `json:"imagesNewAPICompat,omitempty"`
+	AllowInsecureConnection bool   `json:"allowInsecureConnection,omitempty"`
+	BaseURL                 string `json:"baseURL"`
+	TextModelID             string `json:"textModelID"`
+	ImageModelID            string `json:"imageModelID"`
+	ReasoningEffort         string `json:"reasoningEffort"`
+	ConcurrencyLimit        int    `json:"concurrencyLimit"`
+	FallbackProfileID       string `json:"fallbackProfileId,omitempty"`
+	CreatedAt               int64  `json:"createdAt"`
+	LastUsedAt              int64  `json:"lastUsedAt,omitempty"`
 }
 
 type Preset struct {
@@ -94,6 +102,7 @@ type Preset struct {
 	ImageStyle        string `json:"imageStyle,omitempty"`
 	Moderation        string `json:"moderation,omitempty"`
 	StyleTag          string `json:"styleTag,omitempty"`
+	EditAutoAspectRes string `json:"editAutoAspectResolution,omitempty"`
 	KernelRuntimeMode string `json:"kernelRuntimeMode,omitempty"`
 	BatchCount        int    `json:"batchCount"`
 }
@@ -142,6 +151,7 @@ type HistoryItem struct {
 	Moderation        string   `json:"moderation,omitempty"`
 	StyleTag          string   `json:"styleTag,omitempty"`
 	BatchIndex        int      `json:"batchIndex,omitempty"`
+	PreviewSlotIndex  int      `json:"previewSlotIndex,omitempty"`
 	ElapsedSec        float64  `json:"elapsedSec,omitempty"`
 	SourcePaths       []string `json:"sourcePaths,omitempty"`
 	SavedPath         string   `json:"savedPath,omitempty"`

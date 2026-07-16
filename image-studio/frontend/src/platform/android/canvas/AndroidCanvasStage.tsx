@@ -32,6 +32,7 @@ export function AndroidCanvasStage() {
     selectedAnnotationId,
     annotations, addAnnotation, removeAnnotation,
     setMaskDataURL,
+    maskDataURL,
     strokes, pushStroke,
     undo, redo,
     compareB, compareSplit, setCompareSplit, setCompareB,
@@ -90,6 +91,8 @@ export function AndroidCanvasStage() {
 
   const currentImageURL = historyFullSrc(currentImage, null);
   const image = useImageFromSource(currentImage?.imageBlob ?? null, currentImage?.imageB64, currentImageURL);
+  const importedMaskURL = maskDataURL && maskDataURL !== "__PENDING_MASK__" ? maskDataURL : null;
+  const importedMaskImage = useImageFromSource(null, undefined, importedMaskURL);
 
   useEffect(() => {
     if (!currentImage?.previewOnly) return;
@@ -405,13 +408,18 @@ export function AndroidCanvasStage() {
   }
 
   useEffect(() => {
-    if (!image || strokes.length === 0) {
+    const hasImportedMask = !!maskDataURL && maskDataURL !== "__PENDING_MASK__";
+    if (!image) {
       setMaskDataURL(null);
+      return;
+    }
+    if (strokes.length === 0) {
+      if (!hasImportedMask) setMaskDataURL(null);
       return;
     }
     const hasWhite = strokes.some((s) => !s.erase);
     setMaskDataURL(hasWhite ? "__PENDING_MASK__" : null);
-  }, [strokes, image, setMaskDataURL]);
+  }, [strokes, image, maskDataURL, setMaskDataURL]);
 
   useEffect(() => {
     (window as any).__canvasResetView = resetView;
@@ -525,6 +533,15 @@ export function AndroidCanvasStage() {
             </Layer>
 
             <Layer>
+              {image && importedMaskImage ? (
+                <KonvaImage
+                  image={importedMaskImage}
+                  width={image.width}
+                  height={image.height}
+                  opacity={0.35}
+                  listening={false}
+                />
+              ) : null}
               {strokes.map((s, i) => (
                 <Line
                   key={i}

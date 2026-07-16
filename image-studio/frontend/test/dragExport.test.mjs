@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const realWindow = globalThis.window;
@@ -13,7 +14,7 @@ function restoreWindow() {
   globalThis.window = realWindow;
 }
 
-test("buildHistoryItemDragExport prefers the managed full media route over saved file path", async () => {
+test("buildHistoryItemDragExport prefers the saved file path for desktop file drags", async () => {
   installWindow();
   try {
     const dragExport = await import(`../src/lib/dragExport.ts?drag-export-test=${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -28,10 +29,10 @@ test("buildHistoryItemDragExport prefers the managed full media route over saved
       previewOnly: false,
     });
     assert.deepEqual(spec, {
-      href: "http://wails.localhost/media/full/abc123",
+      href: "file:///tmp/image-generate-cat.png",
       fileName: "image-generate-cat.png",
       mimeType: "image/png",
-      downloadURL: "image/png:image-generate-cat.png:http://wails.localhost/media/full/abc123",
+      downloadURL: "image/png:image-generate-cat.png:file:///tmp/image-generate-cat.png",
     });
   } finally {
     restoreWindow();
@@ -113,7 +114,7 @@ test("buildHistoryItemDragExport rewrites wails asset URLs for drag export", asy
   }
 });
 
-test("buildHistoryItemDragExport still uses the full asset for persisted preview-only history items", async () => {
+test("buildHistoryItemDragExport still prefers saved paths for persisted preview-only history items", async () => {
   installWindow("http://wails.localhost/app/");
   try {
     const dragExport = await import(`../src/lib/dragExport.ts?drag-export-test=${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -128,10 +129,10 @@ test("buildHistoryItemDragExport still uses the full asset for persisted preview
       previewOnly: true,
     });
     assert.deepEqual(spec, {
-      href: "http://wails.localhost/media/full/history-full-1",
+      href: "file:///tmp/image-generate-history.webp",
       fileName: "image-generate-history.webp",
       mimeType: "image/webp",
-      downloadURL: "image/webp:image-generate-history.webp:http://wails.localhost/media/full/history-full-1",
+      downloadURL: "image/webp:image-generate-history.webp:file:///tmp/image-generate-history.webp",
     });
   } finally {
     restoreWindow();
@@ -160,6 +161,34 @@ test("writeImageFileDragData writes the expected drag payload formats", async ()
     ["text/uri-list", "http://wails.localhost/media/full/abc123"],
     ["text/plain", "http://wails.localhost/media/full/abc123"],
   ]);
+});
+
+test("shouldUseNativeFileDrag routes persisted Windows and macOS files through the host", async () => {
+  const dragExport = await import(`../src/lib/dragExport.ts?native-file-drag-test=${Date.now()}-${Math.random().toString(36).slice(2)}`);
+
+  assert.equal(dragExport.shouldUseNativeFileDrag("windows", "C:\\Users\\me\\Pictures\\result.png"), true);
+  assert.equal(dragExport.shouldUseNativeFileDrag("macos", "/Users/me/Pictures/result.png"), true);
+  assert.equal(dragExport.shouldUseNativeFileDrag("linux", "/home/me/Pictures/result.png"), false);
+  assert.equal(dragExport.shouldUseNativeFileDrag("windows", "  "), false);
+});
+
+test("all persisted drag export surfaces use the shared native file drag route", async () => {
+  const surfaces = [
+    "../src/components/canvas/DragExportHandle.tsx",
+    "../src/components/common/SavePromptModal.tsx",
+    "../src/components/history/HistoryPromptGroupModal.tsx",
+    "../src/components/history/HistoryTile.tsx",
+    "../src/components/panel/ResultDetailDrawer.tsx",
+  ];
+
+  for (const surface of surfaces) {
+    const source = await readFile(new URL(surface, import.meta.url), "utf8");
+    assert.match(
+      source,
+      /shouldUseNativeFileDrag\(targetPlatform,\s*[A-Za-z]+\.savedPath\)/,
+      `${surface} must route persisted desktop files through the native drag helper`,
+    );
+  }
 });
 
 test("internal history drag payload round-trips through dataTransfer", async () => {

@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"image"
 	"strconv"
 	"strings"
 	"time"
@@ -13,12 +14,16 @@ import (
 )
 
 func (a *App) initWorkspaces() {
+	if a.restoreDesktopWorkspaces() {
+		return
+	}
 	ws := workspaceState{
 		ID:   fmt.Sprintf("ws-%d", time.Now().UnixNano()),
 		Name: "图片 1",
 	}
 	a.workspaces = []workspaceState{ws}
 	a.activeWorkspaceID = ws.ID
+	a.ensureWorkflowGraph(ws.ID)
 	a.saveActiveWorkspaceSnapshot()
 }
 
@@ -69,55 +74,74 @@ func (a *App) buildWorkspaceSnapshot() workspaceState {
 		name = conciseWorkspaceName(a.promptInput.Text(), name)
 	}
 	return workspaceState{
-		ID:                  a.activeWorkspaceID,
-		Name:                name,
-		Prompt:              a.promptInput.Text(),
-		NegativePrompt:      a.negativePromptInput.Text(),
-		Mode:                a.mode,
-		Size:                a.size,
-		Quality:             a.quality,
-		OutputFormat:        a.format,
-		Background:          a.background,
-		OutputCompression:   a.outputCompressionInput.Text(),
-		InputFidelity:       a.inputFidelity,
-		ImageStyle:          a.imageStyle,
-		Moderation:          a.moderation,
-		UserIdentifier:      a.userIdentifierInput.Text(),
-		PartialImages:       a.partialImagesInput.Text(),
-		StyleTag:            a.styleTag,
-		SeedText:            a.seedInput.Text(),
-		BatchCount:          a.batchCount,
-		LoopEnabled:         a.loopEnabled,
-		LoopTotalCount:      normalizeLoopGenerationCount(a.loopTotalCount),
-		LoopConcurrency:     normalizeLoopGenerationConcurrency(a.loopConcurrency),
-		LoopAutoSave:        a.loopAutoSave,
-		LoopAutoSaveDir:     strings.TrimSpace(a.loopAutoSaveDirInput.Text()),
-		LoopLivePreview:     a.loopLivePreview,
-		BatchMode:           a.batchMode,
-		BatchInputDir:       strings.TrimSpace(a.batchInputDirInput.Text()),
-		BatchOutputDir:      strings.TrimSpace(a.batchOutputDirInput.Text()),
-		BatchRetryOnFail:    a.batchRetryOnFail,
-		BatchAutoAspect:     strings.TrimSpace(a.batchAutoAspect),
-		SourcePathsText:     a.sourcePathsInput.Text(),
-		ResultSavedPath:     a.result.SavedPath,
-		ResultRawPath:       a.result.RawPath,
-		ResultRevisedPrompt: a.result.RevisedPrompt,
-		ResultSourceEvent:   a.result.SourceEvent,
-		ResultItem:          a.result.Item,
-		ResultHasItem:       a.result.HasItem,
-		SelectedHistoryID:   a.selectedHistoryID,
-		BatchResultIDs:      append([]string(nil), a.batchResultIDs...),
-		ResultGridOpen:      a.resultGridOpen,
-		CompareHistoryID:    a.compare.Item.ID,
-		CompareSplit:        a.compareSplitSlider.Value,
+		ID:                       a.activeWorkspaceID,
+		Name:                     name,
+		Prompt:                   a.promptInput.Text(),
+		NegativePrompt:           a.negativePromptInput.Text(),
+		Mode:                     a.mode,
+		Size:                     a.size,
+		Quality:                  a.quality,
+		OutputFormat:             a.format,
+		Background:               a.background,
+		OutputCompression:        a.outputCompressionInput.Text(),
+		InputFidelity:            a.inputFidelity,
+		ImageStyle:               a.imageStyle,
+		Moderation:               a.moderation,
+		UserIdentifier:           a.userIdentifierInput.Text(),
+		PartialImages:            a.partialImagesInput.Text(),
+		StyleTag:                 a.styleTag,
+		SeedText:                 a.seedInput.Text(),
+		BatchCount:               a.batchCount,
+		LoopEnabled:              a.loopEnabled,
+		LoopTotalCount:           normalizeLoopGenerationCount(a.loopTotalCount),
+		LoopConcurrency:          normalizeLoopGenerationConcurrency(a.loopConcurrency),
+		LoopAutoSave:             a.loopAutoSave,
+		LoopAutoSaveDir:          strings.TrimSpace(a.loopAutoSaveDirInput.Text()),
+		LoopLivePreview:          a.loopLivePreview,
+		BatchMode:                a.batchMode,
+		BatchInputDir:            strings.TrimSpace(a.batchInputDirInput.Text()),
+		BatchOutputDir:           strings.TrimSpace(a.batchOutputDirInput.Text()),
+		BatchOutputMode:          normalizeBatchOutputMode(a.batchOutputMode),
+		BatchOutputPrefix:        a.effectiveBatchOutputPrefix(),
+		BatchConcurrency:         normalizeBatchProcessConcurrency(a.batchConcurrency),
+		BatchRetryOnFail:         a.batchRetryOnFail,
+		BatchAutoAspect:          strings.TrimSpace(a.batchAutoAspect),
+		EditAutoAspectResolution: strings.TrimSpace(a.editAutoAspectResolution),
+		SourcePathsText:          a.sourcePathsInput.Text(),
+		ResultSavedPath:          a.result.SavedPath,
+		ResultRawPath:            a.result.RawPath,
+		ResultRevisedPrompt:      a.result.RevisedPrompt,
+		ResultSourceEvent:        a.result.SourceEvent,
+		ResultItem:               a.result.Item,
+		ResultHasItem:            a.result.HasItem,
+		SelectedHistoryID:        a.selectedHistoryID,
+		SelectedPresetID:         strings.TrimSpace(a.selectedPresetID),
+		BatchResultIDs:           append([]string(nil), a.batchResultIDs...),
+		BatchPreviewItems:        append([]sharedCompat.HistoryItem(nil), a.batchPreviewItemsSnapshotLocked()...),
+		ResultGridOpen:           a.resultGridOpen,
+		CompareHistoryID:         a.compare.Item.ID,
+		CompareSplit:             a.compareSplitSlider.Value,
 	}
+}
+
+func (a *App) resetCanvasWorkspaceTransientStateLocked() {
+	a.canvasViewScale = 1
+	a.canvasViewOffset = image.Point{}
+	a.canvasViewDragging = false
+	a.canvasViewLastDragPos = image.Point{}
+	a.canvasSpacePan = false
+	a.canvasViewKey = canvasViewStateKey(a.result)
+	a.resetCanvasMaskLocked()
+	a.resetCanvasAnnotationsLocked()
 }
 
 func (a *App) saveActiveWorkspaceSnapshot() {
 	if strings.TrimSpace(a.activeWorkspaceID) == "" {
 		return
 	}
+	a.mu.Lock()
 	snapshot := a.buildWorkspaceSnapshot()
+	a.mu.Unlock()
 	next := make([]workspaceState, 0, len(a.workspaces))
 	found := false
 	for _, ws := range a.workspaces {
@@ -135,6 +159,7 @@ func (a *App) saveActiveWorkspaceSnapshot() {
 }
 
 func (a *App) applyWorkspace(ws workspaceState) {
+	a.clearWorkflowNodeEditor("")
 	a.promptInput.SetText(ws.Prompt)
 	a.negativePromptInput.SetText(ws.NegativePrompt)
 	a.mode = ws.Mode
@@ -161,14 +186,21 @@ func (a *App) applyWorkspace(ws workspaceState) {
 	a.batchMode = ws.BatchMode
 	a.batchInputDirInput.SetText(strings.TrimSpace(ws.BatchInputDir))
 	a.batchOutputDirInput.SetText(strings.TrimSpace(ws.BatchOutputDir))
+	a.batchOutputMode = normalizeBatchOutputMode(ws.BatchOutputMode)
+	a.batchOutputPrefixInput.SetText(normalizeBatchOutputPrefix(ws.BatchOutputPrefix))
+	a.batchConcurrency = normalizeBatchProcessConcurrency(ws.BatchConcurrency)
+	a.batchConcurrencyInput.SetText(strconv.Itoa(a.batchConcurrency))
 	a.batchRetryOnFail = ws.BatchRetryOnFail
 	a.batchAutoAspect = strings.TrimSpace(ws.BatchAutoAspect)
+	a.editAutoAspectResolution = strings.TrimSpace(ws.EditAutoAspectResolution)
 	a.sourcePathsInput.SetText(ws.SourcePathsText)
 	a.sourceButtons = map[string]*widget.Clickable{}
 	a.selectedHistoryID = ws.SelectedHistoryID
+	a.selectedPresetID = strings.TrimSpace(ws.SelectedPresetID)
 	a.activePromptGroup = historyPromptGroup{}
 	a.batchResultIDs = append([]string(nil), ws.BatchResultIDs...)
-	a.resultGridOpen = ws.ResultGridOpen && len(ws.BatchResultIDs) > 1
+	a.batchPreviewItems = batchPreviewItemsMap(ws.BatchPreviewItems)
+	a.resultGridOpen = ws.ResultGridOpen && (len(ws.BatchResultIDs) > 1 || batchGridTotalSlots(nil, ws.BatchPreviewItems, 0) > 1 || (a.running && a.lastRunBatchCount > 1))
 	a.promptHelperOpen = false
 	a.promptButtons = map[string]*widget.Clickable{}
 	a.settingsModalOpen = false
@@ -205,6 +237,7 @@ func (a *App) applyWorkspace(ws workspaceState) {
 	}
 	workspaceID := a.activeWorkspaceID
 	a.mu.Lock()
+	a.resetCanvasWorkspaceTransientStateLocked()
 	a.pruneImageCacheLocked()
 	a.mu.Unlock()
 	a.invalidateNow()
@@ -265,31 +298,37 @@ func (a *App) createWorkspace() {
 	a.saveActiveWorkspaceSnapshot()
 	name := fmt.Sprintf("图片 %d", len(a.workspaces)+1)
 	ws := workspaceState{
-		ID:                fmt.Sprintf("ws-%d", time.Now().UnixNano()),
-		Name:              name,
-		Mode:              string(kernel.DefaultConfig().Mode),
-		Size:              kernel.DefaultConfig().Size,
-		Quality:           kernel.DefaultConfig().Quality,
-		OutputFormat:      kernel.DefaultConfig().OutputFormat,
-		Background:        kernel.DefaultConfig().Background,
-		OutputCompression: strconv.Itoa(kernel.DefaultConfig().OutputCompression),
-		InputFidelity:     kernel.DefaultConfig().InputFidelity,
-		ImageStyle:        kernel.DefaultConfig().ImageStyle,
-		Moderation:        kernel.DefaultConfig().Moderation,
-		PartialImages:     strconv.Itoa(kernel.DefaultConfig().PartialImages),
-		BatchCount:        1,
-		LoopEnabled:       false,
-		LoopTotalCount:    normalizeLoopGenerationCount(10),
-		LoopConcurrency:   normalizeLoopGenerationConcurrency(2),
-		LoopAutoSave:      false,
-		LoopAutoSaveDir:   "",
-		LoopLivePreview:   true,
-		BatchMode:         false,
-		BatchRetryOnFail:  false,
-		BatchAutoAspect:   "",
-		ResultGridOpen:    false,
+		ID:                       fmt.Sprintf("ws-%d", time.Now().UnixNano()),
+		Name:                     name,
+		Mode:                     string(kernel.DefaultConfig().Mode),
+		Size:                     kernel.DefaultConfig().Size,
+		Quality:                  kernel.DefaultConfig().Quality,
+		OutputFormat:             kernel.DefaultConfig().OutputFormat,
+		Background:               kernel.DefaultConfig().Background,
+		OutputCompression:        strconv.Itoa(kernel.DefaultConfig().OutputCompression),
+		InputFidelity:            kernel.DefaultConfig().InputFidelity,
+		ImageStyle:               kernel.DefaultConfig().ImageStyle,
+		Moderation:               kernel.DefaultConfig().Moderation,
+		PartialImages:            strconv.Itoa(kernel.DefaultConfig().PartialImages),
+		BatchCount:               1,
+		LoopEnabled:              false,
+		LoopTotalCount:           normalizeLoopGenerationCount(10),
+		LoopConcurrency:          normalizeLoopGenerationConcurrency(2),
+		LoopAutoSave:             false,
+		LoopAutoSaveDir:          "",
+		LoopLivePreview:          true,
+		BatchMode:                false,
+		BatchOutputMode:          batchOutputModeSourceDir,
+		BatchOutputPrefix:        defaultBatchOutputPrefix,
+		BatchConcurrency:         defaultBatchProcessConcurrency,
+		BatchRetryOnFail:         false,
+		BatchAutoAspect:          "",
+		EditAutoAspectResolution: "",
+		ResultGridOpen:           false,
+		SelectedPresetID:         "",
 	}
 	a.workspaces = append(a.workspaces, ws)
+	a.ensureWorkflowGraph(ws.ID)
 	a.workspaceButtons = map[string]*widget.Clickable{}
 	a.closeWorkspaceButtons = map[string]*widget.Clickable{}
 	a.activeWorkspaceID = ws.ID
@@ -338,6 +377,7 @@ func (a *App) closeWorkspace(id string) {
 		next = append(next, ws)
 	}
 	a.workspaces = next
+	a.deleteWorkflowWorkspaceState(id)
 	a.workspaceButtons = map[string]*widget.Clickable{}
 	a.closeWorkspaceButtons = map[string]*widget.Clickable{}
 	if a.activeWorkspaceID == id && len(next) > 0 {

@@ -1,5 +1,5 @@
 import { ChevronDown, ChevronRight } from "lucide-react";
-import type { APIMode, BatchProcessConfig, EditSourceMode, Mode, QualityValue, RequestPolicy, SizeValue, SourceImage } from "../../types/domain";
+import type { APIMode, AutoAspectResolutionPreset, BatchProcessConfig, EditSourceMode, Mode, QualityValue, RequestPolicy, SizeValue, SourceImage } from "../../types/domain";
 import { DesktopComposeSections } from "./DesktopComposeSections";
 import type { AspectPreset, AspectPresetOption, ResolutionPreset } from "./sizeCapabilities";
 
@@ -26,7 +26,12 @@ export function WindowsComposePanel({
   clearSources,
   currentImageSavedPath,
   editSourceMode,
+  editAutoAspectComputedSizeLabel,
+  editAutoAspectResolution,
+  effectiveEditAutoAspectResolution,
   handleAspectSelect,
+  handleEditAutoAspectResolutionSelect,
+  handleEditAutoAspectToggle,
   handleResolutionSelect,
   imageModelID,
   onOpenCustomAspectRatioModal,
@@ -66,7 +71,12 @@ export function WindowsComposePanel({
   clearSources: () => void;
   currentImageSavedPath?: string | null;
   editSourceMode: EditSourceMode;
+  editAutoAspectComputedSizeLabel?: string | null;
+  editAutoAspectResolution: AutoAspectResolutionPreset;
+  effectiveEditAutoAspectResolution: Exclude<ResolutionPreset, "auto">;
   handleAspectSelect: (aspect: AspectPreset) => void;
+  handleEditAutoAspectResolutionSelect: (resolution: Exclude<ResolutionPreset, "auto">) => void;
+  handleEditAutoAspectToggle: (enabled: boolean) => void;
   handleResolutionSelect: (resolution: ResolutionPreset) => void;
   imageModelID: string;
   onOpenCustomAspectRatioModal: () => void;
@@ -79,7 +89,7 @@ export function WindowsComposePanel({
   qualityOptions: Array<{ value: QualityValue; label: string }>;
   requestPolicy: RequestPolicy;
   selectSourceImage: () => void;
-  setField: (key: "styleTag" | "quality" | "batchCount" | "size", value: any) => void;
+  setField: (key: "styleTag" | "quality" | "batchCount" | "size" | "editAutoAspectResolution", value: any) => void;
   size: SizeValue;
   sources: SourceImage[];
   apiMode: APIMode;
@@ -133,11 +143,16 @@ export function WindowsComposePanel({
             chooseBatchInputDir={chooseBatchInputDir}
             chooseBatchInputFiles={chooseBatchInputFiles}
             chooseBatchOutputDir={chooseBatchOutputDir}
-            clearSources={clearSources}
-            currentImageSavedPath={currentImageSavedPath}
-            editSourceMode={editSourceMode}
-            handleAspectSelect={handleAspectSelect}
-            handleResolutionSelect={handleResolutionSelect}
+          clearSources={clearSources}
+          currentImageSavedPath={currentImageSavedPath}
+          editSourceMode={editSourceMode}
+          editAutoAspectComputedSizeLabel={editAutoAspectComputedSizeLabel}
+          editAutoAspectResolution={editAutoAspectResolution}
+          effectiveEditAutoAspectResolution={effectiveEditAutoAspectResolution}
+          handleAspectSelect={handleAspectSelect}
+          handleEditAutoAspectResolutionSelect={handleEditAutoAspectResolutionSelect}
+          handleEditAutoAspectToggle={handleEditAutoAspectToggle}
+          handleResolutionSelect={handleResolutionSelect}
             imageModelID={imageModelID}
             onOpenCustomAspectRatioModal={onOpenCustomAspectRatioModal}
             onOpenCustomSizeModal={onOpenCustomSizeModal}

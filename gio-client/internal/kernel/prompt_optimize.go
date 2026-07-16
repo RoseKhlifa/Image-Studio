@@ -23,6 +23,10 @@ func OptimizePrompt(ctx context.Context, cfg Config) (string, error) {
 	if baseURL == "" {
 		return "", errors.New("未配置上游 BASE_URL")
 	}
+	baseURL, err := client.ValidateBaseURLWithSecurity(baseURL, cfg.AllowInsecureConnection)
+	if err != nil {
+		return "", err
+	}
 	apiKey := strings.TrimSpace(cfg.APIKey)
 	if apiKey == "" {
 		return "", errors.New("API Key 不能为空")
@@ -42,6 +46,16 @@ func OptimizePrompt(ctx context.Context, cfg Config) (string, error) {
 			"type": "input_text",
 			"text": fmt.Sprintf("Original prompt:\n%s", prompt),
 		},
+	}
+	for _, dataURL := range cfg.SourceImageDataURLs {
+		dataURL = strings.TrimSpace(dataURL)
+		if dataURL == "" {
+			continue
+		}
+		content = append(content, map[string]any{
+			"type":      "input_image",
+			"image_url": dataURL,
+		})
 	}
 	for _, p := range cfg.SourcePaths {
 		dataURL, err := client.ImageFileToDataURL(p)
@@ -84,7 +98,7 @@ func OptimizePrompt(ctx context.Context, cfg Config) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	transport, err := client.NewHTTPTransport(proxyConfig)
+	transport, err := client.NewHTTPTransportWithSecurity(proxyConfig, cfg.AllowInsecureConnection)
 	if err != nil {
 		return "", err
 	}

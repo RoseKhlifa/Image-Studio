@@ -22,6 +22,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
+	neturl "net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -86,6 +87,17 @@ func supportsImageStyle(model string, mode Mode) bool {
 	return mode != ModeEdit && classifyImageModel(model) == "dalle3"
 }
 
+func isGoogleImageModel(model string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(model))
+	return strings.HasPrefix(normalized, "gemini-") ||
+		strings.HasPrefix(normalized, "imagen-") ||
+		strings.Contains(normalized, "nano-banana")
+}
+
+func shouldUseImagesNonStreamingCompat(model string, explicit bool) bool {
+	return explicit || isGoogleImageModel(model)
+}
+
 func normalizeImageStyle(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "vivid":
@@ -125,10 +137,10 @@ func (e *imageStreamExtractor) consume(line string) bool {
 	if stripped == "" {
 		return false
 	}
-	if !strings.HasPrefix(stripped, "data: ") {
+	if !strings.HasPrefix(stripped, "data:") {
 		return false
 	}
-	payload := strings.TrimSpace(stripped[6:])
+	payload := strings.TrimSpace(stripped[len("data:"):])
 	if payload == "" || payload == "[DONE]" {
 		return true
 	}
@@ -167,6 +179,13 @@ func (e *imageStreamExtractor) consume(line string) bool {
 				e.hasFinal = true
 				return true
 			}
+		}
+	}
+	if b, err := json.Marshal(ev); err == nil {
+		if result, err := parseImagesAPIResponseBytes(b, http.StatusOK); err == nil {
+			e.final = result
+			e.hasFinal = true
+			return true
 		}
 	}
 	return true
@@ -209,7 +228,7 @@ func RequestImagesAPIWithPartial(
 	if baseURL == "" {
 		return ImageResult{}, errors.New("未配置上游 BASE_URL,请在「设置 → 上游 BASE_URL」中填入兼容 OpenAI Images API 的中转站地址")
 	}
-	baseURL, err := ValidateBaseURL(baseURL)
+	baseURL, err := ValidateBaseURLWithSecurity(baseURL, opts.AllowInsecureConnection)
 	if err != nil {
 		return ImageResult{}, err
 	}
@@ -241,7 +260,8 @@ func RequestImagesAPIWithPartial(
 		partialImages = 0
 	}
 	includeExtended := shouldSendExtendedImageParameters(opts.RequestPolicy)
-	useNewAPICompat := opts.ImagesNewAPICompat
+	useNewAPICompat := shouldUseImagesNonStreamingCompat(model, opts.ImagesNewAPICompat)
+	useGoogleInteractions := shouldUseGoogleNativeInteractions(baseURL, model)
 
 	var (
 		url         string
@@ -249,7 +269,25 @@ func RequestImagesAPIWithPartial(
 		contentType string
 	)
 
-	if opts.Mode == ModeEdit {
+	if useGoogleInteractions {
+		paths := []string(nil)
+		if opts.Mode == ModeEdit {
+			paths = opts.imageSourcePathsForEdit()
+			if len(paths) == 0 {
+				return ImageResult{}, errors.New("Google Interactions 图生图需要至少一张源图")
+			}
+		}
+		payload, err := buildGoogleInteractionPayload(opts, paths, model, size, outputFormat)
+		if err != nil {
+			return ImageResult{}, err
+		}
+		url, err = googleInteractionsEndpoint(baseURL)
+		if err != nil {
+			return ImageResult{}, err
+		}
+		body = bytes.NewReader(payload)
+		contentType = "application/json"
+	} else if opts.Mode == ModeEdit {
 		paths := opts.imageSourcePathsForEdit()
 		if len(paths) == 0 {
 			return ImageResult{}, errors.New("图生图模式需要至少一张源图(请在面板里添加参考图)")
@@ -258,7 +296,7 @@ func RequestImagesAPIWithPartial(
 		if err != nil {
 			return ImageResult{}, err
 		}
-		url = baseURL + "/v1/images/edits"
+		url = openAIAPIEndpoint(baseURL, "images/edits")
 		body = multipartBuf
 		contentType = mpType
 	} else {
@@ -302,7 +340,7 @@ func RequestImagesAPIWithPartial(
 		if err != nil {
 			return ImageResult{}, fmt.Errorf("marshal payload: %w", err)
 		}
-		url = baseURL + "/v1/images/generations"
+		url = openAIAPIEndpoint(baseURL, "images/generations")
 		body = bytes.NewReader(b)
 		contentType = "application/json"
 	}
@@ -312,11 +350,16 @@ func RequestImagesAPIWithPartial(
 		return ImageResult{}, err
 	}
 	req.Header.Set("Content-Type", contentType)
-	req.Header.Set("Authorization", "Bearer "+opts.APIKey)
-	req.Header.Set("Accept", "text/event-stream, application/json")
+	if useGoogleInteractions {
+		req.Header.Set("X-Goog-Api-Key", opts.APIKey)
+		req.Header.Set("Accept", "application/json")
+	} else {
+		req.Header.Set("Authorization", "Bearer "+opts.APIKey)
+		req.Header.Set("Accept", "text/event-stream, application/json")
+	}
 	req.Header.Set("User-Agent", UserAgent())
 
-	transport, err := NewHTTPTransport(opts.Proxy)
+	transport, err := NewHTTPTransportWithSecurity(opts.Proxy, opts.AllowInsecureConnection)
 	if err != nil {
 		return ImageResult{}, err
 	}
@@ -326,6 +369,10 @@ func RequestImagesAPIWithPartial(
 	}
 
 	startedAt := time.Now()
+	progressStage := "等待 Images API 返回(无 SSE 保活)"
+	if useGoogleInteractions {
+		progressStage = "等待 Google Interactions 返回(无 SSE 保活)"
+	}
 	// Progress ticker — Images API has no streaming so we just tick elapsed time.
 	stopProgress := make(chan struct{})
 	if onProgress != nil {
@@ -337,7 +384,7 @@ func RequestImagesAPIWithPartial(
 				case <-stopProgress:
 					return
 				case <-tick.C:
-					onProgress("等待 Images API 返回(无 SSE 保活)", int(time.Since(startedAt).Seconds()), 0)
+					onProgress(progressStage, int(time.Since(startedAt).Seconds()), 0)
 				}
 			}
 		}()
@@ -349,6 +396,9 @@ func RequestImagesAPIWithPartial(
 		return ImageResult{}, err
 	}
 	defer resp.Body.Close()
+	if useGoogleInteractions {
+		return readGoogleInteractionResponse(ctx, resp, httpClient, rawSink, onProgress, startedAt)
+	}
 
 	contentTypeHeader := strings.ToLower(resp.Header.Get("Content-Type"))
 	if strings.Contains(contentTypeHeader, "text/event-stream") {
@@ -386,48 +436,105 @@ func RequestImagesAPIWithPartial(
 	preview := newCappedPreviewBuffer(4096)
 	teeReader := io.TeeReader(resp.Body, io.MultiWriter(rawSink, preview))
 
-	var parsed imagesAPIResponse
 	dec := json.NewDecoder(teeReader)
-	if err := dec.Decode(&parsed); err != nil {
-		_, _ = io.Copy(io.MultiWriter(rawSink, preview), resp.Body)
-		bodyPreview := preview.String()
-		if len(bodyPreview) > 400 {
-			bodyPreview = bodyPreview[:400] + "..."
+	for {
+		var parsed imagesAPIResponse
+		if err := dec.Decode(&parsed); err != nil {
+			if errors.Is(err, io.EOF) {
+				if resp.StatusCode/100 != 2 {
+					bodyPreview := preview.String()
+					if len(bodyPreview) > 400 {
+						bodyPreview = bodyPreview[:400] + "..."
+					}
+					return ImageResult{}, fmt.Errorf("上游返回 HTTP %d: %s", resp.StatusCode, bodyPreview)
+				}
+				return ImageResult{}, ErrNoImageInResponse
+			}
+			var typeErr *json.UnmarshalTypeError
+			if useNewAPICompat && errors.As(err, &typeErr) && (typeErr.Value == "array" || typeErr.Value == "string") {
+				continue
+			}
+			_, _ = io.Copy(io.MultiWriter(rawSink, preview), resp.Body)
+			bodyPreview := preview.String()
+			if len(bodyPreview) > 400 {
+				bodyPreview = bodyPreview[:400] + "..."
+			}
+			if resp.StatusCode/100 != 2 {
+				return ImageResult{}, fmt.Errorf("上游返回 HTTP %d: %s", resp.StatusCode, bodyPreview)
+			}
+			return ImageResult{}, fmt.Errorf("解析 Images API 响应失败:%w", err)
 		}
+
+		// Non-2xx with JSON body — decode has already captured the structured error.
 		if resp.StatusCode/100 != 2 {
+			if parsed.Error != nil {
+				return ImageResult{}, fmt.Errorf("上游返回 %d:%s", resp.StatusCode, parsed.Error.Message)
+			}
+			bodyPreview := preview.String()
+			if len(bodyPreview) > 400 {
+				bodyPreview = bodyPreview[:400] + "..."
+			}
 			return ImageResult{}, fmt.Errorf("上游返回 HTTP %d: %s", resp.StatusCode, bodyPreview)
 		}
-		return ImageResult{}, fmt.Errorf("解析 Images API 响应失败:%w", err)
-	}
-
-	// Non-2xx with JSON body — decode has already captured the structured error.
-	if resp.StatusCode/100 != 2 {
 		if parsed.Error != nil {
-			return ImageResult{}, fmt.Errorf("上游返回 %d:%s", resp.StatusCode, parsed.Error.Message)
+			return ImageResult{}, fmt.Errorf("上游返回错误:%s", parsed.Error.Message)
 		}
-		bodyPreview := preview.String()
-		if len(bodyPreview) > 400 {
-			bodyPreview = bodyPreview[:400] + "..."
+		if len(parsed.Data) > 0 {
+			d := parsed.Data[0]
+			if d.B64JSON != "" {
+				return imageResultFromImagesDatum(d), nil
+			}
+			if d.URL != "" {
+				return downloadImagesAPIURL(ctx, httpClient, d.URL, d.RevisedPrompt, onProgress, startedAt)
+			}
 		}
-		return ImageResult{}, fmt.Errorf("上游返回 HTTP %d: %s", resp.StatusCode, bodyPreview)
-	}
-	if parsed.Error != nil {
-		return ImageResult{}, fmt.Errorf("上游返回错误:%s", parsed.Error.Message)
-	}
-	if len(parsed.Data) == 0 {
-		return ImageResult{}, ErrNoImageInResponse
-	}
-	d := parsed.Data[0]
-	if d.B64JSON == "" {
-		// Some relays return URL only. We do not download URL responses to keep
-		// behaviour predictable — surface a clear error so user can adjust the
-		// upstream config.
-		if d.URL != "" {
-			return ImageResult{}, fmt.Errorf("上游返回 URL 而非 b64_json(不支持 response_format),请联系中转站启用 b64_json")
+		if !useNewAPICompat {
+			return ImageResult{}, ErrNoImageInResponse
 		}
-		return ImageResult{}, ErrNoImageInResponse
 	}
-	return imageResultFromImagesDatum(d), nil
+}
+
+func readGoogleInteractionResponse(
+	ctx context.Context,
+	resp *http.Response,
+	httpClient *http.Client,
+	rawSink io.Writer,
+	onProgress func(stage string, elapsedSeconds int, bytesReceived int64),
+	startedAt time.Time,
+) (ImageResult, error) {
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxGoogleInteractionResponseBytes+1))
+	if err != nil {
+		return ImageResult{}, fmt.Errorf("读取 Google Interactions 响应失败:%w", err)
+	}
+	if len(data) > maxGoogleInteractionResponseBytes {
+		return ImageResult{}, fmt.Errorf("Google Interactions 响应过大(>%dB 上限)", maxGoogleInteractionResponseBytes)
+	}
+	if _, err := rawSink.Write(data); err != nil {
+		return ImageResult{}, fmt.Errorf("write raw: %w", err)
+	}
+	image, err := extractGoogleInteractionImage(data, resp.StatusCode)
+	if err != nil {
+		return ImageResult{}, err
+	}
+	if strings.TrimSpace(image.Data) != "" {
+		result, err := imageResultFromGoogleInteraction(image)
+		if err != nil {
+			return ImageResult{}, err
+		}
+		if onProgress != nil {
+			onProgress("已收到 Google Interactions 图片", int(time.Since(startedAt).Seconds()), int64(len(data)))
+		}
+		return result, nil
+	}
+	if strings.TrimSpace(image.URI) != "" {
+		result, err := downloadImagesAPIURL(ctx, httpClient, image.URI, "", onProgress, startedAt)
+		if err != nil {
+			return ImageResult{}, fmt.Errorf("下载 Google Interactions URI 图片失败:%w", err)
+		}
+		result.SourceEvent = "google_interactions_url"
+		return result, nil
+	}
+	return ImageResult{}, ErrNoImageInResponse
 }
 
 func imageResultFromImagesDatum(d imagesAPIDatum) ImageResult {
@@ -436,6 +543,60 @@ func imageResultFromImagesDatum(d imagesAPIDatum) ImageResult {
 		RevisedPrompt: d.RevisedPrompt,
 		SourceEvent:   "images_api",
 	}
+}
+
+func downloadImagesAPIURL(
+	ctx context.Context,
+	httpClient *http.Client,
+	rawURL string,
+	revisedPrompt string,
+	onProgress func(stage string, elapsedSeconds int, bytesReceived int64),
+	startedAt time.Time,
+) (ImageResult, error) {
+	parsedURL, err := neturl.Parse(strings.TrimSpace(rawURL))
+	if err != nil || parsedURL.Scheme == "" || parsedURL.Host == "" {
+		return ImageResult{}, fmt.Errorf("上游返回的图片 URL 无效:%s", rawURL)
+	}
+	scheme := strings.ToLower(parsedURL.Scheme)
+	if scheme != "https" && scheme != "http" {
+		return ImageResult{}, fmt.Errorf("上游返回的图片 URL 协议不支持:%s", parsedURL.Scheme)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, parsedURL.String(), nil)
+	if err != nil {
+		return ImageResult{}, err
+	}
+	req.Header.Set("Accept", "image/png, image/jpeg, image/webp, */*")
+	req.Header.Set("User-Agent", UserAgent())
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return ImageResult{}, fmt.Errorf("下载上游 URL 图片失败:%w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		return ImageResult{}, fmt.Errorf("下载上游 URL 图片返回 HTTP %d", resp.StatusCode)
+	}
+	if resp.ContentLength > MaxInputImageBytes {
+		return ImageResult{}, fmt.Errorf("上游 URL 图片过大(%dB > %dB 上限)", resp.ContentLength, MaxInputImageBytes)
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, MaxInputImageBytes+1))
+	if err != nil {
+		return ImageResult{}, fmt.Errorf("读取上游 URL 图片失败:%w", err)
+	}
+	if int64(len(data)) > MaxInputImageBytes {
+		return ImageResult{}, fmt.Errorf("上游 URL 图片过大(>%dB 上限)", MaxInputImageBytes)
+	}
+	if mimeType := detectImageMimeTypeFromBytes(data); mimeType == "" {
+		return ImageResult{}, errors.New("上游 URL 没有返回支持的 PNG/JPEG/WebP 图片")
+	}
+	if onProgress != nil {
+		onProgress("已下载 Images API URL 图片", int(time.Since(startedAt).Seconds()), int64(len(data)))
+	}
+	return ImageResult{
+		ImageB64:      base64.StdEncoding.EncodeToString(data),
+		RevisedPrompt: revisedPrompt,
+		SourceEvent:   "images_api_url",
+	}, nil
 }
 
 func parseImagesAPIResponseBytes(raw []byte, statusCode int) (ImageResult, error) {
@@ -565,17 +726,32 @@ func buildEditsMultipart(
 
 	if strings.TrimSpace(maskB64) != "" {
 		raw, err := base64.StdEncoding.DecodeString(maskB64)
-		if err == nil && len(raw) > 0 {
-			h := make(textproto.MIMEHeader)
-			h.Set("Content-Disposition", `form-data; name="mask"; filename="mask.png"`)
-			h.Set("Content-Type", "image/png")
-			fw, err := w.CreatePart(h)
-			if err != nil {
-				return nil, "", err
-			}
-			if _, err := fw.Write(raw); err != nil {
-				return nil, "", err
-			}
+		if err != nil {
+			return nil, "", fmt.Errorf("蒙版图片 base64 无效:%w", err)
+		}
+		if len(raw) == 0 {
+			return nil, "", errors.New("蒙版图片为空")
+		}
+		if len(raw) > MaxInputImageBytes {
+			return nil, "", fmt.Errorf("蒙版图片过大(%dB > %dB 上限)", len(raw), MaxInputImageBytes)
+		}
+		// Preserve the actual PNG/JPEG/WebP type for compatible relays instead
+		// of relabeling arbitrary bytes as PNG. Official OpenAI users can still
+		// supply a PNG mask when their selected model requires it.
+		maskMimeType := detectImageMimeTypeFromBytes(raw)
+		if strings.TrimSpace(maskMimeType) == "" {
+			return nil, "", errors.New("蒙版图片不是支持的 PNG/JPEG/WebP 格式")
+		}
+		maskExt := imageExtensionForMimeType(maskMimeType)
+		h := make(textproto.MIMEHeader)
+		h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="mask"; filename="mask.%s"`, maskExt))
+		h.Set("Content-Type", maskMimeType)
+		fw, err := w.CreatePart(h)
+		if err != nil {
+			return nil, "", err
+		}
+		if _, err := fw.Write(raw); err != nil {
+			return nil, "", err
 		}
 	}
 

@@ -42,8 +42,27 @@ class MainActivity : AppCompatActivity() {
     private val requestLegacyGalleryPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
         launchGalleryImagePicker()
     }
+    private val requestNotificationPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
     private val importHistoryLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (::bridge.isInitialized) bridge.onImportHistoryResult(uri)
+    }
+
+    private fun ensureBackgroundTaskNotificationPermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        runOnUiThread {
+            if (isFinishing || isDestroyed) return@runOnUiThread
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
+                return@runOnUiThread
+            }
+            val prefs = getSharedPreferences(notificationPermissionPrefs, MODE_PRIVATE)
+            if (prefs.getBoolean(notificationPermissionRequestedKey, false)) return@runOnUiThread
+            try {
+                requestNotificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                prefs.edit().putBoolean(notificationPermissionRequestedKey, true).apply()
+            } catch (_: IllegalStateException) {
+                // The foreground service can still run; Android exposes it in the active-apps UI.
+            }
+        }
     }
 
     private fun launchImageImport() {
@@ -104,6 +123,9 @@ class MainActivity : AppCompatActivity() {
             },
             launchImportHistory = {
                 importHistoryLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
+            },
+            ensureBackgroundTaskNotificationPermission = {
+                ensureBackgroundTaskNotificationPermission()
             },
         )
         assetLoader = WebViewAssetLoader.Builder()
@@ -188,5 +210,10 @@ class MainActivity : AppCompatActivity() {
         webView.removeJavascriptInterface("AndroidImageStudio")
         webView.destroy()
         super.onDestroy()
+    }
+
+    companion object {
+        private const val notificationPermissionPrefs = "image_studio_android_permissions"
+        private const val notificationPermissionRequestedKey = "background_task_notification_requested"
     }
 }

@@ -127,9 +127,15 @@ func optimizePromptWithLLM(
 	baseURL, apiKey, textModelID, mode, prompt string,
 	sourcePaths []string,
 	proxyConfig client.ProxyConfig,
+	allowInsecureConnection bool,
 ) (string, error) {
-	if strings.TrimSpace(prompt) == "" {
+	operation := strings.TrimSpace(mode)
+	isDescribe := operation == "describe"
+	if !isDescribe && strings.TrimSpace(prompt) == "" {
 		return "", errors.New("提示词不能为空")
+	}
+	if isDescribe && len(sourcePaths) == 0 {
+		return "", errors.New("图片反推必须提供画布图片")
 	}
 	baseURL = strings.TrimSpace(baseURL)
 	if baseURL == "" {
@@ -145,14 +151,18 @@ func optimizePromptWithLLM(
 	}
 
 	instruction := "Rewrite the user's image prompt into a clearer, more detailed prompt for image generation. Keep the meaning, preserve the requested subject, and only return the improved prompt text. Do not add explanations, labels, markdown, or quotes."
-	if strings.TrimSpace(mode) == "edit" {
+	inputText := fmt.Sprintf("Original prompt:\n%s", strings.TrimSpace(prompt))
+	if isDescribe {
+		instruction = "Analyze the attached image and reconstruct a detailed image-generation prompt that could reproduce it. Describe the subject, composition, perspective, lighting, colors, materials, environment, and visual style. Return the prompt in Simplified Chinese. Only return the prompt text; do not add explanations, labels, markdown, or quotes."
+		inputText = "为所附图片反推一段可用于重新生成相似画面的完整提示词。"
+	} else if operation == "edit" {
 		instruction += " Treat any attached images as reference context and preserve edit intent."
 	}
 
 	content := []map[string]any{
 		{
 			"type": "input_text",
-			"text": fmt.Sprintf("Original prompt:\n%s", strings.TrimSpace(prompt)),
+			"text": inputText,
 		},
 	}
 	for _, p := range sourcePaths {
@@ -193,7 +203,7 @@ func optimizePromptWithLLM(
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("User-Agent", client.UserAgent())
 
-	transport, err := client.NewHTTPTransport(proxyConfig)
+	transport, err := client.NewHTTPTransportWithSecurity(proxyConfig, allowInsecureConnection)
 	if err != nil {
 		return "", err
 	}

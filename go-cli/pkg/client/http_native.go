@@ -13,8 +13,9 @@ import (
 // line-by-line through a custom SSE scanner.
 type NativeTransport struct {
 	// Client is optional; if nil a sensible default is used.
-	Client *http.Client
-	Proxy  ProxyConfig
+	Client                  *http.Client
+	Proxy                   ProxyConfig
+	AllowInsecureConnection bool
 }
 
 func (t *NativeTransport) Stream(ctx context.Context, req Request, rawSink io.Writer, progress chan<- string) error {
@@ -29,7 +30,7 @@ func (t *NativeTransport) Stream(ctx context.Context, req Request, rawSink io.Wr
 
 	cli := t.Client
 	if cli == nil {
-		transport, err := NewHTTPTransport(t.Proxy)
+		transport, err := NewHTTPTransportWithSecurity(t.Proxy, t.AllowInsecureConnection)
 		if err != nil {
 			return err
 		}

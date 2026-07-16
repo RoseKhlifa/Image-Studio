@@ -1,3 +1,10 @@
 <resources>
     <string name="app_name">Image Studio</string>
+    <string name="background_task_channel_name">后台图片任务</string>
+    <string name="background_task_channel_description">在图片生成或编辑期间保持网络任务运行</string>
+    <string name="background_task_notification_title">Image Studio 正在处理图片</string>
+    <plurals name="background_task_notification_text">
+        <item quantity="one">正在后台运行 %1$d 个图片任务</item>
+        <item quantity="other">正在后台运行 %1$d 个图片任务</item>
+    </plurals>
 </resources>

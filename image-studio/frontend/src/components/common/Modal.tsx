@@ -1,11 +1,16 @@
-import { ReactNode, useEffect } from "react";
+import { ReactNode, Ref, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { usePlatform } from "../../platform/context";
+import {
+  beginBackdropPointerGesture,
+  shouldDismissFromBackdropPointer,
+  type BackdropPointerGesture,
+} from "./modalBackdrop";
 
 // 居中 modal:点击背景 / Esc 关闭。
 export function Modal({
-  open, onClose, title, children, width = 480, backdropClassName = "", cardClassName = "", headerClassName = "", bodyClassName = "",
+  open, onClose, title, children, width = 480, backdropClassName = "", cardClassName = "", headerClassName = "", bodyClassName = "", bodyRef,
 }: {
   open: boolean;
   onClose: () => void;
@@ -16,8 +21,10 @@ export function Modal({
   cardClassName?: string;
   headerClassName?: string;
   bodyClassName?: string;
+  bodyRef?: Ref<HTMLDivElement>;
 }) {
   const { isAndroidPhone, usesFluentUI, usesAppleUI } = usePlatform();
+  const backdropPointerGesture = useRef<BackdropPointerGesture | null>(null);
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -31,7 +38,24 @@ export function Modal({
   const modal = (
     <div
       className={`app-modal-backdrop ${isAndroidPhone ? "app-modal-backdrop-phone" : "app-modal-backdrop-desktop"} ${backdropClassName}`}
-      onClick={onClose}
+      onPointerDownCapture={(event) => {
+        backdropPointerGesture.current = beginBackdropPointerGesture(
+          event.pointerId,
+          event.target === event.currentTarget,
+        );
+      }}
+      onPointerUpCapture={(event) => {
+        const shouldClose = shouldDismissFromBackdropPointer(
+          backdropPointerGesture.current,
+          event.pointerId,
+          event.target === event.currentTarget,
+        );
+        backdropPointerGesture.current = null;
+        if (shouldClose) onClose();
+      }}
+      onPointerCancelCapture={() => {
+        backdropPointerGesture.current = null;
+      }}
     >
       <div
         style={{ width }}
@@ -53,7 +77,7 @@ export function Modal({
             </button>
           </div>
         )}
-        <div className={`modal-scroll-body app-modal-body ${isAndroidPhone ? "app-modal-body-phone" : "app-modal-body-desktop"} ${bodyClassName}`}>{children}</div>
+        <div ref={bodyRef} className={`modal-scroll-body app-modal-body ${isAndroidPhone ? "app-modal-body-phone" : "app-modal-body-desktop"} ${bodyClassName}`}>{children}</div>
       </div>
     </div>
   );

@@ -61,3 +61,44 @@ func TestDescribeProblemExtractsRefusalTextFromResponsesSSE(t *testing.T) {
 		t.Fatalf("DescribeProblem refusal text = %q", got)
 	}
 }
+
+func TestDescribeProblemSpecialErrorCodesMatchSharedRequestModel(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{
+			name: "moderation blocked",
+			raw:  `{"error":{"code":"moderation_blocked","message":"blocked","type":"invalid_request_error"}}`,
+			want: "🚫 上游内容审核拦截 · 生成被拒",
+		},
+		{
+			name: "content policy violation",
+			raw:  `{"error":{"code":"content_policy_violation","message":"policy","type":"invalid_request_error"}}`,
+			want: "🚫 上游内容政策拦截 (content_policy_violation)",
+		},
+		{
+			name: "rate limit exceeded",
+			raw:  `{"error":{"code":"rate_limit_exceeded","message":"too many requests","type":"rate_limit_error"}}`,
+			want: "⏱ 上游限速 (rate_limit_exceeded)\n\ntoo many requests",
+		},
+		{
+			name: "quota exhausted",
+			raw:  `{"error":{"code":"insufficient_quota","message":"quota empty","type":"billing_error"}}`,
+			want: "💳 上游账户额度不足\n\nquota empty",
+		},
+		{
+			name: "model not found",
+			raw:  `{"error":{"code":"model_not_found","message":"missing model","type":"invalid_request_error"}}`,
+			want: "🤷 上游找不到指定模型\n\nmissing model",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := DescribeProblem(tt.raw); got != tt.want {
+				t.Fatalf("DescribeProblem(%s) = %q, want %q", tt.name, got, tt.want)
+			}
+		})
+	}
+}

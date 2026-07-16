@@ -39,7 +39,7 @@ func (a *App) fieldWithStyle(gtx layout.Context, title string, editor *widget.Ed
 						style.TextSize = a.scaledSp(unit.Sp(13))
 						style.Font.Weight = font.Medium
 						if monospace {
-							style.Font.Typeface = uiMonoTypeface
+							style.Font.Typeface = desktopMonoTypeface(a.desktopStyle)
 						}
 						return style.Layout(gtx)
 					})
@@ -107,7 +107,7 @@ func (a *App) segmentedGridWithTitle(gtx layout.Context, title string, options [
 func (a *App) segmented(gtx layout.Context, options []choice, selected string, buttons []widget.Clickable, set func(string)) layout.Dimensions {
 	baseBg := rgba(0x000000, 0x0a)
 	baseBorder := rgba(0x000000, 0x0d)
-	if resolveThemeMode(a.themeMode) == "dark" {
+	if a.isDarkTheme() {
 		baseBg = rgba(0xffffff, 0x0f)
 		baseBorder = rgba(0xffffff, 0x12)
 	}
@@ -164,7 +164,7 @@ func (a *App) segmentedGrid(gtx layout.Context, options []choice, selected strin
 	rows := (len(options) + columns - 1) / columns
 	baseBg := rgba(0x000000, 0x0a)
 	baseBorder := rgba(0x000000, 0x0d)
-	if resolveThemeMode(a.themeMode) == "dark" {
+	if a.isDarkTheme() {
 		baseBg = rgba(0xffffff, 0x0f)
 		baseBorder = rgba(0xffffff, 0x12)
 	}

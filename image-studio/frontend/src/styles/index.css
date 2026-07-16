@@ -785,6 +785,185 @@ html.dark[data-ui-family="apple"] .platform-chip:has(input:checked) {
     0 8px 20px rgb(0 0 0 / 0.26);
 }
 
+@keyframes settings-anchor-orb {
+  0%, 100% {
+    transform: translate3d(0, 0, 0) scale(1);
+    opacity: 0.55;
+  }
+
+  50% {
+    transform: translate3d(10px, 8px, 0) scale(1.08);
+    opacity: 0.9;
+  }
+}
+
+.settings-anchor-panel {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  border: 1px solid rgb(255 255 255 / 0.28);
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.42), rgb(255 255 255 / 0.16));
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.42),
+    0 22px 44px rgb(15 23 42 / 0.08);
+  backdrop-filter: blur(18px) saturate(145%);
+  -webkit-backdrop-filter: blur(18px) saturate(145%);
+}
+
+.settings-anchor-panel::before,
+.settings-anchor-panel::after {
+  content: "";
+  position: absolute;
+  border-radius: 999px;
+  pointer-events: none;
+  filter: blur(10px);
+}
+
+.settings-anchor-panel::before {
+  right: -34px;
+  top: -18px;
+  width: 124px;
+  height: 124px;
+  background: radial-gradient(circle, rgb(0 122 255 / 0.2), transparent 66%);
+  animation: settings-anchor-orb 7.2s ease-in-out infinite;
+}
+
+.settings-anchor-panel::after {
+  left: -44px;
+  bottom: -46px;
+  width: 132px;
+  height: 132px;
+  background: radial-gradient(circle, rgb(90 200 250 / 0.13), transparent 70%);
+  animation: settings-anchor-orb 9.4s ease-in-out infinite reverse;
+}
+
+.settings-anchor-copy {
+  position: relative;
+  z-index: 1;
+}
+
+.settings-anchor-list {
+  position: relative;
+  z-index: 1;
+  padding-left: 2px;
+  padding-right: 12px;
+}
+
+.settings-anchor-list::before {
+  content: "";
+  position: absolute;
+  left: 18px;
+  top: 10px;
+  bottom: 10px;
+  width: 1px;
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0), rgb(255 255 255 / 0.6) 14%, rgb(60 60 67 / 0.16) 46%, rgb(255 255 255 / 0));
+  opacity: 0.72;
+}
+
+.settings-anchor-item {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid transparent;
+  background: transparent;
+  transform: translateX(0);
+  transition:
+    transform 260ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 220ms ease,
+    background-color 220ms ease,
+    box-shadow 260ms ease,
+    color 220ms ease;
+}
+
+.settings-anchor-item::before,
+.settings-anchor-item::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+  transition:
+    opacity 220ms ease,
+    transform 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.settings-anchor-item::before {
+  left: 11px;
+  top: 13px;
+  bottom: 13px;
+  width: 4px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, var(--accent-2), var(--accent));
+  box-shadow: 0 0 18px rgb(0 122 255 / 0.22);
+  opacity: 0;
+  transform: scaleY(0.35);
+}
+
+.settings-anchor-item::after {
+  inset: 0;
+  border-radius: inherit;
+  background:
+    linear-gradient(135deg, rgb(255 255 255 / 0.24), transparent 44%, rgb(0 122 255 / 0.08));
+  opacity: 0;
+  transform: scale(0.98);
+}
+
+.settings-anchor-item:hover {
+  transform: translateX(3px);
+  border-color: rgb(255 255 255 / 0.2);
+  background: rgb(255 255 255 / 0.12);
+}
+
+.settings-anchor-item.is-active {
+  transform: translateX(6px);
+  border-color: rgb(255 255 255 / 0.3);
+  background:
+    linear-gradient(135deg, rgb(255 255 255 / 0.36), rgb(255 255 255 / 0.18));
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.42),
+    0 14px 28px rgb(15 23 42 / 0.08);
+}
+
+.settings-anchor-item:hover::before,
+.settings-anchor-item.is-active::before {
+  opacity: 1;
+  transform: scaleY(1);
+}
+
+.settings-anchor-item:hover::after,
+.settings-anchor-item.is-active::after {
+  opacity: 1;
+  transform: scale(1);
+}
+
+:root.dark .settings-anchor-panel {
+  border-color: rgb(255 255 255 / 0.1);
+  background:
+    linear-gradient(180deg, rgb(38 42 52 / 0.78), rgb(21 24 33 / 0.5));
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.08),
+    0 22px 44px rgb(0 0 0 / 0.28);
+}
+
+:root.dark .settings-anchor-list::before {
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0), rgb(255 255 255 / 0.18) 14%, rgb(255 255 255 / 0.08) 46%, rgb(255 255 255 / 0));
+  opacity: 0.8;
+}
+
+:root.dark .settings-anchor-item:hover {
+  border-color: rgb(255 255 255 / 0.1);
+  background: rgb(255 255 255 / 0.04);
+}
+
+:root.dark .settings-anchor-item.is-active {
+  border-color: rgb(255 255 255 / 0.14);
+  background:
+    linear-gradient(135deg, rgb(255 255 255 / 0.11), rgb(255 255 255 / 0.04));
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.14),
+    0 14px 28px rgb(0 0 0 / 0.24);
+}
+
 html[data-ui-family="apple"] .focus-ring,
 html[data-ui-family="apple"] .input,
 html[data-ui-family="apple"] .textarea,
@@ -803,6 +982,15 @@ html[data-ui-family="apple"] .select:focus {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .settings-anchor-panel::before,
+  .settings-anchor-panel::after {
+    animation: none;
+  }
+
+  .settings-anchor-item {
+    transition-duration: 0.01ms;
+  }
+
   html[data-ui-family="apple"] .liquid-ambient::before,
   html[data-ui-family="apple"] .liquid-ambient::after,
   html[data-ui-family="apple"] .stage-host,

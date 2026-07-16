@@ -3,6 +3,7 @@ import { Clock3, ListPlus } from "lucide-react";
 import { Modal } from "../../components/common/Modal";
 import { useStudioStore } from "../../state/studioStore";
 import { vibrateForPlatform } from "./bridge";
+import { buildPromptHistoryEntries } from "../../lib/promptTemplates";
 
 const ANDROID_PROMPT_TEMPLATES: { label: string; text: string }[] = [
   { label: "写实摄影", text: "photorealistic, professional photography, 35mm, natural lighting, sharp focus, high detail" },
@@ -31,7 +32,7 @@ export function AndroidPromptTemplateModal({
   const [tab, setTab] = useState<"templates" | "history">("templates");
   const items = tab === "templates"
     ? [...promptTemplates.map((item) => ({ label: item.label, text: item.text })), ...ANDROID_PROMPT_TEMPLATES]
-    : history.map((text, index) => ({ label: `历史 ${index + 1}`, text }));
+    : buildPromptHistoryEntries(history).map((entry) => ({ label: `历史 ${entry.position}`, text: entry.text }));
 
   const pick = (text: string) => {
     vibrateForPlatform(8);

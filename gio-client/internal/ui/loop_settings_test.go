@@ -65,3 +65,20 @@ func TestApplyWorkspaceSyncsLoopEditors(t *testing.T) {
 		t.Fatal("loop live preview should be disabled from workspace state")
 	}
 }
+
+func TestLoopSummaryTextIncludesPreviewAndAutoSaveLabel(t *testing.T) {
+	app := &App{
+		loopEnabled:     true,
+		loopTotalCount:  20,
+		loopConcurrency: 4,
+		loopAutoSave:    true,
+		loopLivePreview: false,
+	}
+	app.loopAutoSaveDirInput.SetText("/tmp/exports/final")
+
+	got := app.loopSummaryText()
+	want := "20 张 · 并发 4 · 实时预览关 · 自动另存为 · final"
+	if got != want {
+		t.Fatalf("loopSummaryText=%q want %q", got, want)
+	}
+}

@@ -153,6 +153,34 @@ func IsRetryable(raw string) bool {
 	return false
 }
 
+func workerAlreadyRetried(raw string) bool {
+	text := strings.TrimSpace(raw)
+	if text == "" {
+		return false
+	}
+	var data map[string]any
+	if err := json.Unmarshal([]byte(text), &data); err != nil {
+		return false
+	}
+	errObj, ok := data["error"].(map[string]any)
+	if !ok || errObj == nil {
+		return false
+	}
+	errType, _ := errObj["type"].(string)
+	if strings.ToLower(strings.TrimSpace(errType)) != "upstream_error" {
+		return false
+	}
+	switch errObj["upstreamStatus"].(type) {
+	case float64, int, int64, json.Number:
+		return true
+	}
+	switch errObj["upstream_status"].(type) {
+	case float64, int, int64, json.Number:
+		return true
+	}
+	return false
+}
+
 // DescribeProblem returns a human-readable Chinese explanation of an
 // upstream failure body. Mirrors Python describe_response_problem.
 func DescribeProblem(raw string) string {
@@ -170,27 +198,17 @@ func DescribeProblem(raw string) string {
 
 	var data map[string]any
 	if err := json.Unmarshal([]byte(text), &data); err == nil && data != nil {
-		var statusLabel string
-		if status, ok := data["status"].(float64); ok {
-			statusLabel = fmt.Sprintf("%d", int(status))
-		}
-		if name, ok := data["error_name"].(string); ok && (name == "origin_gateway_timeout" || name == "timeout") {
-			if statusLabel == "" {
-				statusLabel = name
-			}
-		}
-		if statusLabel != "" {
-			return fmt.Sprintf("接口返回 %s:上游服务超时。", statusLabel)
-		}
 		if errObj, ok := data["error"].(map[string]any); ok {
-			if msg, ok := errObj["message"].(string); ok && msg != "" {
-				return fmt.Sprintf("接口返回错误:%s", msg)
-			}
-			b, _ := json.Marshal(errObj)
-			return fmt.Sprintf("接口返回错误:%s", string(b))
+			return describeAPIError(errObj)
 		}
 		if msg, ok := data["message"].(string); ok && msg != "" {
-			return fmt.Sprintf("接口返回消息:%s", msg)
+			return fmt.Sprintf("接口返回消息:%s", strings.TrimSpace(msg))
+		}
+		if status, ok := data["status"].(float64); ok {
+			switch int(status) {
+			case 502, 503, 504, 524:
+				return fmt.Sprintf("接口返回 %d:上游服务超时。", int(status))
+			}
 		}
 		if msg := extractStructuredMessage(data); msg != "" {
 			return msg
@@ -285,49 +303,19 @@ func describeAPIError(e map[string]any) string {
 	code, _ := e["code"].(string)
 	msg, _ := e["message"].(string)
 	typ, _ := e["type"].(string)
-	reqID := extractRequestID(msg)
-
 	switch strings.ToLower(code) {
 	case "moderation_blocked":
-		out := "🚫 上游内容审核拦截 · 生成被拒\n\n" +
-			"OpenAI 安全系统(image safety classifier)否决了这次请求,这是平台硬策略,与客户端配置 / 网络无关。\n\n" +
-			"常见触发原因:\n" +
-			"  • 真实人物 / 公众人物姓名(肖像)\n" +
-			"  • 版权角色(Marvel / Disney / 任天堂 / 动漫 / 游戏 IP)\n" +
-			"  • 注册商标 + 吉祥物联名 + 品牌衍生\n" +
-			"  • 暴力 / 武器 / 血腥 / NSFW\n" +
-			"  • 政治敏感人物 / 符号 / 国旗变体\n\n" +
-			"换个不指名 IP 的措辞重发即可。客户端不会自动重试 —— 避免在确定会拒的请求上无谓消耗 token。"
-		if reqID != "" {
-			out += "\n\n如认为是误判,可联系 help.openai.com 附 request ID = " + reqID
-		}
-		return out
-
+		return "🚫 上游内容审核拦截 · 生成被拒"
 	case "content_policy_violation":
-		// Images API 路径的对应错误
-		out := "🚫 上游内容政策拦截 (content_policy_violation)\n\nImages API 拒绝了这次生成,通常是版权角色 / 商标 / 敏感内容触发。换个不指名 IP 的 prompt 重发。"
-		if reqID != "" {
-			out += "\n\nrequest ID = " + reqID
-		}
-		return out
-
+		return "🚫 上游内容政策拦截 (content_policy_violation)"
 	case "rate_limit_exceeded":
-		return "⏱ 上游限速 (rate_limit_exceeded)\n\n" + msg + "\n\n稍等几秒再试,或在「上游配置」换一个有更高额度的分组。"
-
+		return "⏱ 上游限速 (rate_limit_exceeded)\n\n" + msg
 	case "insufficient_quota", "billing_hard_limit_reached":
-		return "💳 上游账户额度不足\n\n" + msg + "\n\n请到中转站后台确认套餐 / 余额状态。"
-
-	case "invalid_api_key", "incorrect_api_key", "invalid_request_error":
-		if strings.Contains(strings.ToLower(msg), "api key") || strings.Contains(strings.ToLower(code), "api_key") {
-			return "🔑 API Key 无效或已过期\n\n" + msg + "\n\n打开「上游配置」检查并替换 API Key。"
-		}
-		// invalid_request_error 也可能是别的请求字段问题,继续走 fallback
-
+		return "💳 上游账户额度不足\n\n" + msg
 	case "model_not_found":
-		return "🤷 上游找不到指定模型\n\n" + msg + "\n\n打开「上游配置」检查图像模型 ID,确认你的 key 所在分组拥有此模型权限。"
+		return "🤷 上游找不到指定模型\n\n" + msg
 	}
 
-	// Fallback:不再 dump 原始 JSON(日志文件里有),只把 message + code + type 拼成单行
 	var parts []string
 	if msg != "" {
 		parts = append(parts, msg)
@@ -345,7 +333,5 @@ func describeAPIError(e map[string]any) string {
 	if len(parts) > 0 {
 		return "接口返回错误:" + strings.Join(parts, " ")
 	}
-	// 最后的兜底,如果连 message / code / type 都没有,才回到 JSON dump
-	b, _ := json.Marshal(e)
-	return "接口返回错误:" + string(b)
+	return "接口返回错误"
 }

@@ -3,6 +3,7 @@ package kernel
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"image"
 	"image/color"
 	"image/png"
@@ -298,6 +299,155 @@ func TestRunnerRunFallsBackToSecondaryProfileAfterPrimaryFailure(t *testing.T) {
 	}
 	if len(logEntries) < 2 {
 		t.Fatalf("expected raw logs from primary and fallback attempts, got %d", len(logEntries))
+	}
+}
+
+func TestRunnerRunPreviewOnlyResultSkipsImagePersistence(t *testing.T) {
+	finalB64 := base64.StdEncoding.EncodeToString([]byte("\x89PNG\r\n\x1a\npreview"))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/images/generations" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"b64_json":"` + finalB64 + `"}]}`))
+	}))
+	defer server.Close()
+
+	outDir := t.TempDir()
+	result, err := (Runner{}).Run(context.Background(), Config{
+		APIKey:            "sk-preview",
+		BaseURL:           server.URL,
+		Prompt:            "hello",
+		APIMode:           client.APIModeImages,
+		OutputDir:         outDir,
+		PreviewOnlyResult: true,
+	}, Callbacks{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.SavedPath != "" || result.PreviewPath != "" || result.ThumbPath != "" {
+		t.Fatalf("preview-only runner should not persist image paths: %#v", result)
+	}
+	if result.ImageB64 != finalB64 || strings.TrimSpace(result.RawText) == "" || result.RawPath != "" {
+		t.Fatalf("preview-only runner missing image/raw text semantics: %#v", result)
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "images")); !os.IsNotExist(err) {
+		t.Fatalf("images dir should not exist for preview-only result, err=%v", err)
+	}
+}
+
+func TestRunnerRunAllowsEditModeWithOnlySourceImageDataURLs(t *testing.T) {
+	finalB64 := base64.StdEncoding.EncodeToString([]byte("\x89PNG\r\n\x1a\nedit"))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/images/edits" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"b64_json":"` + finalB64 + `"}]}`))
+	}))
+	defer server.Close()
+
+	outDir := t.TempDir()
+	result, err := (Runner{}).Run(context.Background(), Config{
+		APIKey:              "sk-edit",
+		BaseURL:             server.URL,
+		Prompt:              "hello",
+		Mode:                client.ModeEdit,
+		APIMode:             client.APIModeImages,
+		OutputDir:           outDir,
+		SourceImageDataURLs: []string{"data:image/png;base64,AAAA"},
+	}, Callbacks{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.SavedPath == "" {
+		t.Fatalf("saved path=%q want persisted image result", result.SavedPath)
+	}
+}
+
+func TestOptimizePromptUsesSourceImageDataURLs(t *testing.T) {
+	var captured map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/responses" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"output_text":"optimized"}`))
+	}))
+	defer server.Close()
+
+	text, err := OptimizePrompt(context.Background(), Config{
+		APIKey:              "sk-test",
+		BaseURL:             server.URL,
+		Prompt:              "hello",
+		Mode:                client.ModeEdit,
+		SourceImageDataURLs: []string{"data:image/png;base64,AAAA"},
+	})
+	if err != nil {
+		t.Fatalf("OptimizePrompt: %v", err)
+	}
+	if text != "optimized" {
+		t.Fatalf("optimized text=%q want optimized", text)
+	}
+	input := captured["input"].([]any)[0].(map[string]any)
+	content := input["content"].([]any)
+	if len(content) != 2 {
+		t.Fatalf("content len=%d want 2", len(content))
+	}
+	image := content[1].(map[string]any)
+	if image["type"] != "input_image" || image["image_url"] != "data:image/png;base64,AAAA" {
+		t.Fatalf("unexpected input image payload: %#v", image)
+	}
+}
+
+func TestAttachSourceImagesKeepsMixedFileAndDataURLSources(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "source.png")
+	if err := os.WriteFile(src, []byte("\x89PNG\r\n\x1a\nmixed"), 0o600); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+
+	opts := &client.Options{
+		APIMode: client.APIModeResponses,
+	}
+	if err := attachSourceImages(opts, []string{src}, []string{"data:image/png;base64,AAAA"}); err != nil {
+		t.Fatalf("attachSourceImages: %v", err)
+	}
+	if len(opts.ImageDataURLs) != 2 {
+		t.Fatalf("image data urls len=%d want 2", len(opts.ImageDataURLs))
+	}
+	if !strings.HasPrefix(opts.ImageDataURLs[0], "data:image/png;base64,") {
+		t.Fatalf("first image data url=%q want file-backed data URL", opts.ImageDataURLs[0])
+	}
+	if opts.ImageDataURLs[1] != "data:image/png;base64,AAAA" {
+		t.Fatalf("second image data url=%q want virtual data URL", opts.ImageDataURLs[1])
+	}
+}
+
+func TestAttachSourceImagesKeepsMixedFileAndDataURLSourcesForImagesAPI(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "source.png")
+	if err := os.WriteFile(src, []byte("\x89PNG\r\n\x1a\nmixed"), 0o600); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+
+	opts := &client.Options{
+		APIMode: client.APIModeImages,
+	}
+	if err := attachSourceImages(opts, []string{src}, []string{"data:image/png;base64,AAAA"}); err != nil {
+		t.Fatalf("attachSourceImages: %v", err)
+	}
+	if len(opts.ImagePaths) != 2 {
+		t.Fatalf("image paths len=%d want 2", len(opts.ImagePaths))
+	}
+	if opts.ImagePaths[0] != src {
+		t.Fatalf("first image path=%q want %q", opts.ImagePaths[0], src)
+	}
+	if _, err := os.Stat(opts.ImagePaths[1]); err != nil {
+		t.Fatalf("second image path should be temp file: %v", err)
 	}
 }
 

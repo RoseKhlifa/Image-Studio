@@ -14,9 +14,11 @@ import {
   GetOutputDir,
   DeleteStoredAPIKey,
   GetStoredAPIKey,
+  OpenMaskImageDialog,
   SetStoredAPIKey,
   RegisterMediaAsset,
   RegisterImportedImageAsset,
+  ReadImageAsBase64,
   SetKeepLogsEnabled,
   SetCleanupPreviewCacheOnExitEnabled,
   SetOutputDir,
@@ -74,6 +76,7 @@ import {
 import { normalizeAppUpdateInfo } from "../lib/appUpdate.ts";
 import { appVersion } from "../lib/version.ts";
 import { normalizeSavePromptRequest, type SavePromptRequest } from "../lib/savePromptState";
+import { detectImageMimeTypeFromBase64 } from "../lib/images";
 import {
   readSavePromptSuppressed,
   writeSavePromptSuppressed,
@@ -112,6 +115,7 @@ import {
   duplicateProfile as cloneProfile,
   genProfileId,
   keyringUserFor,
+  pickAIProfile,
   pickActiveProfile,
 } from "../lib/profiles";
 import { isMac, readRuntimePlatformState } from "../platform";
@@ -121,6 +125,7 @@ import {
   apiModeLabel,
   defaultBatchProcessConfig,
   defaultLoopGenerationConfig,
+  normalizeAutoAspectResolutionPreset,
   normalizeBatchCount,
   normalizeBatchProcessConcurrency,
   normalizeBatchProcessConfig,
@@ -145,6 +150,7 @@ import {
   deriveResolutionPreset,
   formatSizeValue,
   isBuiltInAspectRatio,
+  normalizeResolutionSelection,
   normalizeSizeSelection,
   supportsPreciseSizeControl,
 } from "../components/panel/sizeCapabilities";
@@ -159,9 +165,11 @@ import {
   imageDims,
   loadModeConfig,
   loadStoredActiveProfileId,
+  loadStoredAIProfileId,
   loadStoredProfiles,
   MAX_HISTORY_ITEMS,
   persistActiveProfileId,
+  persistAIProfileId,
   persistProfiles,
   persistTrimmedHistory,
   registerTrustedOutputRoots,
@@ -641,6 +649,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   noPromptRevision: true,
   profiles: [],
   activeProfileId: "",
+  aiProfileId: "",
   sources: [],
 
   runningJobs: [],
@@ -704,6 +713,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   promptTemplates: [],
   batchCount: 1,
   editSourceMode: "manual",
+  editAutoAspectResolution: "",
   batchProcess: defaultBatchProcessConfig(),
   loopGeneration: defaultLoopGenerationConfig(),
   presets: [],
@@ -788,6 +798,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   closeSettings: () => set({ settingsOpen: false }),
   isTestingKey: false,
   isOptimizingPrompt: false,
+  isInferringPrompt: false,
   upstreamModalOpen: false,
   upstreamReturnTarget: "app",
   openUpstreamConfig: (returnTarget = "app") => set({
@@ -942,6 +953,8 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       ? normalizeBatchCount(value)
       : key === "batchProcess"
         ? normalizeBatchProcessConfig(value)
+      : key === "editAutoAspectResolution"
+        ? normalizeAutoAspectResolutionPreset(value)
       : key === "background"
         ? normalizeBackgroundValue(value)
         : key === "outputCompression"
@@ -1006,6 +1019,12 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         workspaces: get().workspaces.map((w) => (
           w.id === get().activeWorkspaceId ? { ...w, editSourceMode: value } : w
         )),
+      });
+    } else if (key === "editAutoAspectResolution") {
+      set({
+        workspaces: patchWorkspaceRuntime(get().workspaces, get().activeWorkspaceId, {
+          editAutoAspectResolution: normalizedValue as StudioState["editAutoAspectResolution"],
+        }),
       });
     } else if (key === "batchProcess") {
       const value = normalizedValue as StudioState["batchProcess"];
@@ -1089,6 +1108,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   deleteProfile: async (id) => profileActions.deleteProfile(id),
   duplicateProfile: async (id) => profileActions.duplicateProfile(id),
   setActiveProfile: async (id) => profileActions.setActiveProfile(id),
+  setAIProfile: async (id) => profileActions.setAIProfile(id),
 
   clearError: () => {
     const wsId = get().activeWorkspaceId;
@@ -1165,6 +1185,14 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     }
     const activeProfile = s.profiles.find((p) => p.id === s.activeProfileId);
     const responsesTransport = activeProfile?.responsesTransport ?? s.responsesTransport;
+    if (activeProfile?.allowInsecureConnection && s.kernelRuntimeMode === "remote" && !runtimePlatform.isAndroid) {
+      set({
+        errorMessage: "允许不安全连接需要桌面本地内核；浏览器/远程内核不能绕过 HTTPS 证书校验。",
+        errorCanRetry: false,
+        errorRawPath: null,
+      });
+      return;
+    }
     if (s.apiMode === "responses" && responsesTransport === "websocket" && s.kernelRuntimeMode === "remote" && !runtimePlatform.isAndroid) {
       set({
         errorMessage: "当前远程内核模式暂不支持 Responses WebSocket mode，请切回本地内核或关闭该开关。",
@@ -1253,8 +1281,11 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       }),
     });
 
+    const importedMaskDataURL = s.maskDataURL && s.maskDataURL !== "__PENDING_MASK__" ? s.maskDataURL : null;
     const maskDataURL = s.mode === "edit"
-      ? buildMaskPNGDataURL(s.strokes, s.currentImage?.imageB64 ? imageDims(s.currentImage.imageB64) : null)
+      ? (s.strokes.length > 0
+        ? buildMaskPNGDataURL(s.strokes, s.currentImage?.imageB64 ? imageDims(s.currentImage.imageB64) : null)
+        : importedMaskDataURL)
       : null;
     const maskB64 = maskDataURL ? stripDataURLPrefix(maskDataURL) : "";
     let augmentedPrompt = augmentPromptWithAnnotations(s.prompt, s.annotations, s.currentImage?.imageB64 ? imageDims(s.currentImage.imageB64) : null);
@@ -1264,11 +1295,39 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       augmentedPrompt = `${augmentedPrompt}, ${styleSuffix}`;
     }
 
-    const resolvedSize = normalizeSizeSelection(s.size, {
+    const normalizedBaseSize = normalizeSizeSelection(s.size, {
       apiMode: s.apiMode,
       requestPolicy: s.requestPolicy,
       imageModelID: s.imageModelID,
     }, s.customAspectRatios);
+    const normalizedEditAutoAspectResolution = normalizeResolutionSelection(
+      s.editAutoAspectResolution || "1k",
+      {
+        apiMode: s.apiMode,
+        requestPolicy: s.requestPolicy,
+        imageModelID: s.imageModelID,
+      },
+    );
+    const effectiveEditAutoAspectResolution = normalizedEditAutoAspectResolution === "auto"
+      ? "1k"
+      : normalizedEditAutoAspectResolution;
+    const editReferenceDimensions = s.sources[0]?.previewWidth && s.sources[0]?.previewHeight
+      ? { width: s.sources[0].previewWidth, height: s.sources[0].previewHeight }
+      : s.currentImage?.previewWidth && s.currentImage?.previewHeight
+        ? { width: s.currentImage.previewWidth, height: s.currentImage.previewHeight }
+        : null;
+    const resolvedSize = s.mode === "edit" && !batchProcessEnabled && s.editAutoAspectResolution !== ""
+      ? buildReferenceResolutionSizeSelection(
+          effectiveEditAutoAspectResolution,
+          editReferenceDimensions,
+          {
+            apiMode: s.apiMode,
+            requestPolicy: s.requestPolicy,
+            imageModelID: s.imageModelID,
+          },
+          s.customAspectRatios,
+        )
+      : normalizedBaseSize;
     const resolvedQuality = normalizeQualitySelection(s.quality, s.imageModelID);
     const streamPreviewDisableReason = getStreamPreviewDisableReason({
       enabled: s.protectStreamPreview,
@@ -1306,6 +1365,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       responsesTransport: s.responsesTransport,
       requestPolicy: s.requestPolicy,
       imagesNewAPICompat: s.imagesNewAPICompat,
+      allowInsecureConnection: activeProfile?.allowInsecureConnection === true,
       apiMode: s.apiMode,
       noPromptRevision: true,
       concurrencyLimit,
@@ -1322,6 +1382,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
             responsesTransport: fallbackProfile.responsesTransport ?? "sse",
             requestPolicy: fallbackProfile.requestPolicy,
             imagesNewAPICompat: fallbackProfile.imagesNewAPICompat === true,
+            allowInsecureConnection: fallbackProfile.allowInsecureConnection === true,
           }
         : undefined,
       autoRetryEnabled: batchProcessEnabled ? batchProcess.retryOnFailure : s.autoRetryEnabled,
@@ -1357,7 +1418,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     const snapshotBase = {
       workspaceId,
       apiMode: s.apiMode,
-      size: s.size,
+      size: resolvedSize,
       quality: resolvedQuality,
       outputFormat: s.outputFormat,
       sources: s.sources,
@@ -1456,6 +1517,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   compareSourceOnCanvas: async (index) => imageActions.compareSourceOnCanvas(index),
   reuseAsSource: async (item) => imageActions.reuseAsSource(item),
   deleteHistoryItem: async (id) => imageActions.deleteHistoryItem(id),
+  clearHistory: async () => imageActions.clearHistory(),
   saveCurrentImageAs: async () => imageActions.saveCurrentImageAs(),
 
   bootstrap: async () => {
@@ -1502,6 +1564,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         noPromptRevision: true,
         profiles: [preview.profile],
         activeProfileId: preview.profile.id,
+        aiProfileId: preview.profile.apiMode === "responses" ? preview.profile.id : "",
         sources: preview.sources,
         runningJobs: [],
         jobsTotal: 0,
@@ -1545,6 +1608,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         batchCount: workspaceState.batchCount,
         selectedPresetId: workspaceState.selectedPresetId ?? null,
         editSourceMode: workspaceState.editSourceMode,
+        editAutoAspectResolution: normalizeAutoAspectResolutionPreset(workspaceState.editAutoAspectResolution),
         batchProcess: normalizeBatchProcessConfig(workspaceState.batchProcess),
         loopGeneration: normalizeLoopGenerationConfig(workspaceState.loopGeneration),
         presets: preview.presets ?? [],
@@ -1560,6 +1624,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         settingsOpen: false,
         isTestingKey: false,
         isOptimizingPrompt: false,
+        isInferringPrompt: false,
         customAspectRatioModalOpen: false,
         customSizeModalOpen: false,
         upstreamModalOpen: false,
@@ -1670,6 +1735,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     //    个 profile,顺手清理老 localStorage 键。
     let profiles = loadStoredProfiles();
     let activeProfileId = loadStoredActiveProfileId();
+    let aiProfileId = loadStoredAIProfileId();
     if (profiles.length === 0) {
       // 检测老格式
       let legacyApiMode: APIMode = "responses";
@@ -1762,6 +1828,11 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       activeProfileId = activeProfile.id;
       persistActiveProfileId(activeProfileId);
     }
+    const aiProfile = pickAIProfile(profiles, aiProfileId, activeProfileId);
+    if ((aiProfile?.id ?? "") !== aiProfileId) {
+      aiProfileId = aiProfile?.id ?? "";
+      persistAIProfileId(aiProfileId);
+    }
     const apiMode: APIMode = activeProfile?.apiMode ?? "responses";
     const responsesTransport = activeProfile?.responsesTransport ?? "sse";
     const requestPolicy: RequestPolicy = activeProfile?.requestPolicy ?? "openai";
@@ -1814,6 +1885,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       batchCount: 1,
       selectedPresetId: null,
       editSourceMode: "manual",
+      editAutoAspectResolution: "",
       batchProcess: defaultBatchProcessConfig(),
       loopGeneration: defaultLoopGenerationConfig(),
       sources: [],
@@ -1856,10 +1928,12 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       autoRetryEnabled,
       profiles,
       activeProfileId,
+      aiProfileId,
       workspaces: [initialWorkspace],
       activeWorkspaceId: wsId,
       selectedPresetId: initialWorkspace.selectedPresetId ?? null,
       editSourceMode: initialWorkspace.editSourceMode,
+      editAutoAspectResolution: normalizeAutoAspectResolutionPreset(initialWorkspace.editAutoAspectResolution),
       batchProcess: normalizeBatchProcessConfig(initialWorkspace.batchProcess),
       loopGeneration: normalizeLoopGenerationConfig(initialWorkspace.loopGeneration),
       // Android 走首页 hero 引导，不用启动即弹设置；桌面仍保留首次引导。
@@ -1896,6 +1970,36 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     void backfillHistoryPreviewRefs(items);
   },
 
+  importMaskImage: async () => {
+    try {
+      const res = await OpenMaskImageDialog();
+      if (!res?.path) return;
+      const b64 = res.imageB64;
+      if (!b64) throw new Error("未读取到图片内容");
+      const beforeStrokes = get().strokes;
+      const beforeMaskDataURL = get().maskDataURL;
+      const nextMaskDataURL = tempDataURLFromB64(b64);
+      const entry: UndoEntry = {
+        label: "import-mask",
+        undo: () => ({ strokes: beforeStrokes, maskDataURL: beforeMaskDataURL }),
+        redo: () => ({ strokes: [], maskDataURL: nextMaskDataURL }),
+      };
+      set({
+        tool: "mask",
+        strokes: [],
+        maskDataURL: nextMaskDataURL,
+        undoStack: [...get().undoStack, entry],
+        redoStack: [],
+        errorMessage: null,
+        errorCanRetry: false,
+        errorRawPath: null,
+      });
+      get().pushToast("已导入蒙版图片", "success");
+    } catch (error: any) {
+      set({ errorMessage: `导入蒙版失败:${error?.message ?? error}`, errorCanRetry: false, errorRawPath: null });
+    }
+  },
+
   setMaskDataURL: (v) => set({ maskDataURL: v }),
 
   pushStroke: (stroke) => {
@@ -1915,10 +2019,11 @@ export const useStudioStore = create<StudioState>((set, get) => ({
 
   resetMask: () => {
     const before = get().strokes;
-    if (before.length === 0) return;
+    const beforeMaskDataURL = get().maskDataURL;
+    if (before.length === 0 && !beforeMaskDataURL) return;
     const entry: UndoEntry = {
       label: "clear-mask",
-      undo: () => ({ strokes: before, maskDataURL: get().maskDataURL }),
+      undo: () => ({ strokes: before, maskDataURL: beforeMaskDataURL }),
       redo: () => ({ strokes: [], maskDataURL: null }),
     };
     set({
@@ -2095,6 +2200,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     set({ isTestingKey: true });
     s.pushToast("正在测试连接...", "info", 8000);
     try {
+      const activeProfile = s.profiles.find((profile) => profile.id === s.activeProfileId);
       const result = await probeCurrentUpstream(
         cleanedBaseURL,
         s.apiKey.trim(),
@@ -2102,6 +2208,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         s.proxyURL,
         s.apiMode,
         s.responsesTransport,
+        activeProfile?.allowInsecureConnection === true,
       );
       set({ isTestingKey: false });
       if (result.responsesTransport === "websocket" && result.responsesTransportOK === false) {
@@ -2119,30 +2226,24 @@ export const useStudioStore = create<StudioState>((set, get) => ({
 
   optimizePrompt: async () => {
     const s = get();
-    if (s.isRunning || s.isOptimizingPrompt) return;
-    // prompt 优化必须走 Responses(它要文本模型),如果用户 active 的是 Images
-    // profile,要回头找一个 Responses profile 来跑;它的 key 还是从 keyring 拿。
-    let optimizeAPIKey = s.apiKey;
-    let optimizeBaseURL = s.baseURL;
-    let optimizeTextModelID = s.textModelID;
-    if (s.apiMode !== "responses") {
-      const responsesProfile = s.profiles.find((p) => p.apiMode === "responses" && p.baseURL);
-      if (responsesProfile) {
-        optimizeBaseURL = responsesProfile.baseURL;
-        optimizeTextModelID = responsesProfile.textModelID;
-        const k = await GetStoredAPIKey(keyringUserFor(responsesProfile.id)).catch(() => "");
-        if (k) optimizeAPIKey = k;
-      }
-    }
-    optimizeAPIKey = optimizeAPIKey.trim();
-    optimizeBaseURL = cleanBaseURL(optimizeBaseURL);
-    optimizeTextModelID = optimizeTextModelID.trim();
-    if (!optimizeAPIKey) {
-      s.pushToast("先填入 API Key", "warn");
+    if (s.isRunning || s.isOptimizingPrompt || s.isInferringPrompt) return;
+    const aiProfile = pickAIProfile(s.profiles, s.aiProfileId, s.activeProfileId);
+    if (!aiProfile) {
+      s.pushToast("先在上游配置里指定一个 Responses 配置作为 AI 渠道", "warn", 5000);
       return;
     }
-    if (!optimizeBaseURL) {
-      s.pushToast("先在上游配置里填入可用于 AI 优化的 Responses API 地址", "warn", 5000);
+    if (aiProfile.allowInsecureConnection && s.kernelRuntimeMode === "remote" && !readRuntimePlatformState().isAndroid) {
+      s.pushToast("允许不安全连接的 AI 渠道需要桌面本地内核", "warn", 5000);
+      return;
+    }
+    const apiKey = (await GetStoredAPIKey(keyringUserFor(aiProfile.id)).catch(() => "")).trim();
+    const baseURL = cleanBaseURL(aiProfile.baseURL);
+    if (!apiKey) {
+      s.pushToast(`AI 渠道「${aiProfile.name}」缺少 API Key`, "warn", 5000);
+      return;
+    }
+    if (!baseURL) {
+      s.pushToast(`AI 渠道「${aiProfile.name}」缺少 BASE_URL`, "warn", 5000);
       return;
     }
     if (!s.prompt.trim()) {
@@ -2158,28 +2259,97 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     set({ isOptimizingPrompt: true, errorMessage: null, errorCanRetry: false, errorRawPath: null });
     try {
       const optimized = await wailsOptimizePrompt({
-        apiKey: optimizeAPIKey,
+        apiKey,
         prompt: s.prompt,
         mode: s.mode,
-        baseURL: optimizeBaseURL,
-        textModelID: optimizeTextModelID,
+        baseURL,
+        textModelID: aiProfile.textModelID.trim(),
         proxyMode: s.proxyMode,
         proxyURL: s.proxyURL,
+        allowInsecureConnection: aiProfile.allowInsecureConnection === true,
         imagePaths: sourcePaths,
         imagePath: "",
+        sourceImages: s.mode === "edit" ? s.sources : undefined,
       } satisfies PromptOptimizeRequest);
       const trimmed = optimized.trim();
-      if (!trimmed) {
-        throw new Error("上游没有返回可用的优化结果");
-      }
+      if (!trimmed) throw new Error("上游没有返回可用的优化结果");
       set({ prompt: trimmed });
-      s.pushToast("已优化提示词", "success");
+      s.pushToast(`已通过「${aiProfile.name}」优化提示词`, "success");
     } catch (e: any) {
       const msg = `优化失败:${e?.message ?? e}`;
       set({ errorMessage: msg, errorCanRetry: false, errorRawPath: null });
       s.pushToast(msg, "error", 6000);
     } finally {
       set({ isOptimizingPrompt: false });
+    }
+  },
+
+  inferPromptFromCanvas: async () => {
+    const s = get();
+    if (s.isRunning || s.isOptimizingPrompt || s.isInferringPrompt) return;
+    if (!s.currentImage) {
+      s.pushToast("画布中还没有可供反推的图片", "warn");
+      return;
+    }
+    const aiProfile = pickAIProfile(s.profiles, s.aiProfileId, s.activeProfileId);
+    if (!aiProfile) {
+      s.pushToast("先在上游配置里指定一个 Responses 配置作为 AI 渠道", "warn", 5000);
+      return;
+    }
+    if (aiProfile.allowInsecureConnection && s.kernelRuntimeMode === "remote" && !readRuntimePlatformState().isAndroid) {
+      s.pushToast("允许不安全连接的 AI 渠道需要桌面本地内核", "warn", 5000);
+      return;
+    }
+    const apiKey = (await GetStoredAPIKey(keyringUserFor(aiProfile.id)).catch(() => "")).trim();
+    const baseURL = cleanBaseURL(aiProfile.baseURL);
+    if (!apiKey || !baseURL) {
+      s.pushToast(`AI 渠道「${aiProfile.name}」配置不完整`, "warn", 5000);
+      return;
+    }
+    set({ isInferringPrompt: true, errorMessage: null, errorCanRetry: false, errorRawPath: null });
+    try {
+      const full = await ensureFullHistoryItem(s.currentImage);
+      if (!full) throw new Error("无法读取画布图片");
+      let imageB64 = full.imageB64?.trim() ?? "";
+      let imageBlob = full.imageBlob ?? null;
+      if (!imageB64 && full.savedPath) {
+        imageB64 = await ReadImageAsBase64(full.savedPath).catch(() => "");
+      }
+      if (!imageB64 && !imageBlob && full.fullUrl) {
+        imageBlob = await fetch(full.fullUrl).then((response) => response.ok ? response.blob() : null).catch(() => null);
+      }
+      if (!full.savedPath && !imageB64 && !imageBlob) {
+        throw new Error("画布图片没有可读取的本地数据");
+      }
+      const inferred = await wailsOptimizePrompt({
+        apiKey,
+        prompt: "",
+        mode: "describe",
+        baseURL,
+        textModelID: aiProfile.textModelID.trim(),
+        proxyMode: s.proxyMode,
+        proxyURL: s.proxyURL,
+        allowInsecureConnection: aiProfile.allowInsecureConnection === true,
+        imagePaths: full.savedPath ? [full.savedPath] : [],
+        imagePath: "",
+        sourceImages: [{
+          path: full.savedPath,
+          name: full.savedPath?.split(/[\\/]/).pop() ?? "canvas-image.png",
+          mimeType: detectImageMimeTypeFromBase64(imageB64) || imageBlob?.type || null,
+          imageB64: imageB64 || undefined,
+          imageBlob,
+        }],
+      } satisfies PromptOptimizeRequest);
+      const trimmed = inferred.trim();
+      if (!trimmed) throw new Error("上游没有返回可用的反推提示词");
+      set({ prompt: trimmed });
+      s.pushToast(`已通过「${aiProfile.name}」反推画布提示词`, "success");
+    } catch (e: any) {
+      const msg = `图片反推失败:${e?.message ?? e}`;
+      set({ errorMessage: msg, errorCanRetry: false, errorRawPath: null });
+      s.pushToast(msg, "error", 6000);
+    } finally {
+      set({ isInferringPrompt: false });
     }
   },
 

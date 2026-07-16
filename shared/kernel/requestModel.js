@@ -29,6 +29,51 @@ export function normalizeBaseURL(raw) {
   return trimmed.replace(/\/v1$/i, "");
 }
 
+export function isVersionedOpenAICompatibilityBaseURL(raw) {
+  try {
+    const parsed = new URL(normalizeBaseURL(raw));
+    return parsed.pathname.replace(/\/+$/, "").toLowerCase().endsWith("/openai");
+  } catch {
+    return false;
+  }
+}
+
+export function openAIAPIEndpoint(baseURL, endpointPath) {
+  const normalized = normalizeBaseURL(baseURL);
+  const path = String(endpointPath || "").trim().replace(/^\/+|\/+$/g, "");
+  if (!path) return normalized;
+  if (isVersionedOpenAICompatibilityBaseURL(normalized)) {
+    return `${normalized}/${path}`;
+  }
+  return `${normalized}/v1/${path}`;
+}
+
+export function isOfficialGoogleGeminiBaseURL(raw) {
+  try {
+    const parsed = new URL(normalizeBaseURL(raw));
+    return parsed.protocol === "https:" && parsed.hostname.toLowerCase() === "generativelanguage.googleapis.com";
+  } catch {
+    return false;
+  }
+}
+
+export function isGoogleNativeNanoBanana2Model(imageModelID) {
+  return normalizeImageModel(imageModelID).toLowerCase() === "gemini-3.1-flash-image";
+}
+
+export function shouldUseGoogleNativeInteractions(baseURL, imageModelID) {
+  return isOfficialGoogleGeminiBaseURL(baseURL) && isGoogleNativeNanoBanana2Model(imageModelID);
+}
+
+export function googleInteractionsEndpoint(baseURL) {
+  if (!isOfficialGoogleGeminiBaseURL(baseURL)) return "";
+  const parsed = new URL(normalizeBaseURL(baseURL));
+  parsed.pathname = "/v1beta/interactions";
+  parsed.search = "";
+  parsed.hash = "";
+  return parsed.toString();
+}
+
 export function normalizeAPIMode(apiMode) {
   return apiMode === "images" ? "images" : "responses";
 }
@@ -280,12 +325,19 @@ export function supportsImageStyle(imageModelID) {
   return classifyImageModel(imageModelID) === "dalle3";
 }
 
+export function isGoogleImageModel(imageModelID) {
+  const normalized = normalizeImageModel(imageModelID).toLowerCase();
+  return normalized.startsWith("gemini-") ||
+    normalized.startsWith("imagen-") ||
+    normalized.includes("nano-banana");
+}
+
 export function shouldSendExtendedImageParameters(requestPolicy) {
   return isCompatRequestPolicy(requestPolicy);
 }
 
 export function shouldUseImagesNewAPICompat(payload) {
-  return payload?.imagesNewAPICompat === true;
+  return payload?.imagesNewAPICompat === true || isGoogleImageModel(payload?.imageModelID);
 }
 
 export function fileNameFromPath(path) {
@@ -367,11 +419,17 @@ export function buildResponsesPayload(payload, sourceDataURLs, options = {}) {
 }
 
 export function buildPromptOptimizePayload(input, sourceDataURLs) {
+  const operation = String(input.mode || "").trim();
+  const isDescribe = operation === "describe";
   let instruction = "Rewrite the user's image prompt into a clearer, more detailed prompt for image generation. Keep the meaning, preserve the requested subject, and only return the improved prompt text. Do not add explanations, labels, markdown, or quotes.";
-  if (String(input.mode || "").trim() === "edit") {
+  let inputText = `Original prompt:\n${normalizePromptText(input.prompt)}`;
+  if (isDescribe) {
+    instruction = "Analyze the attached image and reconstruct a detailed image-generation prompt that could reproduce it. Describe the subject, composition, perspective, lighting, colors, materials, environment, and visual style. Return the prompt in Simplified Chinese. Only return the prompt text; do not add explanations, labels, markdown, or quotes.";
+    inputText = "为所附图片反推一段可用于重新生成相似画面的完整提示词。";
+  } else if (operation === "edit") {
     instruction += " Treat any attached images as reference context and preserve edit intent.";
   }
-  const content = [{ type: "input_text", text: `Original prompt:\n${normalizePromptText(input.prompt)}` }];
+  const content = [{ type: "input_text", text: inputText }];
   for (const dataURL of sourceDataURLs) {
     content.push({ type: "input_image", image_url: dataURL });
   }

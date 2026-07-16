@@ -25,6 +25,7 @@ import {
   Type as TypeIcon,
   Undo2,
   Redo2,
+  Upload,
   X,
 } from "lucide-react";
 import type { ReactNode } from "react";
@@ -71,6 +72,7 @@ export function AndroidCanvasWorkspace() {
     setField,
     undo,
     redo,
+    importMaskImage,
     resetMask,
     clearAnnotations,
     saveCurrentImageAs,
@@ -257,6 +259,7 @@ export function AndroidCanvasWorkspace() {
               brushSize={brushSize}
               onSetBrushMode={(next) => runAction(() => setField("brushMode", next), 5)}
               onSetBrushSize={(next) => setField("brushSize", next)}
+              onImportMask={() => runAction(importMaskImage, 8)}
               onResetMask={() => runAction(resetMask, 6)}
             />
           ) : null}
@@ -466,12 +469,14 @@ function AndroidMaskControls({
   brushSize,
   onSetBrushMode,
   onSetBrushSize,
+  onImportMask,
   onResetMask,
 }: {
   brushMode: BrushMode;
   brushSize: number;
   onSetBrushMode: (value: BrushMode) => void;
   onSetBrushSize: (value: number) => void;
+  onImportMask: () => void;
   onResetMask: () => void;
 }) {
   return (
@@ -482,6 +487,9 @@ function AndroidMaskControls({
         </DockIconButton>
         <DockIconButton title="橡皮" active={brushMode === "erase"} onClick={() => onSetBrushMode("erase")}>
           <Eraser />
+        </DockIconButton>
+        <DockIconButton title="导入蒙版图片" onClick={onImportMask}>
+          <Upload />
         </DockIconButton>
         <button type="button" className="android-canvas-text-action danger" onClick={onResetMask}>
           清空

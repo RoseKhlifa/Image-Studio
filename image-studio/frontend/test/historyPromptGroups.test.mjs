@@ -26,6 +26,7 @@ test("groups history records by normalized prompt while preserving newest repres
   assert.equal(entries[0].group.representative.id, "newest-cat");
   assert.deepEqual(entries[0].group.items.map((entry) => entry.id), ["newest-cat", "older-cat"]);
   assert.equal(entries[0].group.prompt, "Cyber cat portrait");
+  assert.equal(groups.historyPromptGroupIndexSummary(entries[0].group), "#1-#2");
   assert.equal(entries[1].kind, "item");
   assert.equal(entries[1].item.id, "dog");
 });

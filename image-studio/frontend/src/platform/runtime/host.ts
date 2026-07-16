@@ -150,6 +150,7 @@ async function startRemoteJob(options: GenerateOptionsLike): Promise<JobStartedL
         ...options,
         requestPolicy: normalizeRequestPolicy(options.requestPolicy),
         imagesNewAPICompat: options.imagesNewAPICompat === true,
+        allowInsecureConnection: options.allowInsecureConnection === true,
       }, sourceImages: options.sourceImages }, {
         signal: controller.signal,
         onLog: (line) => emitLocalEvent(`log:${jobId}`, line),
@@ -317,7 +318,8 @@ export function OptimizePrompt(options: PromptOptimizeOptionsLike): Promise<stri
     return Promise.reject(new Error("当前宿主不支持强制本地内核"));
   }
   if (getHostCapabilities().promptOptimization) {
-    return invokeService<string>(unsupportedMessage, "OptimizePrompt", options);
+    const { sourceImages: _sourceImages, ...nativeOptions } = options;
+    return invokeService<string>(unsupportedMessage, "OptimizePrompt", nativeOptions);
   }
   const controller = new AbortController();
   return optimizePromptRemote({
@@ -328,8 +330,10 @@ export function OptimizePrompt(options: PromptOptimizeOptionsLike): Promise<stri
     textModelID: options.textModelID,
     proxyMode: options.proxyMode,
     proxyURL: options.proxyURL,
+    allowInsecureConnection: options.allowInsecureConnection === true,
     imagePaths: options.imagePaths,
     imagePath: options.imagePath,
+    sourceImages: options.sourceImages,
   }, controller.signal);
 }
 
@@ -355,6 +359,16 @@ export function OpenImageDialog(): Promise<SelectFileResponseLike> {
   }
   if (canInvokeAndroidMethod("OpenImageDialog")) {
     return invokeAndroid<SelectFileResponseLike>(unsupportedMessage, "OpenImageDialog").catch(() => openImageDialogFallback());
+  }
+  return openImageDialogFallback();
+}
+
+export function OpenMaskImageDialog(): Promise<SelectFileResponseLike> {
+  if (hasServiceMethod("OpenMaskImageDialog")) {
+    return invokeService<SelectFileResponseLike>(unsupportedMessage, "OpenMaskImageDialog").catch(() => OpenImageDialog());
+  }
+  if (canInvokeAndroidMethod("OpenMaskImageDialog")) {
+    return invokeAndroid<SelectFileResponseLike>(unsupportedMessage, "OpenMaskImageDialog").catch(() => OpenImageDialog());
   }
   return openImageDialogFallback();
 }
@@ -748,6 +762,7 @@ export async function probeCurrentUpstream(
   proxyURL = "",
   apiMode = "responses",
   responsesTransport = "sse",
+  allowInsecureConnection = false,
   signal?: AbortSignal,
 ): Promise<ProbeUpstreamResultLike> {
   if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
@@ -758,6 +773,7 @@ export async function probeCurrentUpstream(
     proxyURL,
     apiMode,
     responsesTransport,
+    ...(allowInsecureConnection ? { allowInsecureConnection: true } : {}),
   };
   if (hasServiceMethod("ProbeUpstream")) {
     return invokeService<ProbeUpstreamResultLike>(unsupportedMessage, "ProbeUpstream", options);

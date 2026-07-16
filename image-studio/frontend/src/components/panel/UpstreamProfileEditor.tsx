@@ -168,8 +168,39 @@ export function UpstreamProfileEditor({
         />
         {baseURLError ? <Hint>{baseURLError}</Hint> : null}
         <Hint>
-          只填中转站的站点根地址。应用会按当前 API 形态自动拼接 <code className="font-mono-token">/v1/responses</code>(Responses)或 <code className="font-mono-token">/v1/images/generations</code> / <code className="font-mono-token">/v1/images/edits</code>(Images),<strong>不要</strong>把这些路径手动贴进来。
+          中转站只填站点根地址，应用会自动拼接当前 API 路径；Google 官方 Images 配置填写 <code className="font-mono-token">https://generativelanguage.googleapis.com/v1beta/openai</code>。除该官方兼容地址外，<strong>不要</strong>手动贴入具体接口路径。
         </Hint>
+      </Field>
+
+      <Field label="连接安全">
+        <button
+          type="button"
+          role="switch"
+          aria-checked={draft.allowInsecureConnection === true}
+          onClick={() => onPatchDraft({ allowInsecureConnection: !(draft.allowInsecureConnection === true) })}
+          className={`flex w-full items-center justify-between gap-3 border px-3 py-2.5 text-left text-sm transition-colors ${
+            draft.allowInsecureConnection
+              ? "border-red-500/30 bg-red-500/[0.06] text-red-700 dark:text-red-300"
+              : "border-black/[0.08] bg-[var(--surface)] text-zinc-900 hover:border-[color:var(--accent)]/35 dark:border-white/[0.08] dark:text-zinc-100"
+          } ${usesFluentUI ? "rounded-[10px]" : "rounded-[14px]"}`}
+        >
+          <span className="min-w-0">
+            <span className="block font-medium">允许不安全连接</span>
+            <span className="mt-1 block break-words text-[11px] leading-relaxed text-zinc-500 dark:text-zinc-400">
+              允许远程 <code className="font-mono-token">http://</code>，并忽略 HTTPS / WSS 的自签名、过期或域名不匹配证书。
+            </span>
+          </span>
+          <span
+            className={`inline-flex min-h-[26px] min-w-[58px] shrink-0 items-center justify-center border px-2.5 text-[11px] font-semibold ${
+              draft.allowInsecureConnection
+                ? "border-red-500/25 bg-red-500/10 text-red-700 dark:text-red-300"
+                : "border-black/[0.08] bg-black/[0.04] text-zinc-500 dark:border-white/[0.08] dark:bg-white/[0.05] dark:text-zinc-300"
+            } ${usesFluentUI ? "rounded-[8px]" : "rounded-full"}`}
+          >
+            {draft.allowInsecureConnection ? "已开启" : "已关闭"}
+          </span>
+        </button>
+        <Hint>仅在可信网络中使用。开启后 API Key、提示词和图片可能被窃听或篡改。</Hint>
       </Field>
 
       <Field label={<>API Key <Req /></>}>
@@ -416,7 +447,7 @@ export function UpstreamProfileEditor({
       {draft.apiMode === "images" ? (
         <div className={`${usesAppleUI ? "liquid-glass-panel" : ""} flex items-start gap-2 border border-[color:var(--accent)]/20 bg-[var(--accent-soft)] px-3 py-2 text-[11px] text-[var(--accent)] ${usesFluentUI ? "rounded-[10px]" : "rounded-[14px]"}`}>
           <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          <span className="min-w-0 break-words [overflow-wrap:anywhere]">Images API 路径走标准 <code className="font-mono-token">/v1/images/generations</code> + <code className="font-mono-token">/v1/images/edits</code>,无 SSE 保活,长推理 CF 524 风险更高,但兼容性最广。</span>
+          <span className="min-w-0 break-words [overflow-wrap:anywhere]">Images API 通常走标准 <code className="font-mono-token">/v1/images/generations</code> + <code className="font-mono-token">/v1/images/edits</code>；Google 官方 <code className="font-mono-token">gemini-3.1-flash-image</code> 例外走 Interactions API。两者都没有 SSE 保活。</span>
         </div>
       ) : null}
     </div>

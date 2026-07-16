@@ -5,15 +5,33 @@ import {
   DEFAULT_AUTO_RETRY_COUNT,
   DEFAULT_PARTIAL_IMAGES,
   DEFAULT_REASONING_EFFORT,
+  buildPromptOptimizePayload,
   buildResponsesPayload,
   describeProblem,
   extractInvalidSize,
+  googleInteractionsEndpoint,
   isRetryableRaw,
   normalizeAutoRetryCount,
   normalizeOpenAIImageSize,
+  openAIAPIEndpoint,
   repairSizeForOpenAI,
   normalizePartialImages,
+  shouldUseImagesNewAPICompat,
+  shouldUseGoogleNativeInteractions,
 } from "../../../shared/kernel/requestModel.js";
+
+test("prompt inference payload sends the canvas image and describe-only instructions", () => {
+  const payload = buildPromptOptimizePayload({
+    prompt: "",
+    mode: "describe",
+    textModelID: "gpt-5.5",
+  }, ["data:image/png;base64,YWJj"]);
+  assert.match(payload.instructions, /attached image/);
+  assert.match(payload.instructions, /Simplified Chinese/);
+  assert.equal(payload.input[0].content[0].type, "input_text");
+  assert.equal(payload.input[0].content[1].type, "input_image");
+  assert.equal(payload.input[0].content[1].image_url, "data:image/png;base64,YWJj");
+});
 
 test("Responses payload defaults partial_images to streaming preview count", () => {
   const payload = buildResponsesPayload({
@@ -41,6 +59,48 @@ test("normalizeAutoRetryCount clamps retry count range", () => {
   assert.equal(normalizeAutoRetryCount(-1), DEFAULT_AUTO_RETRY_COUNT);
   assert.equal(normalizeAutoRetryCount(3.8), 3);
   assert.equal(normalizeAutoRetryCount(99), 10);
+});
+
+test("OpenAI endpoint helper preserves Google compatibility base path", () => {
+  assert.equal(
+    openAIAPIEndpoint("https://generativelanguage.googleapis.com/v1beta/openai", "images/generations"),
+    "https://generativelanguage.googleapis.com/v1beta/openai/images/generations",
+  );
+  assert.equal(
+    openAIAPIEndpoint("https://relay.example.com/api/v1", "/images/edits"),
+    "https://relay.example.com/api/v1/images/edits",
+  );
+});
+
+test("Gemini and Imagen image models use non-streaming Images compat mode", () => {
+  assert.equal(shouldUseImagesNewAPICompat({ imageModelID: "gemini-3.1-flash-image" }), true);
+  assert.equal(shouldUseImagesNewAPICompat({ imageModelID: "imagen-4.0-generate-001" }), true);
+  assert.equal(shouldUseImagesNewAPICompat({ imageModelID: "gpt-image-2" }), false);
+});
+
+test("Google native Interactions routing is narrow to the official Nano Banana 2 endpoint", () => {
+  assert.equal(
+    shouldUseGoogleNativeInteractions(
+      "https://generativelanguage.googleapis.com/v1beta/openai",
+      "gemini-3.1-flash-image",
+    ),
+    true,
+  );
+  assert.equal(
+    googleInteractionsEndpoint("https://generativelanguage.googleapis.com/v1beta/openai"),
+    "https://generativelanguage.googleapis.com/v1beta/interactions",
+  );
+  assert.equal(
+    shouldUseGoogleNativeInteractions("https://relay.example.com", "gemini-3.1-flash-image"),
+    false,
+  );
+  assert.equal(
+    shouldUseGoogleNativeInteractions(
+      "https://generativelanguage.googleapis.com/v1beta/openai",
+      "gemini-2.5-flash-image",
+    ),
+    false,
+  );
 });
 
 test("Responses payload uses configured reasoning effort", () => {

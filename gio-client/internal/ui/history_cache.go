@@ -142,14 +142,14 @@ func (a *App) historyItemDisplay(item sharedCompat.HistoryItem) historyItemDispl
 	return display
 }
 
-func historyFilterCacheKey(query string, modeFilter string, dateFilter string, now time.Time) string {
+func historyFilterCacheKey(query string, modeFilter string, dateFilter string, pickedDate string, now time.Time) string {
 	query = normalizeHistorySearchQuery(strings.Join(strings.Fields(query), " "))
-	return query + "\x00" + strings.TrimSpace(modeFilter) + "\x00" + strings.TrimSpace(dateFilter) + "\x00" + now.Format("2006-01-02")
+	return query + "\x00" + strings.TrimSpace(modeFilter) + "\x00" + strings.TrimSpace(dateFilter) + "\x00" + strings.TrimSpace(pickedDate) + "\x00" + now.Format("2006-01-02")
 }
 
 func (a *App) historyPanelData(items []sharedCompat.HistoryItem) historyPanelData {
 	now := time.Now()
-	key := historyFilterCacheKey(a.historyQueryInput.Text(), a.historyModeFilter, a.historyDateFilter, now)
+	key := historyFilterCacheKey(a.historyQueryInput.Text(), a.historyModeFilter, a.historyDateFilter, "", now)
 
 	a.mu.Lock()
 	cached := a.historyPanelCache
@@ -162,7 +162,7 @@ func (a *App) historyPanelData(items []sharedCompat.HistoryItem) historyPanelDat
 	query := normalizeHistorySearchQuery(a.historyQueryInput.Text())
 	modeFilter := strings.TrimSpace(a.historyModeFilter)
 	dateFilter := strings.TrimSpace(a.historyDateFilter)
-	dateKind, dateCutoff := prepareHistoryDateFilter(dateFilter, now)
+	dateKind, dateStart, dateEnd := prepareHistoryDateFilter(dateFilter, "", now)
 	filteredCount := 0
 	hasLatest := false
 	latest := sharedCompat.HistoryItem{}
@@ -182,7 +182,7 @@ func (a *App) historyPanelData(items []sharedCompat.HistoryItem) historyPanelDat
 		if modeFilter != "" && modeFilter != "all" && item.Mode != modeFilter {
 			continue
 		}
-		if !matchHistoryDatePrepared(item.CreatedAt, dateKind, dateCutoff) {
+		if !matchHistoryDatePrepared(item.CreatedAt, dateKind, dateStart, dateEnd) {
 			continue
 		}
 		if !matchHistoryQueryNormalized(*item, query) {
@@ -241,7 +241,8 @@ func (a *App) historyPanelData(items []sharedCompat.HistoryItem) historyPanelDat
 
 func (a *App) historyTimelineData(items []sharedCompat.HistoryItem) historyTimelineData {
 	now := time.Now()
-	key := historyFilterCacheKey(a.historyTimelineQueryInput.Text(), a.historyTimelineModeFilter, a.historyTimelineDateFilter, now)
+	pickedDate := strings.TrimSpace(a.historyTimelinePickedDateInput.Text())
+	key := historyFilterCacheKey(a.historyTimelineQueryInput.Text(), a.historyTimelineModeFilter, a.historyTimelineDateFilter, pickedDate, now)
 
 	a.mu.Lock()
 	cached := a.historyTimelineCache
@@ -255,7 +256,7 @@ func (a *App) historyTimelineData(items []sharedCompat.HistoryItem) historyTimel
 	query := normalizeHistorySearchQuery(a.historyTimelineQueryInput.Text())
 	modeFilter := strings.TrimSpace(a.historyTimelineModeFilter)
 	dateFilter := strings.TrimSpace(a.historyTimelineDateFilter)
-	dateKind, dateCutoff := prepareHistoryDateFilter(dateFilter, now)
+	dateKind, dateStart, dateEnd := prepareHistoryDateFilter(dateFilter, pickedDate, now)
 	capHint := historyPromptGroupingCapacityHint(len(items))
 	groups := make([]historyPromptGroup, 0, capHint)
 	indexByKey := make(map[string]int, capHint)
@@ -267,7 +268,7 @@ func (a *App) historyTimelineData(items []sharedCompat.HistoryItem) historyTimel
 		if modeFilter != "" && modeFilter != "all" && item.Mode != modeFilter {
 			continue
 		}
-		if !matchHistoryDatePrepared(item.CreatedAt, dateKind, dateCutoff) {
+		if !matchHistoryDatePrepared(item.CreatedAt, dateKind, dateStart, dateEnd) {
 			continue
 		}
 		if !matchHistoryQueryNormalized(*item, query) {

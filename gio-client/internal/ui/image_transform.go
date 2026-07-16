@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"bytes"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"image"
@@ -35,6 +37,18 @@ func flipImageFile(path string, horizontal bool) (string, error) {
 		suffix = "fliph"
 	}
 	return saveTransformedImage(flipImage(src, horizontal), path, suffix)
+}
+
+func cropImageFile(path string, rect image.Rectangle) (string, error) {
+	src, err := decodeImageFile(path)
+	if err != nil {
+		return "", err
+	}
+	cropped, err := cropImage(src, rect)
+	if err != nil {
+		return "", err
+	}
+	return saveTransformedImage(cropped, path, "crop")
 }
 
 func rotateImage(src image.Image, deg int) image.Image {
@@ -83,7 +97,32 @@ func flipImage(src image.Image, horizontal bool) image.Image {
 	return dst
 }
 
+func cropImage(src image.Image, rect image.Rectangle) (image.Image, error) {
+	b := src.Bounds()
+	if rect.Empty() {
+		return nil, errors.New("crop rect is empty")
+	}
+	rect = rect.Intersect(image.Rect(0, 0, b.Dx(), b.Dy()))
+	if rect.Empty() || rect.Dx() <= 0 || rect.Dy() <= 0 {
+		return nil, errors.New("crop rect is outside image bounds")
+	}
+	dst := image.NewRGBA(image.Rect(0, 0, rect.Dx(), rect.Dy()))
+	for y := 0; y < rect.Dy(); y++ {
+		for x := 0; x < rect.Dx(); x++ {
+			dst.Set(x, y, src.At(b.Min.X+rect.Min.X+x, b.Min.Y+rect.Min.Y+y))
+		}
+	}
+	return dst, nil
+}
+
 func saveTransformedImage(img image.Image, originalPath string, suffix string) (string, error) {
+	if isVirtualImagePath(originalPath) {
+		encodedPath, err := registerTransformedVirtualImage(img, originalPath, suffix)
+		if err != nil {
+			return "", err
+		}
+		return encodedPath, nil
+	}
 	outputPath, format, err := prepareTransformOutput(originalPath, suffix)
 	if err != nil {
 		return "", err
@@ -105,6 +144,31 @@ func saveTransformedImage(img image.Image, originalPath string, suffix string) (
 		}
 	}
 	return outputPath, nil
+}
+
+func registerTransformedVirtualImage(img image.Image, originalPath string, suffix string) (string, error) {
+	format := "png"
+	if ext := strings.ToLower(filepath.Ext(originalPath)); ext == ".jpg" || ext == ".jpeg" {
+		format = "jpeg"
+	}
+	var buf bytes.Buffer
+	switch format {
+	case "jpeg":
+		if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 92}); err != nil {
+			return "", err
+		}
+	default:
+		if err := png.Encode(&buf, img); err != nil {
+			return "", err
+		}
+	}
+	name := virtualImageDisplayName(originalPath)
+	stem := strings.TrimSuffix(name, filepath.Ext(name))
+	ext := ".png"
+	if format == "jpeg" {
+		ext = ".jpg"
+	}
+	return registerVirtualImage(base64.StdEncoding.EncodeToString(buf.Bytes()), fmt.Sprintf("%s-%s%s", stem, suffix, ext), strings.TrimPrefix(ext, ".")), nil
 }
 
 func prepareTransformOutput(originalPath string, suffix string) (string, string, error) {

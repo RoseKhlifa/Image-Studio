@@ -13,6 +13,9 @@
 - 默认图片会优先走两种 API 形态之一：
   - `responses`：适合多轮、SSE 保活、内置 `image_generation` 工具
   - `images`：适合标准 `/v1/images/generations` 和 `/v1/images/edits`
+- Google 官方 `generativelanguage.googleapis.com` + `gemini-3.1-flash-image` 是窄例外：
+  - 仍由用户选择 `images` 模式，但宿主按官方文档改发 `/v1beta/interactions`
+  - 第三方 relay 不走这条原生路径，继续使用其 OpenAI-compatible Images 端点
 - 默认请求策略是 `openai`：
   - 只发送 OpenAI 官方公开字段
 - 可选请求策略是 `compat`：

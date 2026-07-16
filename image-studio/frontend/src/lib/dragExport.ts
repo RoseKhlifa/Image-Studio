@@ -11,6 +11,14 @@ export type DragExportSpec = {
 
 export const INTERNAL_HISTORY_ITEM_MIME = "application/x-image-studio-history-item";
 
+export function shouldUseNativeFileDrag(
+  targetPlatform: string,
+  savedPath?: string | null,
+): savedPath is string {
+  return (targetPlatform === "macos" || targetPlatform === "windows")
+    && !!savedPath?.trim();
+}
+
 type DragExportHistoryItem = Pick<
   HistoryItem,
   "id" | "mode" | "outputFormat" | "savedPath" | "imageId" | "fullUrl" | "imageB64" | "previewOnly"
@@ -105,7 +113,7 @@ export function buildHistoryItemDragExport(
   const pathURL = fileURLFromPath(item.savedPath);
   const preferredURL = sourceURL?.trim() || "";
   const fullURL = isTransientPreview(item) ? "" : (item.fullUrl || mediaFullURL(item.imageId));
-  const rawURL = fullURL || preferredURL || pathURL || (item.imageB64
+  const rawURL = pathURL || fullURL || preferredURL || (item.imageB64
     ? `data:${detectImageMimeTypeFromBase64(item.imageB64) || "image/png"};base64,${item.imageB64}`
     : "");
   if (!rawURL) return null;

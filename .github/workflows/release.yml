@@ -558,24 +558,40 @@ jobs:
           - id: windows-amd64
             runner: windows-latest
             goos: windows
+            goarch: amd64
+            gui_ldflags: -H=windowsgui
             artifact_suffix: windows-amd64.exe
             exe_ext: .exe
             package_cmd: cp dist/gio/image-studio-gio.exe "$artifact_path"
           - id: windows-arm64
             runner: windows-11-arm
             goos: windows
+            goarch: arm64
+            gui_ldflags: -H=windowsgui
             artifact_suffix: windows-arm64.exe
             exe_ext: .exe
             package_cmd: cp dist/gio/image-studio-gio.exe "$artifact_path"
+          - id: macos-arm64
+            runner: macos-15
+            goos: darwin
+            goarch: arm64
+            gui_ldflags: ""
+            artifact_suffix: macos-arm64.tar.gz
+            exe_ext: ""
+            package_cmd: tar -C dist/gio -czf "$artifact_path" image-studio-gio
           - id: linux-amd64
             runner: ubuntu-24.04
             goos: linux
+            goarch: amd64
+            gui_ldflags: ""
             artifact_suffix: linux-amd64.tar.gz
             exe_ext: ""
             package_cmd: tar -C dist/gio -czf "$artifact_path" image-studio-gio
           - id: linux-arm64
             runner: ubuntu-24.04-arm
             goos: linux
+            goarch: arm64
+            gui_ldflags: ""
             artifact_suffix: linux-arm64.tar.gz
             exe_ext: ""
             package_cmd: tar -C dist/gio -czf "$artifact_path" image-studio-gio
@@ -610,10 +626,13 @@ jobs:
       - name: Build Gio client
         working-directory: gio-client
         shell: bash
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
         run: |
           mkdir -p ../dist/gio
           go build -trimpath \
-            -ldflags "-s -w -X github.com/yuanhua/image-gptcodex/pkg/client.Version=${{ needs.prepare-version.outputs.app_version }}" \
+            -ldflags "-s -w ${{ matrix.gui_ldflags }} -X github.com/yuanhua/image-gptcodex/pkg/client.Version=${{ needs.prepare-version.outputs.app_version }}" \
             -o "../dist/gio/image-studio-gio${{ matrix.exe_ext }}" \
             ./cmd/image-studio-gio
 

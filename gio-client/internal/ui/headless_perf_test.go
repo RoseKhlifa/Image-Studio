@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"bytes"
+	"encoding/base64"
 	"image"
 	"image/color"
 	"image/png"
@@ -30,6 +32,21 @@ func writeHeadlessPerfPNG(t *testing.T, path string, width int, height int, fill
 	if err := png.Encode(file, img); err != nil {
 		t.Fatalf("encode %s: %v", path, err)
 	}
+}
+
+func encodeHeadlessPerfPNGBase64(t *testing.T, width int, height int, fill color.NRGBA) string {
+	t.Helper()
+	img := image.NewNRGBA(image.Rect(0, 0, width, height))
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			img.SetNRGBA(x, y, fill)
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatalf("encode virtual png: %v", err)
+	}
+	return base64.StdEncoding.EncodeToString(buf.Bytes())
 }
 
 func TestBuildHeadlessHistoryPerfReport(t *testing.T) {
@@ -109,5 +126,25 @@ func TestBuildHeadlessResultPerfReport(t *testing.T) {
 	}
 	if report.ColdMs < 0 || report.WarmMs < 0 || report.ReducedColdMs < 0 || report.ReducedWarmMs < 0 || report.ManagedPreviewMs < 0 {
 		t.Fatalf("report=%+v", report)
+	}
+}
+
+func TestBuildHeadlessResultPerfReportSupportsVirtualSavedPath(t *testing.T) {
+	virtualPath := registerVirtualImage(encodeHeadlessPerfPNGBase64(t, 1200, 800, color.NRGBA{R: 0x77, G: 0x55, B: 0x33, A: 0xff}), "remote-result.png", "png")
+	report := BuildHeadlessResultPerfReport([]sharedCompat.HistoryItem{{
+		ID:        "latest-virtual",
+		SavedPath: virtualPath,
+	}})
+	if !report.HasResult {
+		t.Fatalf("report=%+v want HasResult", report)
+	}
+	if report.SavedPath != virtualPath {
+		t.Fatalf("saved_path=%q want %q", report.SavedPath, virtualPath)
+	}
+	if report.OutputWidth <= 0 || report.OutputHeight <= 0 {
+		t.Fatalf("report=%+v want decoded virtual dimensions", report)
+	}
+	if report.ManagedPreviewReady || report.ManagedPreviewPath != "" {
+		t.Fatalf("report=%+v want no managed preview for virtual saved path", report)
 	}
 }

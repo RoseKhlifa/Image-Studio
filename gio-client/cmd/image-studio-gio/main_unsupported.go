@@ -1,4 +1,4 @@
-//go:build !windows && !linux
+//go:build !windows && (!linux || android) && (!darwin || ios)
 
 package main
 
@@ -14,6 +14,6 @@ func main() {
 		}
 		os.Exit(exitCode)
 	}
-	fmt.Fprintln(os.Stderr, "Image Studio Gio client is supported on Windows and Linux.")
+	fmt.Fprintln(os.Stderr, "Image Studio Gio client is supported on Windows, macOS, and Linux.")
 	os.Exit(1)
 }

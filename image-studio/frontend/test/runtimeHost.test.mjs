@@ -181,6 +181,7 @@ async function withPatchedGlobals(setup, run) {
     globalThis.atob = realAtob;
     globalThis.btoa = realBtoa;
     delete globalThis.__probeCalls;
+    delete globalThis.__maskDialogCalls;
   }
 }
 
@@ -650,7 +651,15 @@ test("runtimeHost probes upstream through Wails backend", async () => {
     };
   }, async () => {
     const runtimeHost = await loadRuntimeHost();
-    await runtimeHost.probeCurrentUpstream("https://relay.example.com", "sk-test");
+    await runtimeHost.probeCurrentUpstream(
+      "https://relay.example.com",
+      "sk-test",
+      "system",
+      "",
+      "responses",
+      "sse",
+      true,
+    );
     assert.deepEqual(globalThis.__probeCalls, [
       {
         baseURL: "https://relay.example.com",
@@ -659,6 +668,7 @@ test("runtimeHost probes upstream through Wails backend", async () => {
         proxyURL: "",
         apiMode: "responses",
         responsesTransport: "sse",
+        allowInsecureConnection: true,
       },
     ]);
   });
@@ -781,10 +791,46 @@ test("runtimeHost can use Android invoke host capabilities directly", async () =
     assert.equal(picked.path, "/sdcard/imports/picked.png");
     assert.equal(picked.imageB64, "YWJj");
 
+    const mask = await runtimeHost.OpenMaskImageDialog();
+    assert.equal(mask.path, "/sdcard/imports/picked.png");
+    assert.equal(mask.imageB64, "YWJj");
+
     const imported = await runtimeHost.ImportImageFromB64("YWJj", "source.png");
     assert.equal(imported.path, "/sdcard/imports/source.png");
     assert.equal(await runtimeHost.ReadImageAsBase64(imported.path), "YWJj");
     assert.equal(await runtimeHost.ImportHistoryFromFile(), '{"items":[]}');
+  });
+});
+
+test("runtimeHost uses dedicated desktop mask image dialog when available", async () => {
+  await withPatchedGlobals(async () => {
+    const calls = [];
+    globalThis.window.go = {
+      backend: {
+        Service: {
+          OpenMaskImageDialog: async () => {
+            calls.push("OpenMaskImageDialog");
+            return { path: "/Users/test/mask.png", size: 4, imageB64: "bWFzaw==" };
+          },
+          OpenImageDialog: async () => {
+            calls.push("OpenImageDialog");
+            return { path: "/Users/test/source.png", size: 4 };
+          },
+          ReadImageAsBase64: async () => {
+            calls.push("ReadImageAsBase64");
+            return "c291cmNl";
+          },
+        },
+      },
+    };
+    globalThis.__maskDialogCalls = calls;
+  }, async () => {
+    const runtimeHost = await loadRuntimeHost();
+    const picked = await runtimeHost.OpenMaskImageDialog();
+    assert.equal(picked.path, "/Users/test/mask.png");
+    assert.equal(picked.imageB64, "bWFzaw==");
+    assert.deepEqual(globalThis.__maskDialogCalls, ["OpenMaskImageDialog"]);
+    delete globalThis.__maskDialogCalls;
   });
 });
 

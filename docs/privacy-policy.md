@@ -119,7 +119,13 @@ Image Studio 在本地可能处理以下数据：
 Android 版当前声明的主要权限包括：
 
 - `INTERNET`：用于访问你配置的上游服务
+- `POST_NOTIFICATIONS`：Android 13 及以上首次执行图片任务时，用于显示后台任务通知
+- `FOREGROUND_SERVICE` / `FOREGROUND_SERVICE_DATA_SYNC`：仅在图片生成或编辑请求仍在运行时维持前台数据同步服务
+- `VIBRATE`：用于执行界面中明确触发的短震动反馈
+- `WAKE_LOCK`：在活跃图片任务期间短时保持 CPU 可运行；唤醒锁设有超时，并在最后一个任务结束、失败或取消后释放
 - `READ_EXTERNAL_STORAGE`（仅 Android 12 及以下生效）：用于读取你选择的本地图片
+
+Android 后台服务不会在应用空闲时常驻，也不申请悬浮窗权限。系统强制停止应用、网络中断或设备厂商的省电策略仍可能终止正在运行的任务。
 
 另外，Android 清单当前启用了系统备份能力：
 
