@@ -28,6 +28,7 @@
 # Go
 *.test
 *.out
+.gobin/
 .gocache/
 .gomodcache/
 .gopath/
