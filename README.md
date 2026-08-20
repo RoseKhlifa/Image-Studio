@@ -91,4 +91,4 @@ Image Studio 面向 OpenAI 兼容图像上游，重点解决长时间图像推�
   <a href="https://muxueai.pro"><img src="./docs/picture/%E8%B5%9E%E5%8A%A9-muxueai.pro.png" alt="赞助商 · muxueai.pro" width="720"></a>
 </p>
 
-[![Star History Chart](https://api.star-history.com/svg?repos=RoseKhlifa/Image-Studio&type=Date)](https://star-history.com/#RoseKhlifa/Image-Studio&Date)
+[![Star History Chart](https://star-history.dera.page/svg?repos=RoseKhlifa/Image-Studio&type=Date)](https://star-history.dera.page/#RoseKhlifa/Image-Studio&Date)
