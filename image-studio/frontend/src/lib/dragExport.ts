@@ -15,8 +15,9 @@ export function shouldUseNativeFileDrag(
   targetPlatform: string,
   savedPath?: string | null,
 ): savedPath is string {
+  const path = savedPath?.trim() ?? "";
   return (targetPlatform === "macos" || targetPlatform === "windows")
-    && !!savedPath?.trim();
+    && (/^[a-zA-Z]:[\\/]/.test(path) || path.startsWith("/") || path.startsWith("\\\\"));
 }
 
 type DragExportHistoryItem = Pick<
@@ -73,6 +74,7 @@ function isWindowsDrivePath(path: string): boolean {
 function fileURLFromPath(path?: string): string {
   const trimmed = path?.trim() || "";
   if (!trimmed) return "";
+  if (trimmed.startsWith("memory://")) return "";
   if (trimmed.startsWith("file://")) return trimmed;
   if (/^[a-zA-Z][a-zA-Z\d+\-.]*:/.test(trimmed) && !isWindowsDrivePath(trimmed)) return trimmed;
   const normalized = trimmed.replace(/\\/g, "/");
@@ -194,6 +196,17 @@ export function writeInternalHistoryItemDragData(
   } catch {
     // Best-effort app-internal drag payload.
   }
+}
+
+export function writeHistoryItemFileDragData(
+  dataTransfer: Pick<DataTransfer, "clearData" | "setData"> | null | undefined,
+  item: InternalHistoryDragItem,
+  spec: DragExportSpec,
+): void {
+  // File formats clear the browser's defaults. Add the app payload afterwards
+  // so dropping the same image inside the studio still retains its metadata.
+  writeImageFileDragData(dataTransfer, spec);
+  writeInternalHistoryItemDragData(dataTransfer, item);
 }
 
 export function readInternalHistoryItemDragData(

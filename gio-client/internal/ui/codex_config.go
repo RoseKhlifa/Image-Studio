@@ -305,6 +305,7 @@ func (a *App) applyCodexConfigSync(imported codexAPIConfig) error {
 				continue
 			}
 			state.Profiles[i].Name = name
+			state.Profiles[i].Provider = string(client.ProviderOpenAI)
 			state.Profiles[i].APIMode = string(client.APIModeResponses)
 			state.Profiles[i].RequestPolicy = string(client.RequestPolicyOpenAI)
 			state.Profiles[i].ImagesNewAPICompat = false
@@ -319,6 +320,7 @@ func (a *App) applyCodexConfigSync(imported codexAPIConfig) error {
 			state.Profiles = append(state.Profiles, sharedCompat.UpstreamProfile{
 				ID:                 profileID,
 				Name:               name,
+				Provider:           string(client.ProviderOpenAI),
 				APIMode:            string(client.APIModeResponses),
 				RequestPolicy:      string(client.RequestPolicyOpenAI),
 				ImagesNewAPICompat: false,

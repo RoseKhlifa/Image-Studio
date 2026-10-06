@@ -3,6 +3,7 @@ import {
   CheckCircle2, ImagePlus, ListPlus, ScanSearch, Sparkles,
 } from "lucide-react";
 import { useStudioStore } from "../../state/studioStore";
+import { useStudioFields } from "../../state/useStudioFields";
 import { availableQualityOptions, normalizeQualitySelection, STYLE_CHIPS } from "../../components/panel/panelOptions";
 import type { Mode, SizeValue } from "../../types/domain";
 import { AndroidModeSwitch } from "./AndroidModeSwitch";
@@ -49,7 +50,19 @@ export function AndroidPadComposePanel({
     compareSourceOnCanvas,
     openCustomAspectRatioModal, openCustomSizeModal,
     openUpstreamConfig, submit, cancel, optimizePrompt, inferPromptFromCanvas,
-  } = useStudioStore();
+  } = useStudioFields([
+    "apiKey", "mode", "prompt", "background",
+    "imageStyle", "inputFidelity", "moderation", "negativePrompt",
+    "outputCompression", "size", "quality", "seed",
+    "styleTag", "outputFormat", "userIdentifier", "partialImages",
+    "batchCount", "editAutoAspectResolution", "loopGeneration", "sources",
+    "currentImage", "isRunning", "isOptimizingPrompt", "isInferringPrompt",
+    "apiMode", "requestPolicy", "baseURL", "imageModelID",
+    "profiles", "aiProfileId", "customAspectRatios", "setField",
+    "selectSourceImage", "removeSource", "clearSources", "viewSourceOnCanvas",
+    "compareSourceOnCanvas", "openCustomAspectRatioModal", "openCustomSizeModal", "openUpstreamConfig",
+    "submit", "cancel", "optimizePrompt", "inferPromptFromCanvas",
+  ]);
   const [templateOpen, setTemplateOpen] = useState(false);
   const [templateManagerOpen, setTemplateManagerOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);

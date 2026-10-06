@@ -1,13 +1,13 @@
 import { ClipboardCopy, Folder, RotateCw, Save, Sparkles } from "lucide-react";
 import { useStudioStore } from "../../state/studioStore";
-import { BeginNativeFileDrag, OpenOutputDir } from "../../platform/runtime/host";
+import { OpenOutputDir } from "../../platform/runtime/host";
+import { useNativeFileDrag } from "../common/useNativeFileDrag";
 import { submitShortcutLabel } from "../../platform";
 import { historyPreviewSrc, useBlobURL } from "../../lib/images";
 import {
   buildHistoryItemDragExport,
   shouldUseNativeFileDrag,
-  writeImageFileDragData,
-  writeInternalHistoryItemDragData,
+  writeHistoryItemFileDragData,
 } from "../../lib/dragExport.ts";
 import { androidSaveHint, androidTarget, openOutputLocationForPlatform } from "../../platform/android/bridge";
 import { saveHistoryItemAs } from "../../lib/saveResultImage";
@@ -21,12 +21,13 @@ export function ResultDetailDrawer() {
   const setField = useStudioStore((s) => s.setField);
   const pushToast = useStudioStore((s) => s.pushToast);
   const { usesFluentUI, targetPlatform } = usePlatform();
+  const nativeDrag = useNativeFileDrag(item?.savedPath);
+  const previewURL = useBlobURL(item?.previewBlob ?? item?.imageBlob ?? null, item?.imageB64 ?? null);
 
   if (!item) return null;
   const detail = item;
 
   const created = new Date(detail.createdAt).toLocaleString();
-  const previewURL = useBlobURL(detail.previewBlob ?? detail.imageBlob ?? null, detail.imageB64 ?? null);
   const imageSrc = historyPreviewSrc(detail, previewURL);
   const dragSpec = buildHistoryItemDragExport(detail);
 
@@ -38,14 +39,10 @@ export function ResultDetailDrawer() {
     event.stopPropagation();
     if (shouldUseNativeFileDrag(targetPlatform, detail.savedPath)) {
       event.preventDefault();
-      void BeginNativeFileDrag(detail.savedPath).catch((error) => {
-        console.error("[drag-export] native-file-drag failed", error);
-      });
       return;
     }
     event.dataTransfer.effectAllowed = "copy";
-    writeInternalHistoryItemDragData(event.dataTransfer, detail);
-    writeImageFileDragData(event.dataTransfer, dragSpec);
+    writeHistoryItemFileDragData(event.dataTransfer, detail, dragSpec);
   }
 
   function copy(text: string, label: string) {
@@ -77,7 +74,8 @@ export function ResultDetailDrawer() {
       <div className="grid gap-4 md:grid-cols-[minmax(0,280px)_minmax(0,1fr)]">
         <section className={`platform-card border border-black/[0.05] bg-white/72 p-3 shadow-[var(--shadow-card)] dark:border-white/[0.06] dark:bg-white/[0.03] ${usesFluentUI ? "rounded-[12px]" : "rounded-[18px]"}`}>
           <div
-            draggable={!!dragSpec}
+            draggable={!!dragSpec && !nativeDrag.native}
+            onMouseDown={nativeDrag.onMouseDown}
             onDragStart={handlePreviewDragStart}
             title={dragSpec ? "拖到文件夹复制原图" : undefined}
             className={`flex items-center justify-center border border-black/[0.08] bg-[var(--surface)] p-2 dark:border-white/[0.06] ${usesFluentUI ? "rounded-[10px]" : "rounded-[16px]"}`}
@@ -128,7 +126,7 @@ export function ResultDetailDrawer() {
           {detail.revisedPrompt && (
             <Section
               title={<span className="inline-flex items-center gap-1.5"><Sparkles className="w-3 h-3 text-[var(--accent)]" /> 优化后提示词</span>}
-              hint="Responses API 模式下文本模型可能会重写你的提示词。"
+              hint="Responses API 模式下请求模型可能会重写你的提示词。"
             >
               <PromptBlock highlight>{detail.revisedPrompt}</PromptBlock>
               <div className="flex flex-wrap gap-1.5">

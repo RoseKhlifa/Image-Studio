@@ -42,7 +42,7 @@ test("history cleanup removes persisted references across every workspace", () =
     history: [current, pending, compare],
     historyHasMore: true,
     historyLoading: true,
-    historyCursorBeforeDayStart: 123,
+    historyCursor: { createdAt: 123, id: "last-loaded" },
     currentImage: current,
     batchResults: [current, pending],
     resultGridOpen: true,
@@ -72,7 +72,7 @@ test("history cleanup removes persisted references across every workspace", () =
   assert.deepEqual(patch.history, [pending]);
   assert.equal(patch.historyHasMore, false);
   assert.equal(patch.historyLoading, false);
-  assert.equal(patch.historyCursorBeforeDayStart, null);
+  assert.equal(patch.historyCursor, null);
   assert.equal(patch.currentImage, null);
   assert.deepEqual(patch.batchResults, [pending]);
   assert.equal(patch.resultGridOpen, false);

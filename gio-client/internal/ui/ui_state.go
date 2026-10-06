@@ -1395,6 +1395,17 @@ func normalizeProfileAPIMode(mode string) string {
 	return string(client.APIModeResponses)
 }
 
+func normalizeProfileProvider(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case string(client.ProviderGoogle):
+		return string(client.ProviderGoogle)
+	case string(client.ProviderGrok):
+		return string(client.ProviderGrok)
+	default:
+		return string(client.ProviderOpenAI)
+	}
+}
+
 func normalizeProfilePolicy(policy string) string {
 	if strings.TrimSpace(policy) == string(client.RequestPolicyCompat) {
 		return string(client.RequestPolicyCompat)
@@ -1447,7 +1458,11 @@ func (a *App) settingsDraftReady() bool {
 func (a *App) applySettingsProfileDraft(state sharedCompat.State, profile sharedCompat.UpstreamProfile) {
 	a.settingsSelectedProfileID = profile.ID
 	a.profileNameInput.SetText(strings.TrimSpace(profile.Name))
+	a.provider = normalizeProfileProvider(profile.Provider)
 	a.api = normalizeProfileAPIMode(profile.APIMode)
+	if a.provider != string(client.ProviderOpenAI) {
+		a.api = string(client.APIModeImages)
+	}
 	a.policy = normalizeProfilePolicy(profile.RequestPolicy)
 	a.responsesTransport = normalizeProfileResponsesTransport(profile.ResponsesTransport)
 	a.reasoningEffort = normalizeReasoningEffort(profile.ReasoningEffort)
@@ -1584,6 +1599,7 @@ func (a *App) loadSettingsProfileDraft(profileID string) error {
 			a.protectStreamPreview = kernel.DefaultConfig().ProtectStreamPreview
 		}
 		a.imagesNewAPICompat = false
+		a.provider = string(client.ProviderOpenAI)
 		a.api = string(client.APIModeResponses)
 		a.policy = string(client.RequestPolicyOpenAI)
 		a.apiKeyVisible = false
@@ -1678,7 +1694,11 @@ func (a *App) saveSettingsSelection() error {
 				}
 			}
 			state.Profiles[i].Name = name
+			state.Profiles[i].Provider = normalizeProfileProvider(a.provider)
 			state.Profiles[i].APIMode = normalizeProfileAPIMode(a.api)
+			if state.Profiles[i].Provider != string(client.ProviderOpenAI) {
+				state.Profiles[i].APIMode = string(client.APIModeImages)
+			}
 			state.Profiles[i].RequestPolicy = normalizeProfilePolicy(a.policy)
 			state.Profiles[i].ResponsesTransport = normalizeProfileResponsesTransport(a.responsesTransport)
 			state.Profiles[i].ReasoningEffort = normalizeReasoningEffort(a.reasoningEffort)
@@ -1802,6 +1822,7 @@ func (a *App) createSettingsProfile(apiMode string) error {
 		profile = sharedCompat.UpstreamProfile{
 			ID:                 nextProfileID(state.Profiles, now),
 			Name:               nextProfileName(state.Profiles),
+			Provider:           string(client.ProviderOpenAI),
 			APIMode:            normalizeProfileAPIMode(apiMode),
 			ResponsesTransport: string(client.ResponsesTransportSSE),
 			RequestPolicy:      string(client.RequestPolicyOpenAI),
@@ -2070,6 +2091,7 @@ func (a *App) createBlankProfileWithMode(apiMode string) {
 		profile = sharedCompat.UpstreamProfile{
 			ID:                 nextProfileID(state.Profiles, now),
 			Name:               nextProfileName(state.Profiles),
+			Provider:           string(client.ProviderOpenAI),
 			APIMode:            apiMode,
 			ResponsesTransport: string(client.ResponsesTransportSSE),
 			RequestPolicy:      string(client.RequestPolicyOpenAI),

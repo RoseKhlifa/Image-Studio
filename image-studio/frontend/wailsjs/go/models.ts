@@ -23,6 +23,7 @@ export namespace backend {
 	    textModelID: string;
 	    imageModelID: string;
 	    reasoningEffort: string;
+	    provider: string;
 	    proxyMode: string;
 	    proxyURL: string;
 	    apiMode: string;
@@ -65,6 +66,7 @@ export namespace backend {
 	        this.textModelID = source["textModelID"];
 	        this.imageModelID = source["imageModelID"];
 	        this.reasoningEffort = source["reasoningEffort"];
+	        this.provider = source["provider"];
 	        this.proxyMode = source["proxyMode"];
 	        this.proxyURL = source["proxyURL"];
 	        this.apiMode = source["apiMode"];
@@ -215,6 +217,7 @@ export namespace backend {
 	    baseURL: string;
 	    proxyMode: string;
 	    proxyURL: string;
+	    provider: string;
 	    apiMode: string;
 	    responsesTransport: string;
 	    allowInsecureConnection: boolean;
@@ -229,6 +232,7 @@ export namespace backend {
 	        this.baseURL = source["baseURL"];
 	        this.proxyMode = source["proxyMode"];
 	        this.proxyURL = source["proxyURL"];
+	        this.provider = source["provider"];
 	        this.apiMode = source["apiMode"];
 	        this.responsesTransport = source["responsesTransport"];
 	        this.allowInsecureConnection = source["allowInsecureConnection"];

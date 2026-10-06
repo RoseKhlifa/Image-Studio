@@ -25,7 +25,7 @@ func decodeMaskImage(t *testing.T, rawB64 string) image.Image {
 	return img
 }
 
-func TestBuildCanvasMaskB64ReturnsPNGWhenPaintStrokePresent(t *testing.T) {
+func TestBuildCanvasMaskB64UsesAlphaMaskSemantics(t *testing.T) {
 	maskB64 := buildCanvasMaskB64([]canvasMaskStroke{{
 		Points:   []f32.Point{f32.Pt(0.1, 0.1), f32.Pt(0.9, 0.9)},
 		SizeNorm: 0.1,
@@ -38,17 +38,36 @@ func TestBuildCanvasMaskB64ReturnsPNGWhenPaintStrokePresent(t *testing.T) {
 	if img.Bounds().Dx() != 64 || img.Bounds().Dy() != 64 {
 		t.Fatalf("mask bounds=%v want 64x64", img.Bounds())
 	}
-	hasWhite := false
-	for y := 0; y < img.Bounds().Dy() && !hasWhite; y++ {
-		for x := 0; x < img.Bounds().Dx(); x++ {
-			if color.GrayModel.Convert(img.At(x, y)).(color.Gray).Y > 0 {
-				hasWhite = true
-				break
-			}
-		}
+	if alpha := color.NRGBAModel.Convert(img.At(32, 32)).(color.NRGBA).A; alpha != 0 {
+		t.Fatalf("painted pixel alpha=%d want transparent editable pixel", alpha)
 	}
-	if !hasWhite {
-		t.Fatal("mask should contain white painted area")
+	if alpha := color.NRGBAModel.Convert(img.At(63, 0)).(color.NRGBA).A; alpha != 0xff {
+		t.Fatalf("unpainted pixel alpha=%d want opaque protected pixel", alpha)
+	}
+}
+
+func TestBuildCanvasMaskB64EraseRestoresProtection(t *testing.T) {
+	maskB64 := buildCanvasMaskB64([]canvasMaskStroke{
+		{Points: []f32.Point{f32.Pt(0.5, 0.5)}, SizeNorm: 0.5},
+		{Points: []f32.Point{f32.Pt(0.5, 0.5)}, SizeNorm: 0.2, Erase: true},
+	}, image.Pt(20, 20))
+	img := decodeMaskImage(t, maskB64)
+	if alpha := color.NRGBAModel.Convert(img.At(10, 10)).(color.NRGBA).A; alpha != 0xff {
+		t.Fatalf("erased center alpha=%d want opaque protected pixel", alpha)
+	}
+	if alpha := color.NRGBAModel.Convert(img.At(6, 10)).(color.NRGBA).A; alpha != 0 {
+		t.Fatalf("painted ring alpha=%d want transparent editable pixel", alpha)
+	}
+}
+
+func TestBuildCanvasMaskB64ReturnsEmptyWithoutEditablePixels(t *testing.T) {
+	maskB64 := buildCanvasMaskB64([]canvasMaskStroke{{
+		Points:   []f32.Point{f32.Pt(0.5, 0.5)},
+		SizeNorm: 0.2,
+		Erase:    true,
+	}}, image.Pt(20, 20))
+	if maskB64 != "" {
+		t.Fatal("erase-only mask should not submit a fully protected image")
 	}
 }
 

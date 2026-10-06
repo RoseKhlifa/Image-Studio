@@ -5,8 +5,9 @@ import {
   type RequestPolicy,
   type ResponsesTransport,
   type UpstreamProfile,
+  type UpstreamProvider,
 } from "../../types/domain";
-import { requestPolicyLabel } from "../../lib/profiles";
+import { requestPolicyLabel, upstreamProviderLabel } from "../../lib/profiles";
 import { usePlatform } from "../../platform/context";
 import {
   formatUpstreamModelLabel,
@@ -59,6 +60,11 @@ export function UpstreamProfileEditor({
   onSaveAndClose: () => void | Promise<void>;
 }) {
   const { isAndroidPhone, usesFluentUI } = usePlatform();
+  const providerOptions = [
+    { id: "openai" as UpstreamProvider, title: "OpenAI / 兼容中转", sub: "Responses 与 Images API" },
+    { id: "google" as UpstreamProvider, title: "Google Gemini", sub: "原生 Interactions API" },
+    { id: "grok" as UpstreamProvider, title: "Grok / xAI", sub: "原生 Imagine API" },
+  ];
   const apiModeOptions = [
     { id: "responses" as APIMode, title: "Responses API", sub: "SSE 保活(CF 超时推荐)" },
     { id: "images" as APIMode, title: "Images API", sub: "标准 generations / edits" },
@@ -75,6 +81,9 @@ export function UpstreamProfileEditor({
   const selectedRequestPolicy = requestPolicyOptions.find((option) => option.id === draft.requestPolicy) ?? requestPolicyOptions[0];
   const selectedReasoningEffort = REASONING_EFFORT_OPTIONS.find((option) => option.value === draft.reasoningEffort) ?? REASONING_EFFORT_OPTIONS[0];
   const preferredModels = modelCatalog ? preferredModelsForAPIMode(modelCatalog, draft.apiMode) : null;
+  const requestModels = modelCatalog
+    ? (draft.apiMode === "responses" ? modelCatalog.all : preferredModels?.image ?? [])
+    : [];
   const fallbackCandidates = profiles.filter((profile) => profile.id !== draft.id && profile.baseURL.trim());
 
   return (
@@ -99,7 +108,27 @@ export function UpstreamProfileEditor({
         />
       </Field>
 
-      <Field
+      <Field label="服务商请求方式">
+        <div className={`grid gap-2 ${isAndroidPhone ? "grid-cols-1" : "grid-cols-3"}`}>
+          {providerOptions.map((option) => (
+            <OptionCard
+              key={option.id}
+              active={draft.provider === option.id}
+              usesFluentUI={usesFluentUI}
+              title={option.title}
+              sub={option.sub}
+              onClick={() => onPatchDraft({
+                provider: option.id,
+                apiMode: option.id === "openai" ? draft.apiMode : "images",
+                imageModelID: draft.imageModelID || (option.id === "google" ? "gemini-3.1-flash-image" : option.id === "grok" ? "grok-imagine-image" : ""),
+              })}
+            />
+          ))}
+        </div>
+        <Hint>服务商决定请求路径、认证头和请求体；第三方 OpenAI 兼容中转请选择 OpenAI / 兼容中转。</Hint>
+      </Field>
+
+      {draft.provider === "openai" ? <Field
         label={(
           <span className="flex items-center justify-between gap-3">
             <span>API 形态</span>
@@ -124,12 +153,18 @@ export function UpstreamProfileEditor({
         </div>
         <Hint>
           {draft.apiMode === "responses"
-            ? "需要 key 绑定到「拥有 gpt-5.5 模型的分组」。SSE 保活可防 Cloudflare 524。"
+            ? "需要 key 拥有所填请求模型的权限。SSE 保活可防 Cloudflare 524。"
             : "使用标准 Images API,key 用 image-2 / image API 分组,兼容性最广。"}
         </Hint>
-      </Field>
+      </Field> : (
+        <Field label="请求协议">
+          <div className={`border border-[color:var(--accent)]/20 bg-[var(--accent-soft)] px-3 py-2.5 text-sm text-[var(--accent)] ${usesFluentUI ? "rounded-[10px]" : "rounded-[14px]"}`}>
+            {draft.provider === "google" ? "Google Interactions API" : "Grok Imagine Images API"}
+          </div>
+        </Field>
+      )}
 
-      <Field
+      {draft.provider === "openai" ? <Field
         label={(
           <span className="flex items-center justify-between gap-3">
             <span>参数策略</span>
@@ -155,7 +190,7 @@ export function UpstreamProfileEditor({
         <Hint>
           `OpenAI 标准` 更适合直连 OpenAI 或严格兼容实现。`兼容中转扩展` 会额外发送一些 relay 常见扩展字段。
         </Hint>
-      </Field>
+      </Field> : null}
 
       <Field label={<>上游 BASE_URL <Req /></>}>
         <input
@@ -167,8 +202,11 @@ export function UpstreamProfileEditor({
           className={`focus-ring w-full min-w-0 border border-black/[0.08] bg-[var(--surface)] px-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 dark:border-white/[0.08] dark:text-zinc-100 dark:placeholder:text-zinc-500 font-mono-token ${usesFluentUI ? "rounded-[10px]" : "rounded-[14px]"}`}
         />
         {baseURLError ? <Hint>{baseURLError}</Hint> : null}
-        <Hint>
-          中转站只填站点根地址，应用会自动拼接当前 API 路径；Google 官方 Images 配置填写 <code className="font-mono-token">https://generativelanguage.googleapis.com/v1beta/openai</code>。除该官方兼容地址外，<strong>不要</strong>手动贴入具体接口路径。
+        <Hint>{draft.provider === "google"
+          ? <>Google 官方填写 <code className="font-mono-token">https://generativelanguage.googleapis.com</code>，应用自动拼接 <code className="font-mono-token">/v1beta/interactions</code>。</>
+          : draft.provider === "grok"
+            ? <>xAI 官方填写 <code className="font-mono-token">https://api.x.ai</code>，应用自动拼接 Imagine 请求路径。</>
+            : <>中转站只填站点根地址，应用会自动拼接当前 OpenAI API 路径，不要手动贴入具体接口路径。</>}
         </Hint>
       </Field>
 
@@ -246,12 +284,12 @@ export function UpstreamProfileEditor({
           {loadingModels ? "拉取中..." : "拉取并解析上游模型"}
         </button>
         <Hint>
-          通过宿主侧请求 <code className="font-mono-token">/v1/models</code> 获取模型列表，避免浏览器跨域或 WebView 差异影响结果。
+          通过宿主侧请求 {draft.provider === "google" ? <code className="font-mono-token">/v1beta/models</code> : <code className="font-mono-token">/v1/models</code>} 获取模型列表，避免浏览器跨域或 WebView 差异影响结果。
         </Hint>
         {modelCatalogError ? <Hint>{modelCatalogError}</Hint> : null}
       </Field>
 
-      {draft.apiMode === "responses" ? (
+      {draft.provider === "openai" && draft.apiMode === "responses" ? (
         <>
           <Field
             label={(
@@ -283,7 +321,7 @@ export function UpstreamProfileEditor({
             </Hint>
           </Field>
 
-          <Field label="文本模型 ID">
+          <Field label="请求模型 ID">
             <input
               type="text"
               value={draft.textModelID}
@@ -292,10 +330,10 @@ export function UpstreamProfileEditor({
               spellCheck={false}
               className={`focus-ring w-full min-w-0 border border-black/[0.08] bg-[var(--surface)] px-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 dark:border-white/[0.08] dark:text-zinc-100 dark:placeholder:text-zinc-500 font-mono-token ${usesFluentUI ? "rounded-[10px]" : "rounded-[14px]"}`}
             />
-            {preferredModels && preferredModels.text.length > 0 ? (
+            {requestModels.length > 0 ? (
               <ModelSuggestions
-                title="推荐文本模型"
-                models={preferredModels.text}
+                title="推荐请求模型"
+                models={requestModels}
                 selectedID={draft.textModelID}
                 usesFluentUI={usesFluentUI}
                 onSelect={(id) => onPatchDraft({ textModelID: id })}
@@ -332,25 +370,27 @@ export function UpstreamProfileEditor({
         </>
       ) : null}
 
-      <Field label="图像模型 ID">
-        <input
-          type="text"
-          value={draft.imageModelID}
-          placeholder="留空=默认 gpt-image-2"
-          onChange={(e) => onPatchDraft({ imageModelID: e.target.value })}
-          spellCheck={false}
-          className={`focus-ring w-full min-w-0 border border-black/[0.08] bg-[var(--surface)] px-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 dark:border-white/[0.08] dark:text-zinc-100 dark:placeholder:text-zinc-500 font-mono-token ${usesFluentUI ? "rounded-[10px]" : "rounded-[14px]"}`}
-        />
-        {preferredModels && preferredModels.image.length > 0 ? (
-          <ModelSuggestions
-            title="推荐图像模型"
-            models={preferredModels.image}
-            selectedID={draft.imageModelID}
-            usesFluentUI={usesFluentUI}
-            onSelect={(id) => onPatchDraft({ imageModelID: id })}
+      {draft.apiMode === "images" ? (
+        <Field label="请求模型 ID">
+          <input
+            type="text"
+            value={draft.imageModelID}
+            placeholder={draft.provider === "google" ? "例如 gemini-3.1-flash-image" : draft.provider === "grok" ? "例如 grok-imagine-image" : "留空=默认 gpt-image-2"}
+            onChange={(e) => onPatchDraft({ imageModelID: e.target.value })}
+            spellCheck={false}
+            className={`focus-ring w-full min-w-0 border border-black/[0.08] bg-[var(--surface)] px-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 dark:border-white/[0.08] dark:text-zinc-100 dark:placeholder:text-zinc-500 font-mono-token ${usesFluentUI ? "rounded-[10px]" : "rounded-[14px]"}`}
           />
-        ) : null}
-      </Field>
+          {requestModels.length > 0 ? (
+            <ModelSuggestions
+              title="推荐请求模型"
+              models={requestModels}
+              selectedID={draft.imageModelID}
+              usesFluentUI={usesFluentUI}
+              onSelect={(id) => onPatchDraft({ imageModelID: id })}
+            />
+          ) : null}
+        </Field>
+      ) : null}
 
       <Field label="并发数量限制">
         <input
@@ -374,7 +414,7 @@ export function UpstreamProfileEditor({
           <option value="">不自动切备用上游</option>
           {fallbackCandidates.map((profile) => (
             <option key={profile.id} value={profile.id}>
-              {profile.name} · {profile.apiMode === "responses" ? "Responses" : "Images"}
+              {profile.name} · {upstreamProviderLabel(profile.provider ?? "openai")}
             </option>
           ))}
         </select>
@@ -383,7 +423,7 @@ export function UpstreamProfileEditor({
         </Hint>
       </Field>
 
-      {draft.apiMode === "images" ? (
+      {draft.provider === "openai" && draft.apiMode === "images" ? (
         <Field label="Images API 中转兼容">
           <button
             type="button"
@@ -447,7 +487,13 @@ export function UpstreamProfileEditor({
       {draft.apiMode === "images" ? (
         <div className={`${usesAppleUI ? "liquid-glass-panel" : ""} flex items-start gap-2 border border-[color:var(--accent)]/20 bg-[var(--accent-soft)] px-3 py-2 text-[11px] text-[var(--accent)] ${usesFluentUI ? "rounded-[10px]" : "rounded-[14px]"}`}>
           <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          <span className="min-w-0 break-words [overflow-wrap:anywhere]">Images API 通常走标准 <code className="font-mono-token">/v1/images/generations</code> + <code className="font-mono-token">/v1/images/edits</code>；Google 官方 <code className="font-mono-token">gemini-3.1-flash-image</code> 例外走 Interactions API。两者都没有 SSE 保活。</span>
+          <span className="min-w-0 break-words [overflow-wrap:anywhere]">
+            {draft.provider === "google"
+              ? <>Google 原生请求走 <code className="font-mono-token">/v1beta/interactions</code>，认证使用 <code className="font-mono-token">x-goog-api-key</code>。</>
+              : draft.provider === "grok"
+                ? <>Grok 文生图走 <code className="font-mono-token">/v1/images/generations</code>，图生图走 JSON 格式的 <code className="font-mono-token">/v1/images/edits</code>。</>
+                : <>OpenAI Images API 走 <code className="font-mono-token">/v1/images/generations</code> 与 multipart <code className="font-mono-token">/v1/images/edits</code>。</>}
+          </span>
         </div>
       ) : null}
     </div>

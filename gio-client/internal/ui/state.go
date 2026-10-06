@@ -69,6 +69,7 @@ func (a *App) finishWithError(err error, rawPath string) {
 	}
 	a.appendLogLocked("失败: " + err.Error())
 	a.mu.Unlock()
+	a.notifyRunFailure(err.Error())
 	a.invalidateNow()
 }
 

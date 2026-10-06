@@ -1,6 +1,6 @@
 import {
-  Brush, Crop, Eraser, FlipHorizontal, FlipVertical, Hand,
-  Info, MoveRight, Pencil, RotateCcw, RotateCw, Save, Square,
+  Brush, Contrast, Crop, Eraser, Eye, EyeOff, FlipHorizontal, FlipVertical, Hand,
+  Info, MoveRight, PaintBucket, Pencil, RotateCcw, RotateCw, Save, Square,
   Trash2, Maximize, Minimize, Type as TypeIcon, Upload,
 } from "lucide-react";
 import { ANNOTATION_COLORS } from "../../types/domain";
@@ -19,6 +19,8 @@ import {
 export function BaseToolSection({
   hasImage,
   tool,
+  maskDisabled = false,
+  maskDisabledTitle,
   undoDisabled,
   redoDisabled,
   onSetTool,
@@ -27,6 +29,8 @@ export function BaseToolSection({
 }: {
   hasImage: boolean;
   tool: "pan" | "mask" | "annotate";
+  maskDisabled?: boolean;
+  maskDisabledTitle?: string;
   undoDisabled: boolean;
   redoDisabled: boolean;
   onSetTool: (tool: "pan" | "mask" | "annotate") => void;
@@ -40,7 +44,7 @@ export function BaseToolSection({
       <ToolBtn active={tool === "pan"} disabled={!hasImage} onClick={() => onSetTool("pan")} title="拖动 / 缩放 (1)" label={isMac ? "拖动" : undefined}>
         <Hand className="w-3.5 h-3.5" />
       </ToolBtn>
-      <ToolBtn active={tool === "mask"} disabled={!hasImage} onClick={() => onSetTool("mask")} title="蒙版画笔 (2)" label={isMac ? "蒙版" : undefined}>
+      <ToolBtn active={tool === "mask"} disabled={!hasImage || maskDisabled} onClick={() => onSetTool("mask")} title={maskDisabledTitle || "蒙版画笔 (2)"} label={isMac ? "蒙版" : undefined}>
         <Brush className="w-3.5 h-3.5" />
       </ToolBtn>
       <ToolBtn active={tool === "annotate"} disabled={!hasImage} onClick={() => onSetTool("annotate")} title="画框标注 (3)" label={isMac ? "标注" : undefined}>
@@ -62,10 +66,17 @@ export function ContextualSection({
   showViewReset,
   brushMode,
   brushSize,
+  maskVisible,
+  maskOpacity,
+  hasMask,
   annotationKind,
   annotationColor,
   onSetBrushMode,
   onSetBrushSize,
+  onToggleMaskVisible,
+  onSetMaskOpacity,
+  onFillMask,
+  onInvertMask,
   onImportMask,
   onResetMask,
   onSetAnnotationKind,
@@ -78,10 +89,17 @@ export function ContextualSection({
   showViewReset: boolean;
   brushMode: "paint" | "erase";
   brushSize: number;
+  maskVisible: boolean;
+  maskOpacity: number;
+  hasMask: boolean;
   annotationKind: "rect" | "arrow" | "freehand" | "text";
   annotationColor: string;
   onSetBrushMode: (mode: "paint" | "erase") => void;
   onSetBrushSize: (size: number) => void;
+  onToggleMaskVisible: () => void;
+  onSetMaskOpacity: (opacity: number) => void;
+  onFillMask: () => void | Promise<void>;
+  onInvertMask: () => void | Promise<void>;
   onImportMask: () => void | Promise<void>;
   onResetMask: () => void;
   onSetAnnotationKind: (kind: "rect" | "arrow" | "freehand" | "text") => void;
@@ -103,6 +121,15 @@ export function ContextualSection({
           <ToolBtn onClick={() => void onImportMask()} title="导入蒙版图片" label={isMac ? "导入" : undefined}>
             <Upload className="w-3.5 h-3.5" />
           </ToolBtn>
+          <ToolBtn onClick={() => void onFillMask()} title="全选整张图为可编辑区域" label={isMac ? "全选" : undefined}>
+            <PaintBucket className="w-3.5 h-3.5" />
+          </ToolBtn>
+          <ToolBtn onClick={() => void onInvertMask()} title="反选可编辑区域" label={isMac ? "反选" : undefined}>
+            <Contrast className="w-3.5 h-3.5" />
+          </ToolBtn>
+          <ToolBtn active={maskVisible} disabled={!hasMask} onClick={onToggleMaskVisible} title={maskVisible ? "隐藏蒙版叠加" : "显示蒙版叠加"} label={isMac ? (maskVisible ? "隐藏" : "显示") : undefined}>
+            {maskVisible ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+          </ToolBtn>
           <span className="ml-1 text-[11px] text-zinc-500">大小</span>
           <input
             type="range"
@@ -113,7 +140,18 @@ export function ContextualSection({
             className="w-20 accent-[var(--accent)]"
           />
           <span className="text-[11px] text-zinc-500 min-w-[24px] tabular-nums">{brushSize}</span>
-          <ToolbarTextButton onClick={onResetMask} tone="danger">
+          <span className="ml-1 text-[11px] text-zinc-500">叠加</span>
+          <input
+            type="range"
+            min={10}
+            max={90}
+            value={Math.round(maskOpacity * 100)}
+            disabled={!hasMask}
+            onChange={(event) => onSetMaskOpacity(Number(event.target.value) / 100)}
+            className="w-16 accent-[var(--accent)] disabled:opacity-40"
+          />
+          <span className="text-[11px] text-zinc-500 min-w-[30px] tabular-nums">{Math.round(maskOpacity * 100)}%</span>
+          <ToolbarTextButton disabled={!hasMask} onClick={onResetMask} tone="danger">
             清空
           </ToolbarTextButton>
         </>

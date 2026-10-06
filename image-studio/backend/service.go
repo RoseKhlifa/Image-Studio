@@ -35,6 +35,8 @@ type Service struct {
 	ctx context.Context
 
 	mu                        sync.Mutex
+	nativeDragMu              sync.Mutex
+	nativeDragActive          bool
 	jobs                      map[string]*job
 	runningByAPIMode          map[string]int
 	outputDir                 string // 用户自定义输出目录;空时回退到 defaultOutputDir()
@@ -378,6 +380,7 @@ func (s *Service) runJob(ctx context.Context, jobID string, opts GenerateOptions
 		TextModelID:             opts.TextModelID,
 		ImageModelID:            opts.ImageModelID,
 		ReasoningEffort:         opts.ReasoningEffort,
+		Provider:                client.Provider(strings.TrimSpace(opts.Provider)),
 		Proxy:                   client.ProxyConfig{Mode: opts.ProxyMode, URL: opts.ProxyURL},
 		APIMode:                 apiMode,
 		ResponsesTransport:      client.ResponsesTransport(strings.TrimSpace(opts.ResponsesTransport)),
@@ -418,6 +421,7 @@ func (s *Service) runJob(ctx context.Context, jobID string, opts GenerateOptions
 			TextModelID:             strings.TrimSpace(opts.FallbackProfile.TextModelID),
 			ImageModelID:            strings.TrimSpace(opts.FallbackProfile.ImageModelID),
 			ReasoningEffort:         strings.TrimSpace(opts.FallbackProfile.ReasoningEffort),
+			Provider:                client.Provider(strings.TrimSpace(opts.FallbackProfile.Provider)),
 			Proxy:                   client.ProxyConfig{Mode: opts.ProxyMode, URL: opts.ProxyURL},
 			APIMode:                 fallbackAPIMode,
 			ResponsesTransport:      client.ResponsesTransport(strings.TrimSpace(opts.FallbackProfile.ResponsesTransport)),
@@ -431,7 +435,14 @@ func (s *Service) runJob(ctx context.Context, jobID string, opts GenerateOptions
 			PartialImages:           clientOpts.PartialImages,
 		}
 	}
+	originalEditSourcePath := ""
 	if mode == client.ModeEdit {
+		for _, candidate := range opts.collectPaths() {
+			if strings.TrimSpace(candidate) != "" {
+				originalEditSourcePath = strings.TrimSpace(candidate)
+				break
+			}
+		}
 		paths, cleanup, prepErr := prepareUploadSourcePaths(opts.collectPaths())
 		if prepErr != nil {
 			s.emitError(jobID, prepErr)
@@ -441,6 +452,17 @@ func (s *Service) runJob(ctx context.Context, jobID string, opts GenerateOptions
 		clientOpts.ImagePaths = paths
 		if fallbackClientOpts != nil {
 			fallbackClientOpts.ImagePaths = paths
+		}
+		if strings.TrimSpace(opts.MaskB64) != "" {
+			normalizedMask, maskErr := normalizeEditMaskB64(opts.MaskB64, originalEditSourcePath)
+			if maskErr != nil {
+				s.emitError(jobID, maskErr)
+				return
+			}
+			clientOpts.MaskB64 = normalizedMask
+			if fallbackClientOpts != nil {
+				fallbackClientOpts.MaskB64 = normalizedMask
+			}
 		}
 		// Responses API 仍需 data URL(走 input_image 形态);
 		// Images API 直接 multipart 上传文件,跳过 base64 编码节省往返开销。
@@ -569,8 +591,19 @@ func (s *Service) runJob(ctx context.Context, jobID string, opts GenerateOptions
 		s.emitErrorWithRaw(jobID, err, rawPath)
 		return
 	}
+	effectiveOutputFormat := opts.OutputFormat
+	if mode == client.ModeEdit && strings.TrimSpace(clientOpts.MaskB64) != "" && len(clientOpts.ImagePaths) > 0 {
+		composited, compositeErr := compositeMaskedEditB64(originalEditSourcePath, clientOpts.MaskB64, result.ImageB64)
+		if compositeErr != nil {
+			s.emitErrorWithRaw(jobID, fmt.Errorf("保护蒙版外原图失败: %w", compositeErr), rawPath)
+			return
+		}
+		result.ImageB64 = composited
+		effectiveOutputFormat = "png"
+		logFn("已在本地合成蒙版结果，蒙版外区域使用原图像素。")
+	}
 
-	imageName := buildImageName(mode, opts.Prompt, timestamp, opts.OutputFormat)
+	imageName := buildImageName(mode, opts.Prompt, timestamp, effectiveOutputFormat)
 	savedPath := filepath.Join(imagesDir, imageName)
 	absSaved, werr := writeBase64PNG(result.ImageB64, savedPath)
 	if werr != nil {
@@ -605,6 +638,7 @@ func (s *Service) runJob(ctx context.Context, jobID string, opts GenerateOptions
 		RawPath:       absRaw,
 		Mode:          string(mode),
 		Prompt:        opts.Prompt,
+		OutputFormat:  effectiveOutputFormat,
 	})
 }
 

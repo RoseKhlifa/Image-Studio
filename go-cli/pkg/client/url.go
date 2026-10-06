@@ -58,6 +58,44 @@ func OpenAIAPIEndpoint(baseURL, endpointPath string) string {
 	return cleaned + "/v1/" + path
 }
 
+// NormalizeProvider keeps old configurations on the OpenAI-compatible path.
+func NormalizeProvider(provider Provider) Provider {
+	switch Provider(strings.ToLower(strings.TrimSpace(string(provider)))) {
+	case ProviderGoogle:
+		return ProviderGoogle
+	case ProviderGrok:
+		return ProviderGrok
+	default:
+		return ProviderOpenAI
+	}
+}
+
+// EffectiveAPIMode returns the only valid request shape for the selected
+// provider. Native Google and Grok image APIs do not use OpenAI Responses.
+func EffectiveAPIMode(provider Provider, apiMode APIMode) APIMode {
+	if NormalizeProvider(provider) != ProviderOpenAI || apiMode == APIModeImages {
+		return APIModeImages
+	}
+	return APIModeResponses
+}
+
+// GoogleAPIEndpoint accepts an official root, the legacy /v1beta/openai base,
+// or a Google-compatible relay prefix without duplicating version segments.
+func GoogleAPIEndpoint(baseURL, endpointPath string) string {
+	cleaned := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	path := strings.Trim(strings.TrimSpace(endpointPath), "/")
+	lower := strings.ToLower(cleaned)
+	if strings.HasSuffix(lower, "/v1beta/openai") {
+		cleaned = cleaned[:len(cleaned)-len("/openai")]
+	} else if !strings.HasSuffix(lower, "/v1beta") {
+		cleaned += "/v1beta"
+	}
+	if path == "" {
+		return cleaned
+	}
+	return cleaned + "/" + path
+}
+
 func openAIAPIEndpoint(baseURL, endpointPath string) string {
 	return OpenAIAPIEndpoint(baseURL, endpointPath)
 }
@@ -88,18 +126,11 @@ func shouldUseGoogleNativeInteractions(baseURL, model string) bool {
 }
 
 func googleInteractionsEndpoint(baseURL string) (string, error) {
-	if !isOfficialGoogleGeminiBaseURL(baseURL) {
-		return "", fmt.Errorf("Google Interactions 仅支持官方 generativelanguage.googleapis.com 主机")
-	}
-	u, err := url.Parse(strings.TrimRight(strings.TrimSpace(baseURL), "/"))
-	if err != nil {
+	endpoint := GoogleAPIEndpoint(baseURL, "interactions")
+	if _, err := url.Parse(endpoint); err != nil {
 		return "", err
 	}
-	u.Path = "/v1beta/interactions"
-	u.RawPath = ""
-	u.RawQuery = ""
-	u.Fragment = ""
-	return u.String(), nil
+	return endpoint, nil
 }
 
 func isLoopbackHost(host string) bool {

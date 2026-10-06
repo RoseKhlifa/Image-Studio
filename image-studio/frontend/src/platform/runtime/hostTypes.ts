@@ -1,4 +1,4 @@
-import type { RequestPolicy } from "../../types/domain";
+import type { RequestPolicy, UpstreamProvider } from "../../types/domain";
 
 export type GenerateOptionsLike = {
   apiKey: string;
@@ -22,6 +22,7 @@ export type GenerateOptionsLike = {
   textModelID: string;
   imageModelID: string;
   reasoningEffort?: string;
+  provider?: UpstreamProvider;
   proxyMode?: string;
   proxyURL?: string;
   apiMode: string;
@@ -38,6 +39,7 @@ export type GenerateOptionsLike = {
     textModelID: string;
     imageModelID: string;
     reasoningEffort?: string;
+    provider?: UpstreamProvider;
     apiMode: string;
     responsesTransport?: string;
     requestPolicy: RequestPolicy;
@@ -83,6 +85,7 @@ export type ProbeUpstreamOptionsLike = {
   proxyMode?: string;
   proxyURL?: string;
   apiMode?: string;
+  provider?: UpstreamProvider;
   responsesTransport?: string;
   allowInsecureConnection?: boolean;
 };

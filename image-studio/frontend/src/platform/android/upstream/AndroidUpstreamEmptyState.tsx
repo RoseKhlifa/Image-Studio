@@ -1,12 +1,12 @@
 import { Boxes, ClipboardPaste, Plus, RadioTower } from "lucide-react";
-import type { APIMode } from "../../../types/domain";
-import { ANDROID_API_MODE_OPTIONS } from "./useAndroidUpstreamConfig";
+import type { UpstreamProvider } from "../../../types/domain";
+import { ANDROID_PROVIDER_OPTIONS } from "./useAndroidUpstreamConfig";
 
 export function AndroidUpstreamEmptyState({
   onCreate,
   onQuickImport,
 }: {
-  onCreate: (apiMode: APIMode) => void | Promise<void>;
+  onCreate: (provider: UpstreamProvider) => void | Promise<void>;
   onQuickImport: () => void | Promise<void>;
 }) {
   return (
@@ -29,10 +29,10 @@ export function AndroidUpstreamEmptyState({
           </span>
           <Plus className="h-4 w-4" />
         </button>
-        {ANDROID_API_MODE_OPTIONS.map((option) => (
+        {ANDROID_PROVIDER_OPTIONS.map((option) => (
           <button key={option.id} type="button" onClick={() => onCreate(option.id)}>
             <span className="android-upstream-create-icon">
-              {option.id === "responses" ? <RadioTower className="h-4 w-4" /> : <Boxes className="h-4 w-4" />}
+              {option.id === "openai" ? <RadioTower className="h-4 w-4" /> : <Boxes className="h-4 w-4" />}
             </span>
             <span>
               <strong>{option.title}</strong>

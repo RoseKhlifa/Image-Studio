@@ -54,6 +54,21 @@ export interface WorkspaceRuntimeMirror {
   isRunning: boolean;
 }
 
+export function completeWorkspaceJob(
+  runtime: Pick<WorkspaceRuntimeMirror, "runningJobs" | "jobsCompleted" | "jobsTotal">,
+  jobId: string,
+) {
+  const runningJobs = runtime.runningJobs.filter((id) => id !== jobId);
+  const completed = runtime.jobsCompleted + (runtime.runningJobs.includes(jobId) ? 1 : 0);
+  return {
+    runningJobs,
+    completed,
+    total: runtime.jobsTotal,
+    // Empty runningJobs can be the gap before the next queued job starts.
+    jobsTotal: completed >= runtime.jobsTotal ? 0 : runtime.jobsTotal,
+  };
+}
+
 export function normalizeAPIMode(mode: string): APIModeValue {
   return String(mode).trim() === "images" ? "images" : "responses";
 }
@@ -239,7 +254,7 @@ export function workspaceRuntimeFromState(
       errorCanRetry: s.errorCanRetry,
       errorRawPath: s.errorRawPath,
       lastPayload: s.lastPayload,
-      isRunning: s.runningJobs.length > 0,
+      isRunning: s.runningJobs.length > 0 || s.jobsTotal > s.jobsCompleted,
     };
   }
   const w = s.workspaces.find((item) => item.id === workspaceId);
@@ -256,7 +271,7 @@ export function workspaceRuntimeFromState(
     errorCanRetry: w?.errorCanRetry ?? false,
     errorRawPath: w?.errorRawPath ?? null,
     lastPayload: w?.lastPayload ?? null,
-    isRunning: runningJobs.length > 0,
+    isRunning: runningJobs.length > 0 || (w?.jobsTotal ?? 0) > (w?.jobsCompleted ?? 0),
   };
 }
 
@@ -272,6 +287,9 @@ export function activeRuntimePatch(patch: WorkspacePatch): Partial<WorkspaceRunt
   }
   if (patch.jobsTotal !== undefined) out.jobsTotal = patch.jobsTotal;
   if (patch.jobsCompleted !== undefined) out.jobsCompleted = patch.jobsCompleted;
+  if (patch.jobsTotal !== undefined && patch.jobsCompleted !== undefined) {
+    out.isRunning = (out.runningJobs?.length ?? 0) > 0 || patch.jobsTotal > patch.jobsCompleted;
+  }
   if (patch.progress !== undefined) out.progress = patch.progress;
   if (patch.streamPreview !== undefined) out.streamPreview = patch.streamPreview;
   if (patch.streamPreviews !== undefined) out.streamPreviews = patch.streamPreviews;

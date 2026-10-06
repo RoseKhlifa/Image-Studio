@@ -1,4 +1,5 @@
-import type { RequestPolicy } from "../../../types/domain";
+import type { RequestPolicy, UpstreamProvider } from "../../../types/domain";
+import type { PreparedMaskComposite } from "../../../lib/maskComposite.ts";
 
 export type KernelImageSource = {
   path?: string;
@@ -30,6 +31,7 @@ export type RemoteGeneratePayload = {
   textModelID: string;
   imageModelID: string;
   reasoningEffort?: string;
+  provider?: UpstreamProvider;
   proxyMode?: string;
   proxyURL?: string;
   apiMode: string;
@@ -47,6 +49,7 @@ export type RemoteGeneratePayload = {
     textModelID: string;
     imageModelID: string;
     reasoningEffort?: string;
+    provider?: UpstreamProvider;
     apiMode: string;
     responsesTransport?: string;
     requestPolicy: RequestPolicy;
@@ -68,6 +71,7 @@ export type PartialImageCallback = (partial: {
 export type RemoteJobRequest = {
   payload: RemoteGeneratePayload;
   sourceImages?: KernelImageSource[];
+  preparedMask?: PreparedMaskComposite | null;
 };
 
 export type RemoteJobCallbacks = {

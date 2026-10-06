@@ -106,7 +106,11 @@ func ConfigFromState(cfg kernel.Config, state shared.State) kernel.Config {
 	cfg.BaseURL = profile.BaseURL
 	cfg.TextModelID = profile.TextModelID
 	cfg.ImageModelID = profile.ImageModelID
+	cfg.Provider = client.NormalizeProvider(client.Provider(profile.Provider))
 	cfg.APIMode = normaliseAPIMode(profile.APIMode)
+	if cfg.Provider != client.ProviderOpenAI {
+		cfg.APIMode = client.APIModeImages
+	}
 	cfg.ResponsesTransport = client.ResponsesTransport(normalizeProfileResponsesTransport(profile.ResponsesTransport))
 	cfg.FallbackProfileID = strings.TrimSpace(profile.FallbackProfileID)
 	cfg.RequestPolicy = normalisePolicy(profile.RequestPolicy)
@@ -234,6 +238,7 @@ func UpsertConfig(state shared.State, cfg kernel.Config) shared.State {
 	profile := shared.UpstreamProfile{
 		ID:                      profileID,
 		Name:                    nextDefaultProfileName(state.Profiles),
+		Provider:                string(client.NormalizeProvider(cfg.Provider)),
 		APIMode:                 string(normaliseAPIMode(string(cfg.APIMode))),
 		ResponsesTransport:      normalizeProfileResponsesTransport(string(cfg.ResponsesTransport)),
 		RequestPolicy:           string(normalisePolicy(string(cfg.RequestPolicy))),
@@ -292,6 +297,10 @@ func UpsertConfig(state shared.State, cfg kernel.Config) shared.State {
 }
 
 func HistoryItemFromRun(cfg kernel.Config, result kernel.Result, elapsedSec float64, previewOnlyResult bool) shared.HistoryItem {
+	outputFormat := strings.TrimSpace(result.OutputFormat)
+	if outputFormat == "" {
+		outputFormat = cfg.OutputFormat
+	}
 	item := shared.HistoryItem{
 		ID:               randomID(),
 		Prompt:           cfg.Prompt,
@@ -299,7 +308,7 @@ func HistoryItemFromRun(cfg kernel.Config, result kernel.Result, elapsedSec floa
 		Mode:             string(cfg.Mode),
 		Size:             cfg.Size,
 		Quality:          cfg.Quality,
-		OutputFormat:     cfg.OutputFormat,
+		OutputFormat:     outputFormat,
 		CreatedAt:        time.Now().UnixMilli(),
 		Seed:             cfg.Seed,
 		NegativePrompt:   cfg.NegativePrompt,
@@ -450,7 +459,7 @@ func WriteAPIKey(profileID, value string) error {
 }
 
 func mergeHistory(item shared.HistoryItem, items []shared.HistoryItem) []shared.HistoryItem {
-	out := make([]shared.HistoryItem, 0, min(len(items)+1, 120))
+	out := make([]shared.HistoryItem, 0, len(items)+1)
 	seen := map[string]struct{}{item.ID: {}}
 	out = append(out, item)
 	for _, existing := range items {
@@ -466,9 +475,6 @@ func mergeHistory(item shared.HistoryItem, items []shared.HistoryItem) []shared.
 	sort.SliceStable(out, func(i, j int) bool {
 		return out[i].CreatedAt > out[j].CreatedAt
 	})
-	if len(out) > 120 {
-		out = out[:120]
-	}
 	return out
 }
 

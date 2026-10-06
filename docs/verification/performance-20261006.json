@@ -1,0 +1,307 @@
+{
+  "date": "2026-10-06",
+  "timezone": "Asia/Shanghai",
+  "baseCommit": "613d49105de37c9ad52d21796d79238603f44ea2",
+  "environment": {
+    "node": "v25.8.1",
+    "os": "macOS",
+    "architecture": "arm64"
+  },
+  "methodology": {
+    "records": 1000,
+    "rounds": 3,
+    "summary": "median of three measured runs",
+    "pagingSize": 24,
+    "comparison": "same fixture against baseline Git revision and current source",
+    "scope": "Node/fake-indexeddb timings; React test renderer render counts; Vite manifest static import graph. Not an upstream latency or end-user startup timing claim."
+  },
+  "runtime": {
+    "sameTimestamp": {
+      "before": {
+        "node": "v25.8.1",
+        "source": "613d491",
+        "records": 1000,
+        "rounds": 3,
+        "pagination": {
+          "fixture": "identical timestamps, 24 records per page",
+          "medianMs": 2945.4542919999994,
+          "runs": [
+            {
+              "elapsedMs": 3065.035833,
+              "indexRowsRead": 21705,
+              "pages": 42
+            },
+            {
+              "elapsedMs": 2926.891916,
+              "indexRowsRead": 21705,
+              "pages": 42
+            },
+            {
+              "elapsedMs": 2945.4542919999994,
+              "indexRowsRead": 21705,
+              "pages": 42
+            }
+          ]
+        },
+        "compatibilityUpdates": {
+          "events": 200,
+          "base64CharactersPerRecord": 4096,
+          "medianMs": 281.9087500000005,
+          "runsMs": [
+            281.9087500000005,
+            277.74395899999945,
+            284.31137500000114
+          ]
+        },
+        "scope": "Node + fake-indexeddb microbenchmark; timings do not represent a browser or upstream inference latency."
+      },
+      "after": {
+        "node": "v25.8.1",
+        "source": "working-tree",
+        "records": 1000,
+        "rounds": 3,
+        "pagination": {
+          "fixture": "identical timestamps, 24 records per page",
+          "medianMs": 191.43329199999994,
+          "runs": [
+            {
+              "elapsedMs": 231.21725000000004,
+              "indexRowsRead": 1123,
+              "pages": 42
+            },
+            {
+              "elapsedMs": 191.43329199999994,
+              "indexRowsRead": 1123,
+              "pages": 42
+            },
+            {
+              "elapsedMs": 185.058083,
+              "indexRowsRead": 1123,
+              "pages": 42
+            }
+          ]
+        },
+        "compatibilityUpdates": {
+          "events": 200,
+          "base64CharactersPerRecord": 4096,
+          "medianMs": 0.1787090000000262,
+          "runsMs": [
+            0.29929199999992306,
+            0.1787090000000262,
+            0.13974999999993543
+          ]
+        },
+        "scope": "Node + fake-indexeddb microbenchmark; timings do not represent a browser or upstream inference latency."
+      },
+      "elapsedReductionPercent": 93.5007210086423,
+      "indexReadReductionPercent": 94.82607694079705
+    },
+    "distinctTimestamps": {
+      "before": {
+        "node": "v25.8.1",
+        "source": "613d491",
+        "records": 1000,
+        "rounds": 3,
+        "pagination": {
+          "fixture": "distinct timestamps, 24 records per page",
+          "medianMs": 41.28816699999999,
+          "runs": [
+            {
+              "elapsedMs": 36.06541599999997,
+              "indexRowsRead": 1082,
+              "pages": 42
+            },
+            {
+              "elapsedMs": 41.28816699999999,
+              "indexRowsRead": 1082,
+              "pages": 42
+            },
+            {
+              "elapsedMs": 42.641583000000026,
+              "indexRowsRead": 1082,
+              "pages": 42
+            }
+          ]
+        },
+        "compatibilityUpdates": {
+          "events": 200,
+          "base64CharactersPerRecord": 4096,
+          "medianMs": 232.38204199999996,
+          "runsMs": [
+            235.744917,
+            232.38204199999996,
+            218.12041599999998
+          ]
+        },
+        "scope": "Node + fake-indexeddb microbenchmark; timings do not represent a browser or upstream inference latency."
+      },
+      "after": {
+        "node": "v25.8.1",
+        "source": "working-tree",
+        "records": 1000,
+        "rounds": 3,
+        "pagination": {
+          "fixture": "distinct timestamps, 24 records per page",
+          "medianMs": 26.71758299999999,
+          "runs": [
+            {
+              "elapsedMs": 32.21983399999999,
+              "indexRowsRead": 1082,
+              "pages": 42
+            },
+            {
+              "elapsedMs": 26.71758299999999,
+              "indexRowsRead": 1082,
+              "pages": 42
+            },
+            {
+              "elapsedMs": 26.368334000000004,
+              "indexRowsRead": 1082,
+              "pages": 42
+            }
+          ]
+        },
+        "compatibilityUpdates": {
+          "events": 200,
+          "base64CharactersPerRecord": 4096,
+          "medianMs": 0.1752920000000131,
+          "runsMs": [
+            0.2980000000000018,
+            0.1752920000000131,
+            0.1554580000000101
+          ]
+        },
+        "scope": "Node + fake-indexeddb microbenchmark; timings do not represent a browser or upstream inference latency."
+      },
+      "elapsedReductionPercent": 35.28997545471079
+    },
+    "unrelatedCompatibilityUpdates": {
+      "events": 200,
+      "beforeMedianMs": 281.9087500000005,
+      "afterMedianMs": 0.1787090000000262,
+      "reductionPercent": 99.93660750154083
+    }
+  },
+  "renderProbe": {
+    "unrelatedUpdates": 200,
+    "wholeStoreRendersIncludingInitial": 201,
+    "selectedFieldsRendersIncludingInitial": 1,
+    "historyChangeStillRenders": true,
+    "selectedImageIdChangeStillRenders": true
+  },
+  "bundle": {
+    "before": {
+      "initial": {
+        "bytes": 1114655,
+        "gzipBytes": 315082,
+        "files": [
+          "assets/canvas-vendor-C_z8fXb8.js",
+          "assets/icon-vendor-Cv-SJP1B.js",
+          "assets/platform-ui-CkUlPfST.js",
+          "assets/react-vendor-BAxn4F6P.js",
+          "assets/vendor-DtnaKeTN.js",
+          "assets/index-Bq4u_r1s.js"
+        ]
+      },
+      "desktopStartup": {
+        "bytes": 1114655,
+        "gzipBytes": 315082,
+        "files": [
+          "assets/canvas-vendor-C_z8fXb8.js",
+          "assets/icon-vendor-Cv-SJP1B.js",
+          "assets/platform-ui-CkUlPfST.js",
+          "assets/react-vendor-BAxn4F6P.js",
+          "assets/vendor-DtnaKeTN.js",
+          "assets/index-Bq4u_r1s.js"
+        ]
+      }
+    },
+    "after": {
+      "initial": {
+        "bytes": 589308,
+        "gzipBytes": 175721,
+        "files": [
+          "assets/icon-vendor-zmYe8_zS.js",
+          "assets/react-vendor-CdyhBHga.js",
+          "assets/vendor-BdesEoX1.js",
+          "assets/index-DzUYDt5S.js"
+        ]
+      },
+      "desktopStartup": {
+        "bytes": 1051277,
+        "gzipBytes": 300005,
+        "files": [
+          "assets/BatchResultGrid-BHM_LcjO.js",
+          "assets/MaskOverlayLayer-DDWQCG66.js",
+          "assets/canvas-vendor-DVw25lm7.js",
+          "assets/domain-NpKOI1mb.js",
+          "assets/icon-vendor-zmYe8_zS.js",
+          "assets/react-vendor-CdyhBHga.js",
+          "assets/useNativeFileDrag-BNEjcRNs.js",
+          "assets/vendor-BdesEoX1.js",
+          "assets/index-DzUYDt5S.js",
+          "assets/DesktopShell-BV1Snizx.js"
+        ]
+      }
+    },
+    "initialBytesReductionPercent": 47.13090597539149,
+    "desktopStartupBytesReductionPercent": 5.685884870206476
+  },
+  "dataCompatibility": {
+    "indexedDBVersion": 2,
+    "archiveTruncation": false,
+    "olderWebviewFallback": true,
+    "legacyMigrationRetriesTransientErrors": true
+  },
+  "verification": {
+    "frontendTests": 210,
+    "frontendBuildTargets": [
+      "windows",
+      "macos",
+      "linux",
+      "android-pad",
+      "android"
+    ],
+    "dependencyAuditKnownIssues": 0,
+    "android": {
+      "status": "passed",
+      "jvmTests": 15,
+      "suites": [
+        {
+          "name": "top.gptcodex.imagestudio.android.AndroidStreamEventParserTest",
+          "tests": 9
+        },
+        {
+          "name": "top.gptcodex.imagestudio.android.ActiveTaskRegistryTest",
+          "tests": 3
+        },
+        {
+          "name": "top.gptcodex.imagestudio.android.AndroidBinaryResponseTest",
+          "tests": 3
+        }
+      ],
+      "forcedTestExecution": true,
+      "debugApkBuilt": true,
+      "signatureV2Verified": true,
+      "apkSha256": "d5add58bda76a53d724865b9328bd35497a13b6a6ddc7b26244e8a9959be6c0d",
+      "entry": "assets/index-DMaKzPDI.js",
+      "javascriptFilesChecked": 23,
+      "frontendAssetEntries": 25
+    },
+    "macos": {
+      "status": "passed",
+      "architectures": [
+        "x86_64",
+        "arm64"
+      ],
+      "signature": "adhoc",
+      "plistVerified": true,
+      "runtimeProbeExecuted": true,
+      "backendGoTestsPassed": true,
+      "fixtureVersion": "1.1.13-ci.local+verify",
+      "completedAt": "2026-10-06T06:59:00.687Z"
+    }
+  },
+  "status": "passed",
+  "completedAt": "2026-10-06T15:03:05.047456+08:00"
+}

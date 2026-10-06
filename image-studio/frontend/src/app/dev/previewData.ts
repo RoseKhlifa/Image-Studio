@@ -166,6 +166,7 @@ function buildPreviewProfile(now: number): UpstreamProfile {
   return {
     id: "preview-profile",
     name: "Preview Responses",
+    provider: "openai",
     apiMode: "responses",
     responsesTransport: "sse",
     requestPolicy: "openai",

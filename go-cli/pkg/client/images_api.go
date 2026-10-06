@@ -128,8 +128,28 @@ type imagesAPIResponse struct {
 type imageStreamExtractor struct {
 	partialB64 string
 	final      ImageResult
+	finalURL   string
 	hasFinal   bool
 	onPartial  func(PartialImage)
+}
+
+func (e *imageStreamExtractor) captureDatum(d imagesAPIDatum) bool {
+	if strings.TrimSpace(d.B64JSON) != "" {
+		e.final = imageResultFromImagesDatum(d)
+		e.finalURL = ""
+		e.hasFinal = true
+		return true
+	}
+	if strings.TrimSpace(d.URL) != "" {
+		e.final = ImageResult{
+			RevisedPrompt: d.RevisedPrompt,
+			SourceEvent:   "images_api_url",
+		}
+		e.finalURL = strings.TrimSpace(d.URL)
+		e.hasFinal = true
+		return true
+	}
+	return false
 }
 
 func (e *imageStreamExtractor) consume(line string) bool {
@@ -163,39 +183,36 @@ func (e *imageStreamExtractor) consume(line string) bool {
 		}
 		return true
 	case "image_generation.completed", "image_edit.completed":
-		if b64, ok := ev["b64_json"].(string); ok && b64 != "" {
-			e.final = ImageResult{ImageB64: b64, SourceEvent: "images_api"}
-			e.hasFinal = true
+		datum := imagesAPIDatum{}
+		if b64, ok := ev["b64_json"].(string); ok {
+			datum.B64JSON = b64
+		}
+		if rawURL, ok := ev["url"].(string); ok {
+			datum.URL = rawURL
+		}
+		if revisedPrompt, ok := ev["revised_prompt"].(string); ok {
+			datum.RevisedPrompt = revisedPrompt
+		}
+		if e.captureDatum(datum) {
 			return true
 		}
 	case "error":
 		return true
 	}
-	if ev["object"] == "image.generation.result" || ev["object"] == "image.edit.result" {
-		b, err := json.Marshal(ev)
-		if err == nil {
-			if result, err := parseImagesAPIResponseBytes(b, 200); err == nil {
-				e.final = result
-				e.hasFinal = true
-				return true
-			}
-		}
-	}
 	if b, err := json.Marshal(ev); err == nil {
-		if result, err := parseImagesAPIResponseBytes(b, http.StatusOK); err == nil {
-			e.final = result
-			e.hasFinal = true
+		var parsed imagesAPIResponse
+		if json.Unmarshal(b, &parsed) == nil && len(parsed.Data) > 0 && e.captureDatum(parsed.Data[0]) {
 			return true
 		}
 	}
 	return true
 }
 
-func (e *imageStreamExtractor) result() (ImageResult, bool) {
+func (e *imageStreamExtractor) result() (ImageResult, string, bool) {
 	if e.hasFinal {
-		return e.final, true
+		return e.final, e.finalURL, true
 	}
-	return ImageResult{}, false
+	return ImageResult{}, "", false
 }
 
 // RequestImagesAPI executes a single (no-retry) request against the standard
@@ -222,6 +239,9 @@ func RequestImagesAPIWithPartial(
 	}
 	if strings.TrimSpace(opts.Prompt) == "" {
 		return ImageResult{}, ErrEmptyPrompt
+	}
+	if strings.TrimSpace(opts.MaskB64) != "" && opts.Mode != ModeEdit {
+		return ImageResult{}, errors.New("蒙版仅支持图生图模式")
 	}
 
 	baseURL := strings.TrimSpace(opts.BaseURL)
@@ -261,7 +281,10 @@ func RequestImagesAPIWithPartial(
 	}
 	includeExtended := shouldSendExtendedImageParameters(opts.RequestPolicy)
 	useNewAPICompat := shouldUseImagesNonStreamingCompat(model, opts.ImagesNewAPICompat)
-	useGoogleInteractions := shouldUseGoogleNativeInteractions(baseURL, model)
+	provider := NormalizeProvider(opts.Provider)
+	useGoogleInteractions := provider == ProviderGoogle ||
+		(provider == ProviderOpenAI && shouldUseGoogleNativeInteractions(baseURL, model))
+	useGrokImagine := provider == ProviderGrok
 
 	var (
 		url         string
@@ -285,6 +308,22 @@ func RequestImagesAPIWithPartial(
 		if err != nil {
 			return ImageResult{}, err
 		}
+		body = bytes.NewReader(payload)
+		contentType = "application/json"
+	} else if useGrokImagine {
+		paths := []string(nil)
+		if opts.Mode == ModeEdit {
+			paths = opts.imageSourcePathsForEdit()
+		}
+		payload, err := buildGrokImagePayload(opts, paths, model, size)
+		if err != nil {
+			return ImageResult{}, err
+		}
+		endpoint := "images/generations"
+		if opts.Mode == ModeEdit {
+			endpoint = "images/edits"
+		}
+		url = openAIAPIEndpoint(baseURL, endpoint)
 		body = bytes.NewReader(payload)
 		contentType = "application/json"
 	} else if opts.Mode == ModeEdit {
@@ -372,6 +411,8 @@ func RequestImagesAPIWithPartial(
 	progressStage := "等待 Images API 返回(无 SSE 保活)"
 	if useGoogleInteractions {
 		progressStage = "等待 Google Interactions 返回(无 SSE 保活)"
+	} else if useGrokImagine {
+		progressStage = "等待 Grok Imagine 返回(无 SSE 保活)"
 	}
 	// Progress ticker — Images API has no streaming so we just tick elapsed time.
 	stopProgress := make(chan struct{})
@@ -419,15 +460,23 @@ func RequestImagesAPIWithPartial(
 			}
 		}
 		if err := scanner.Err(); err != nil {
-			if result, ok := extractor.result(); ok && result.ImageB64 != "" {
-				return result, nil
+			if result, resultURL, ok := extractor.result(); ok {
+				if resultURL != "" {
+					return downloadImagesAPIURL(ctx, httpClient, resultURL, result.RevisedPrompt, onProgress, startedAt)
+				}
+				if result.ImageB64 != "" {
+					return result, nil
+				}
 			}
 			return ImageResult{}, fmt.Errorf("read Images API stream: %w", err)
 		}
 		if resp.StatusCode/100 != 2 {
 			return ImageResult{}, fmt.Errorf("上游返回 HTTP %d", resp.StatusCode)
 		}
-		if result, ok := extractor.result(); ok {
+		if result, resultURL, ok := extractor.result(); ok {
+			if resultURL != "" {
+				return downloadImagesAPIURL(ctx, httpClient, resultURL, result.RevisedPrompt, onProgress, startedAt)
+			}
 			return result, nil
 		}
 		return ImageResult{}, ErrNoImageInResponse
@@ -704,53 +753,43 @@ func writeDataURLToTemp(dataURL string) (string, error) {
 }
 
 // buildEditsMultipart constructs the multipart/form-data body for /v1/images/edits.
-// 多张源图按 image[] / image[1] / ... 形式串联 —— 不同中转站对多图编辑支持不一,
-// 仅第一张是 OpenAI 官方接受的最小可用形态,其余作为兼容性 best-effort。
+// OpenAI's multi-image contract uses repeated image[] fields for every source;
+// the singular image field is retained only for a one-image edit.
 func buildEditsMultipart(
 	paths []string, maskB64, prompt, model, size, quality, outputFormat, background string, outputCompression int, inputFidelity, moderation, userIdentifier, negativePrompt string, seed int64, requestPolicy RequestPolicy, partialImages int, useNewAPICompat bool,
 ) (*bytes.Buffer, string, error) {
 	buf := &bytes.Buffer{}
 	w := multipart.NewWriter(buf)
+	var maskPair *openAIImagesMaskPair
+	if strings.TrimSpace(maskB64) != "" {
+		if len(paths) == 0 || strings.TrimSpace(paths[0]) == "" {
+			return nil, "", errors.New("蒙版任务需要至少一张源图")
+		}
+		prepared, err := prepareOpenAIImagesMaskPair(paths[0], maskB64)
+		if err != nil {
+			return nil, "", err
+		}
+		maskPair = &prepared
+	}
 
 	for i, p := range paths {
 		fieldName := "image"
-		if i > 0 {
-			// Some relays accept multiple `image` fields, others want image[] —
-			// we send both to maximise compatibility. The extra field is cheap.
+		if len(paths) > 1 {
 			fieldName = "image[]"
+		}
+		if i == 0 && maskPair != nil {
+			if err := writeMultipartBytes(w, fieldName, "source.png", "image/png", maskPair.sourcePNG); err != nil {
+				return nil, "", fmt.Errorf("attach source.png: %w", err)
+			}
+			continue
 		}
 		if err := writeMultipartFile(w, fieldName, p); err != nil {
 			return nil, "", fmt.Errorf("attach %s: %w", filepath.Base(p), err)
 		}
 	}
 
-	if strings.TrimSpace(maskB64) != "" {
-		raw, err := base64.StdEncoding.DecodeString(maskB64)
-		if err != nil {
-			return nil, "", fmt.Errorf("蒙版图片 base64 无效:%w", err)
-		}
-		if len(raw) == 0 {
-			return nil, "", errors.New("蒙版图片为空")
-		}
-		if len(raw) > MaxInputImageBytes {
-			return nil, "", fmt.Errorf("蒙版图片过大(%dB > %dB 上限)", len(raw), MaxInputImageBytes)
-		}
-		// Preserve the actual PNG/JPEG/WebP type for compatible relays instead
-		// of relabeling arbitrary bytes as PNG. Official OpenAI users can still
-		// supply a PNG mask when their selected model requires it.
-		maskMimeType := detectImageMimeTypeFromBytes(raw)
-		if strings.TrimSpace(maskMimeType) == "" {
-			return nil, "", errors.New("蒙版图片不是支持的 PNG/JPEG/WebP 格式")
-		}
-		maskExt := imageExtensionForMimeType(maskMimeType)
-		h := make(textproto.MIMEHeader)
-		h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="mask"; filename="mask.%s"`, maskExt))
-		h.Set("Content-Type", maskMimeType)
-		fw, err := w.CreatePart(h)
-		if err != nil {
-			return nil, "", err
-		}
-		if _, err := fw.Write(raw); err != nil {
+	if maskPair != nil {
+		if err := writeMultipartBytes(w, "mask", "mask.png", "image/png", maskPair.maskPNG); err != nil {
 			return nil, "", err
 		}
 	}
@@ -819,6 +858,18 @@ func writeMultipartFile(w *multipart.Writer, fieldName, path string) error {
 		return err
 	}
 	_, err = io.Copy(fw, f)
+	return err
+}
+
+func writeMultipartBytes(w *multipart.Writer, fieldName, filename, mimeType string, data []byte) error {
+	h := make(textproto.MIMEHeader)
+	h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"; filename="%s"`, fieldName, filename))
+	h.Set("Content-Type", mimeType)
+	part, err := w.CreatePart(h)
+	if err != nil {
+		return err
+	}
+	_, err = part.Write(data)
 	return err
 }
 

@@ -87,6 +87,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 		Profiles: []UpstreamProfile{{
 			ID:              "p1",
 			Name:            "配置1",
+			Provider:        "google",
 			APIMode:         "responses",
 			RequestPolicy:   "openai",
 			BaseURL:         "https://upstream.example",
@@ -141,7 +142,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	if preset.StyleTag != "anime" || preset.Background != "transparent" || preset.InputFidelity != "high" || preset.ImageStyle != "vivid" || preset.Moderation != "auto" || preset.KernelRuntimeMode != "remote" || preset.BatchCount != 4 {
 		t.Fatalf("preset fields not preserved: %#v", preset)
 	}
-	if len(loaded.Profiles) != 1 || loaded.Profiles[0].BaseURL != "https://upstream.example" || loaded.Profiles[0].ReasoningEffort != "xhigh" {
+	if len(loaded.Profiles) != 1 || loaded.Profiles[0].BaseURL != "https://upstream.example" || loaded.Profiles[0].ReasoningEffort != "xhigh" || loaded.Profiles[0].Provider != "google" || loaded.Profiles[0].APIMode != "images" {
 		t.Fatalf("profiles not preserved: %#v", loaded.Profiles)
 	}
 	if len(loaded.History) != 1 || loaded.History[0].SavedPath != "/tmp/images/cat.png" {

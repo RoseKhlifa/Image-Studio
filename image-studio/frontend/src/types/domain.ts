@@ -6,6 +6,7 @@ export type Mode = "generate" | "edit";
 // 上游 API 形态 —— Responses (`/v1/responses` + SSE) 或标准 Images API。
 // 老代码里以前是顶层全局二选一,v0.1.6 起降级成 profile 的字段。
 export type APIMode = "responses" | "images";
+export type UpstreamProvider = "openai" | "google" | "grok";
 export type RequestPolicy = "openai" | "compat";
 export type ReasoningEffortValue = "low" | "medium" | "high" | "xhigh";
 export type ResponsesTransport = "sse" | "websocket";
@@ -20,6 +21,8 @@ export type AutoRetryCountValue = number;
 export interface UpstreamProfile {
   id: string;
   name: string;
+  // 决定实际请求路径、认证头与 payload。旧配置缺省按 OpenAI 兼容协议处理。
+  provider: UpstreamProvider;
   apiMode: APIMode;
   responsesTransport?: ResponsesTransport;
   requestPolicy: RequestPolicy;

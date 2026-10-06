@@ -52,6 +52,15 @@ test("completion sound preview can force playback", async () => {
   assert.equal(playCalls, 1);
 });
 
+test("blocked audio reports failed playback without losing the visible failure alert", async () => {
+  for (const play of [() => Promise.reject(new Error("NotAllowedError")), () => { throw new Error("audio unavailable"); }]) {
+    assert.equal(await completionSound.playCompletionSound(
+      completionSound.normalizeCompletionSoundConfig({ enabled: true }),
+      { createAudio: () => ({ currentTime: 0, play }) },
+    ), false);
+  }
+});
+
 test("importCompletionSoundFile rejects oversized files", async () => {
   const bytes = new Uint8Array(completionSound.MAX_COMPLETION_SOUND_BYTES + 1);
   const file = new File([bytes], "too-large.wav", { type: "audio/wav" });

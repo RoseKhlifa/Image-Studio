@@ -9,9 +9,9 @@
 
 先做这组最短排查:
 
-1. 在当前 profile 里点一次「测试连接」，确认 `BASE_URL`、`API Key`、文本模型 ID、图像模型 ID 至少能通过基础校验。
+1. 在当前 profile 里点一次「测试连接」，确认 `BASE_URL`、`API Key`、请求模型 ID 至少能通过基础校验。
 2. 确认自己选对了 API 形态:
-   - `Responses API` 需要文本模型可用，并且上游真正实现了 `/v1/responses` 与 SSE。
+   - `Responses API` 需要所填请求模型可用，并且上游真正实现了 `/v1/responses` 与 SSE。
    - `Images API` 需要上游真正实现 `/v1/images/generations` 或 `/v1/images/edits`。
 3. 打开历史详情或 raw 响应，先看真实 `HTTP status` 和上游错误 message，不要只看页面上的 toast。
 4. 如果同样的 `BASE_URL + Key + 模型 ID` 在 curl、Postman 或上游自带调试页里也失败，优先联系上游服务商。
@@ -20,13 +20,13 @@
 ### 这些情况通常不是软件 bug
 
 - `401 / 403 / model not found`:
-  常见原因是 Key 没权限、模型 ID 填错、账号没开通对应模型、IP 白名单未放行，或上游把图像模型和文本模型分了不同权限组。
+  常见原因是 Key 没权限、请求模型 ID 填错、账号没开通对应模型或 IP 白名单未放行。
 - `524 / 504 / 5xx`:
   常见原因是 Cloudflare / Nginx / relay 网关超时、上游排队过久、服务商限流、上游临时故障，不一定是本地程序崩溃。
 - 多参考图、蒙版、`seed`、`negative_prompt` 不生效:
   常见原因是 relay 只“接受字段”但没有真正透传，或目标模型本身就不支持这些能力。
 - `Responses API` 一直失败:
-  常见原因是上游根本没实现 `/v1/responses`、会缓冲 SSE，或者 Key 只有 image-only 权限。
+  常见原因是上游根本没实现 `/v1/responses`、会缓冲 SSE，或者 Key 没有所填请求模型的权限。
 - `Responses WebSocket mode` 握手失败:
   如果 raw 日志或上游报错里出现 `WebSocket upgrade required (Upgrade: websocket)`，说明当前链路把 WebSocket 请求降成了普通 HTTP，请求没有真正完成 Upgrade。常见原因是中转站 / 反向代理 / 网关没有正确放行 `Upgrade: websocket`，这种情况应直接切回 `HTTP SSE` 或修上游代理配置。
 - Android 看不到“目录”或保存位置和桌面端不一样:
@@ -54,7 +54,7 @@
 - 应用版本: release 版本号或 Actions artifact 对应 commit / 构建日期
 - API 形态: `Responses API` 或 `Images API`
 - `BASE_URL` 类型: 官方 / OpenAI 兼容中转 / 自建网关
-- 文本模型 ID 与图像模型 ID
+- 请求模型 ID
 - 最短复现步骤
 - raw 响应中的 `HTTP status`、错误 message 或截图
 
@@ -96,7 +96,7 @@ log/
 处理顺序:
 
 1. 如果当前是 Images API，优先切到 Responses API。
-2. 确认 key 有文本模型权限，例如默认 `gpt-5.5`。
+2. 确认 key 有所填请求模型的权限。
 3. 降低质量或尺寸，缩短单次推理时间。
 4. 从历史项查看 raw 响应，确认是 Cloudflare 524/504、上游 JSON 5xx，还是模型权限错误。
 5. 如果上游本身不支持 SSE 或会缓冲 SSE，换上游或走 Images API。
@@ -145,13 +145,13 @@ websocket handshake failed: HTTP 400: WebSocket upgrade required (Upgrade: webso
 
 Responses API:
 
-- key 没有文本模型权限。
-- 文本模型 ID 或图像模型 ID 在该上游不可用。
-- key 绑到了 image-only 分组，但 Responses API 需要文本模型来调用 `image_generation` 工具。
+- key 没有请求模型权限。
+- 请求模型 ID 在该上游不可用。
+- 上游虽然列出了该模型，但没有允许它通过 Responses API 调用。
 
 Images API:
 
-- 图像模型 ID 不存在。
+- 请求模型 ID 不存在。
 - key 没有 image endpoint 权限。
 - 上游只实现了 `/v1/chat/completions`，没有实现 `/v1/images/generations` 或 `/v1/images/edits`。
 

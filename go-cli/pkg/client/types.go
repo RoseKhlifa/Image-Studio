@@ -116,6 +116,16 @@ const (
 	APIModeImages    APIMode = "images"
 )
 
+// Provider selects the upstream vendor contract. Empty values retain the
+// historical OpenAI-compatible behavior.
+type Provider string
+
+const (
+	ProviderOpenAI Provider = "openai"
+	ProviderGoogle Provider = "google"
+	ProviderGrok   Provider = "grok"
+)
+
 type ResponsesTransport string
 
 const (
@@ -162,6 +172,10 @@ type Options struct {
 	// Empty string is treated as APIModeResponses for back-compat.
 	APIMode APIMode
 
+	// Provider selects request paths, authentication, and payload semantics.
+	// Google and Grok use their native image APIs and therefore imply Images.
+	Provider Provider
+
 	// ResponsesTransport selects how Responses API requests are transported.
 	// Empty string is treated as ResponsesTransportSSE for back-compat.
 	ResponsesTransport ResponsesTransport
@@ -180,7 +194,9 @@ type Options struct {
 	// certificate verification for this upstream. It must remain opt-in.
 	AllowInsecureConnection bool
 
-	MaskB64 string // optional, reserved for Phase 3 GUI; omitted from payload when empty
+	// MaskB64 is a raw base64 image for edit requests. Images API uploads are
+	// normalized with the first source into a same-size PNG pair.
+	MaskB64 string
 
 	// Seed pins the random source so users can reproduce a result. 0 means
 	// "let the model pick", and the field is then omitted from the payload.

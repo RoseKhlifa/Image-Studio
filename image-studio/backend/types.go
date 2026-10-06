@@ -41,7 +41,8 @@ type GenerateOptions struct {
 	TextModelID        string `json:"textModelID"`  // overrides the default text model
 	ImageModelID       string `json:"imageModelID"` // overrides the default image model
 	ReasoningEffort    string `json:"reasoningEffort"`
-	APIMode            string `json:"apiMode"` // "responses" (default) | "images"
+	Provider           string `json:"provider,omitempty"` // "openai" (default) | "google" | "grok"
+	APIMode            string `json:"apiMode"`            // "responses" (default) | "images"
 	ResponsesTransport string `json:"responsesTransport,omitempty"`
 	RequestPolicy      string `json:"requestPolicy"` // "openai" (default) | "compat"
 	// ImagesNewAPICompat 开启后仅影响 Images API 请求:
@@ -77,6 +78,7 @@ type FallbackProfileOptions struct {
 	TextModelID             string `json:"textModelID"`
 	ImageModelID            string `json:"imageModelID"`
 	ReasoningEffort         string `json:"reasoningEffort"`
+	Provider                string `json:"provider,omitempty"`
 	APIMode                 string `json:"apiMode"`
 	ResponsesTransport      string `json:"responsesTransport,omitempty"`
 	RequestPolicy           string `json:"requestPolicy"`
@@ -106,6 +108,7 @@ type ProbeUpstreamOptions struct {
 	BaseURL                 string `json:"baseURL"`
 	ProxyMode               string `json:"proxyMode"`
 	ProxyURL                string `json:"proxyURL"`
+	Provider                string `json:"provider,omitempty"`
 	APIMode                 string `json:"apiMode,omitempty"`
 	ResponsesTransport      string `json:"responsesTransport,omitempty"`
 	AllowInsecureConnection bool   `json:"allowInsecureConnection,omitempty"`
@@ -192,6 +195,7 @@ type ResultPayload struct {
 	RawPath       string `json:"rawPath"` // raw SSE dump location
 	Mode          string `json:"mode"`
 	Prompt        string `json:"prompt"`
+	OutputFormat  string `json:"outputFormat,omitempty"`
 }
 
 // PreviewPayload is emitted as `preview:<jobId>` while Responses API streams

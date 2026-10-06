@@ -1043,10 +1043,10 @@ func (a *App) layoutSettingsHelpModal(gtx layout.Context) layout.Dimensions {
 					return a.helpInfoCard(gtx, "模型 ID 怎么填?", "", func(gtx layout.Context) layout.Dimensions {
 						return layout.Flex{Axis: layout.Vertical, Gap: gtx.Dp(unit.Dp(8))}.Layout(gtx,
 							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								return a.label(gtx, "Responses API 会同时用到文本模型 ID 与图像模型 ID；Images API 只读取图像模型 ID。", unit.Sp(11), fluent.textMuted, font.Normal)
+								return a.label(gtx, "Responses API 与 Images API 都只填写一个请求模型 ID；Responses API 可使用上游支持的文本或图像模型。", unit.Sp(11), fluent.textMuted, font.Normal)
 							}),
 							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								return a.label(gtx, "留空时默认文本模型是 gpt-5.5，默认图像模型是 gpt-image-2。", unit.Sp(11), fluent.textMuted, font.Normal)
+								return a.label(gtx, "Responses API 留空默认 gpt-5.5；Images API 留空默认 gpt-image-2。", unit.Sp(11), fluent.textMuted, font.Normal)
 							}),
 						)
 					})
@@ -2860,20 +2860,39 @@ func (a *App) layoutSettingsEditorPane(gtx layout.Context, snap snapshot) layout
 				return a.field(gtx, "名称", &a.profileNameInput, "配置1", unit.Dp(40))
 			}),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return a.layoutSettingsOptionCards(gtx, "服务商请求方式", []settingsOptionChoice{
+					{Title: "OpenAI / 兼容", Detail: "Responses 或 Images", Value: string(client.ProviderOpenAI)},
+					{Title: "Google Gemini", Detail: "Interactions 原生协议", Value: string(client.ProviderGoogle)},
+					{Title: "Grok / xAI", Detail: "Imagine 原生协议", Value: string(client.ProviderGrok)},
+				}, a.provider, a.providerButtons, 3, func(value string) {
+					a.provider = normalizeProfileProvider(value)
+					if a.provider != string(client.ProviderOpenAI) {
+						a.api = string(client.APIModeImages)
+						a.policy = string(client.RequestPolicyOpenAI)
+					}
+				})
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				if a.provider != string(client.ProviderOpenAI) {
+					return a.label(gtx, "服务商决定请求路径、认证头与请求体；第三方 OpenAI 兼容中转请选择 OpenAI / 兼容。", unit.Sp(10), fluent.textDim, font.Normal)
+				}
 				return a.layoutSettingsOptionCards(gtx, "API 形态", []settingsOptionChoice{
 					{Title: "Responses API", Detail: "SSE 保活，更适合长推理", Value: string(client.APIModeResponses)},
 					{Title: "Images API", Detail: "标准 generations / edits", Value: string(client.APIModeImages)},
 				}, a.api, a.apiButtons, 2, func(value string) { a.api = value })
 			}),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				hint := "需要 key 绑定到拥有 gpt-5.5 模型的分组。SSE 保活可防 Cloudflare 524。"
+				if a.provider != string(client.ProviderOpenAI) {
+					return layout.Dimensions{}
+				}
+				hint := "需要 key 拥有所填请求模型的权限。SSE 保活可防 Cloudflare 524。"
 				if a.api == string(client.APIModeImages) {
 					hint = "使用标准 Images API，key 走 image-2 / image API 分组，兼容性最广。"
 				}
 				return a.label(gtx, hint, unit.Sp(10), fluent.textDim, font.Normal)
 			}),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				if a.api != string(client.APIModeResponses) {
+				if a.provider != string(client.ProviderOpenAI) || a.api != string(client.APIModeResponses) {
 					return layout.Dimensions{}
 				}
 				return a.layoutSettingsOptionCards(gtx, "Responses 传输", responsesTransportChoices, a.responsesTransport, a.responsesTransportButtons, 2, func(value string) {
@@ -2881,25 +2900,37 @@ func (a *App) layoutSettingsEditorPane(gtx layout.Context, snap snapshot) layout
 				})
 			}),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				if a.api != string(client.APIModeResponses) {
+				if a.provider != string(client.ProviderOpenAI) || a.api != string(client.APIModeResponses) {
 					return layout.Dimensions{}
 				}
 				return a.label(gtx, "WebSocket mode 需要上游 / 代理正确转发 Upgrade: websocket；若握手失败，请求层会自动回退到 HTTP SSE，并把原因写进 Raw response。", unit.Sp(10), fluent.textDim, font.Normal)
 			}),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				if a.provider != string(client.ProviderOpenAI) {
+					return layout.Dimensions{}
+				}
 				return a.layoutSettingsOptionCards(gtx, "参数策略", []settingsOptionChoice{
 					{Title: "OpenAI 标准", Detail: "只发送官方公开字段", Value: string(client.RequestPolicyOpenAI)},
 					{Title: "兼容中转扩展", Detail: "附带 seed / negative_prompt", Value: string(client.RequestPolicyCompat)},
 				}, a.policy, a.policyButtons, 1, func(value string) { a.policy = value })
 			}),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				if a.provider != string(client.ProviderOpenAI) {
+					return layout.Dimensions{}
+				}
 				return a.label(gtx, "OpenAI 标准更适合直连 OpenAI；兼容中转扩展会额外发送 relay 常见扩展字段。", unit.Sp(10), fluent.textDim, font.Normal)
 			}),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				return a.technicalField(gtx, "上游 BASE_URL", &a.baseURLInput, "https://example.com", unit.Dp(40))
 			}),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return a.label(gtx, "中转站只填根地址；Google 官方 Images 配置填写 https://generativelanguage.googleapis.com/v1beta/openai。", unit.Sp(10), fluent.textDim, font.Normal)
+				hint := "中转站只填根地址，应用自动拼接 OpenAI API 路径。"
+				if a.provider == string(client.ProviderGoogle) {
+					hint = "Google 官方填写 https://generativelanguage.googleapis.com，应用自动拼接 /v1beta/interactions。"
+				} else if a.provider == string(client.ProviderGrok) {
+					hint = "xAI 官方填写 https://api.x.ai，应用自动拼接 Imagine API 路径。"
+				}
+				return a.label(gtx, hint, unit.Sp(10), fluent.textDim, font.Normal)
 			}),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				active := a.allowInsecureConnection
@@ -2976,11 +3007,11 @@ func (a *App) layoutSettingsEditorPane(gtx layout.Context, snap snapshot) layout
 		}))
 		if a.api == string(client.APIModeResponses) {
 			rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return a.technicalField(gtx, "文本模型 ID", &a.textModelInput, client.TextModel, unit.Dp(40))
+				return a.technicalField(gtx, "请求模型 ID", &a.textModelInput, client.TextModel, unit.Dp(40))
 			}))
 			if len(probeTextModels) > 0 {
 				rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return a.layoutProbeModelSuggestions(gtx, "推荐文本模型", "text", probeTextModels, strings.TrimSpace(a.textModelInput.Text()), func(id string) {
+					return a.layoutProbeModelSuggestions(gtx, "推荐请求模型", "text", probeTextModels, strings.TrimSpace(a.textModelInput.Text()), func(id string) {
 						a.textModelInput.SetText(strings.TrimSpace(id))
 					})
 				}))
@@ -2994,17 +3025,17 @@ func (a *App) layoutSettingsEditorPane(gtx layout.Context, snap snapshot) layout
 				return a.label(gtx, "仅 Responses API 生效，会写入 reasoning.effort。推理越高通常越稳，但延迟也会更长。", unit.Sp(10), fluent.textDim, font.Normal)
 			}))
 		}
-		rows = append(rows,
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return a.technicalField(gtx, "图像模型 ID", &a.imageModelInput, client.ImageModel, unit.Dp(40))
-			}),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return a.technicalField(gtx, "并发数量限制", &a.concurrencyLimitInput, "留空 = 不限制", unit.Dp(40))
-			}),
-		)
-		if len(probeImageModels) > 0 {
+		if a.api == string(client.APIModeImages) {
 			rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return a.layoutProbeModelSuggestions(gtx, "推荐图像模型", "image", probeImageModels, strings.TrimSpace(a.imageModelInput.Text()), func(id string) {
+				return a.technicalField(gtx, "请求模型 ID", &a.imageModelInput, client.ImageModel, unit.Dp(40))
+			}))
+		}
+		rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return a.technicalField(gtx, "并发数量限制", &a.concurrencyLimitInput, "留空 = 不限制", unit.Dp(40))
+		}))
+		if a.api == string(client.APIModeImages) && len(probeImageModels) > 0 {
+			rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return a.layoutProbeModelSuggestions(gtx, "推荐请求模型", "image", probeImageModels, strings.TrimSpace(a.imageModelInput.Text()), func(id string) {
 					a.imageModelInput.SetText(strings.TrimSpace(id))
 				})
 			}))

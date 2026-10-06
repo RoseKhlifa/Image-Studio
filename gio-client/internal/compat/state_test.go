@@ -178,6 +178,20 @@ func TestHistoryItemFromRunPreviewOnlyRemoteKeepsRawAndDefersSavedPaths(t *testi
 	}
 }
 
+func TestHistoryItemFromRunPrefersEffectiveResultFormat(t *testing.T) {
+	item := HistoryItemFromRun(kernel.Config{
+		Prompt:       "masked edit",
+		Mode:         client.ModeEdit,
+		OutputFormat: "jpeg",
+	}, kernel.Result{
+		SavedPath:    "/tmp/images/masked.png",
+		OutputFormat: "png",
+	}, 1, false)
+	if item.OutputFormat != "png" {
+		t.Fatalf("history output format=%q want effective PNG result", item.OutputFormat)
+	}
+}
+
 func TestSaveConfigAndHistoryWithPreviewModeStoresHistoryFullAndHydratesImageB64(t *testing.T) {
 	root := t.TempDir()
 	origStable := StableDataRootForTest()
@@ -264,6 +278,27 @@ func TestSaveConfigAndHistorySerializesConcurrentHistoryUpdates(t *testing.T) {
 		prompt := fmt.Sprintf("prompt-%02d", index)
 		if !seen[prompt] {
 			t.Fatalf("missing concurrent history item %q", prompt)
+		}
+	}
+}
+
+func TestMergeHistoryRetainsLargeBatchAndDeduplicates(t *testing.T) {
+	items := make([]shared.HistoryItem, 650)
+	for i := range items {
+		items[i] = shared.HistoryItem{ID: fmt.Sprintf("image-%04d", i), Prompt: fmt.Sprintf("prompt-%d", i), CreatedAt: int64(i)}
+	}
+	updated := items[10]
+	updated.Prompt = "updated prompt"
+	merged := mergeHistory(updated, items)
+	if len(merged) != len(items) {
+		t.Fatalf("history len=%d want %d", len(merged), len(items))
+	}
+	if merged[0].ID != "image-0649" || merged[len(merged)-1].ID != "image-0000" {
+		t.Fatal("history should preserve the entire archive in descending date order")
+	}
+	for _, item := range merged {
+		if item.ID == updated.ID && item.Prompt != updated.Prompt {
+			t.Fatal("the newest version of a duplicate should replace the old record")
 		}
 	}
 }

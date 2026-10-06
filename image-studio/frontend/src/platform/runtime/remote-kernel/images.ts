@@ -325,7 +325,7 @@ export async function requestImagesOnce(
   const built = await buildImagesRequestBody(request, sourceDataURLs);
   const allowEmptyKeepAlive = request.payload.imagesNewAPICompat === true;
   const startedAt = Date.now();
-  const protocolLabel = built.protocol === "google-interactions" ? "Google Interactions" : "Images API";
+  const protocolLabel = built.protocol === "google-interactions" ? "Google Interactions" : built.protocol === "grok-images" ? "Grok Imagine" : "Images API";
   callbacks.onLog?.(`[${protocolLabel}] 第 ${attempt}/${maxAttempts} 次请求...`);
   callbacks.onProgress?.(`等待 ${protocolLabel} 返回(无 SSE 保活)`, 0, 0);
   const ticker = globalThis.setInterval(() => {
@@ -351,7 +351,7 @@ export async function requestImagesOnce(
         built.url,
         "POST",
         {
-          ...(built.protocol === "openai-images" ? { Authorization: `Bearer ${request.payload.apiKey}` } : {}),
+          ...(built.protocol !== "google-interactions" ? { Authorization: `Bearer ${request.payload.apiKey}` } : {}),
           Accept: "text/event-stream, application/json",
           ...(built.headers ?? {}),
         },
@@ -411,7 +411,7 @@ export async function requestImagesOnce(
     const response = await fetch(built.url, {
       method: "POST",
       headers: {
-        ...(built.protocol === "openai-images" ? { Authorization: `Bearer ${request.payload.apiKey}` } : {}),
+        ...(built.protocol !== "google-interactions" ? { Authorization: `Bearer ${request.payload.apiKey}` } : {}),
         Accept: "text/event-stream, application/json",
         ...(built.headers ?? {}),
       },

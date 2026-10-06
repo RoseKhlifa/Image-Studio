@@ -19,6 +19,7 @@ import (
 type upstreamConfigExportProfile struct {
 	ID                      string `json:"id"`
 	Name                    string `json:"name"`
+	Provider                string `json:"provider"`
 	APIMode                 string `json:"apiMode"`
 	ResponsesTransport      string `json:"responsesTransport"`
 	RequestPolicy           string `json:"requestPolicy"`
@@ -78,6 +79,7 @@ func buildUpstreamConfigExportFile(state sharedCompat.State) (upstreamConfigExpo
 		profiles = append(profiles, upstreamConfigExportProfile{
 			ID:                      profile.ID,
 			Name:                    strings.TrimSpace(profile.Name),
+			Provider:                normalizeProfileProvider(profile.Provider),
 			APIMode:                 normalizeProfileAPIMode(profile.APIMode),
 			ResponsesTransport:      normalizeProfileResponsesTransport(profile.ResponsesTransport),
 			RequestPolicy:           normalizeProfilePolicy(profile.RequestPolicy),
@@ -181,6 +183,7 @@ func parseExportProfile(raw any) (upstreamConfigExportProfile, bool) {
 	return upstreamConfigExportProfile{
 		ID:                      strings.TrimSpace(id),
 		Name:                    strings.TrimSpace(name),
+		Provider:                normalizeProfileProvider(stringValue(source["provider"])),
 		APIMode:                 normalizeProfileAPIMode(stringValue(source["apiMode"])),
 		ResponsesTransport:      normalizeProfileResponsesTransport(stringValue(source["responsesTransport"])),
 		RequestPolicy:           normalizeProfilePolicy(stringValue(source["requestPolicy"])),
@@ -213,6 +216,7 @@ func parseNewAPIChannelConnTemplate(input map[string]any) (parsedUpstreamConfigI
 		Profiles: []upstreamConfigExportProfile{{
 			ID:                 profileID,
 			Name:               buildTemplateProfileName("NewAPI", baseURL, ""),
+			Provider:           string(client.ProviderOpenAI),
 			APIMode:            string(client.APIModeResponses),
 			ResponsesTransport: string(client.ResponsesTransportSSE),
 			RequestPolicy:      string(client.RequestPolicyOpenAI),
@@ -262,6 +266,7 @@ func parseOpenCodeProviderTemplate(input map[string]any) (parsedUpstreamConfigIm
 		profiles = append(profiles, upstreamConfigExportProfile{
 			ID:                 nextTemplateProfileID(index),
 			Name:               buildTemplateProfileName("OpenCode", baseURL, providerName),
+			Provider:           string(client.ProviderOpenAI),
 			APIMode:            apiMode,
 			ResponsesTransport: string(client.ResponsesTransportSSE),
 			RequestPolicy:      string(client.RequestPolicyOpenAI),
@@ -386,6 +391,7 @@ func (a *App) applyParsedUpstreamConfigImport(parsed parsedUpstreamConfigImport)
 			if existingIndex, ok := existingByName[strings.TrimSpace(incoming.Name)]; ok {
 				profile := state.Profiles[existingIndex]
 				profile.Name = strings.TrimSpace(incoming.Name)
+				profile.Provider = normalizeProfileProvider(incoming.Provider)
 				profile.APIMode = normalizeProfileAPIMode(incoming.APIMode)
 				profile.ResponsesTransport = normalizeProfileResponsesTransport(incoming.ResponsesTransport)
 				profile.RequestPolicy = normalizeProfilePolicy(incoming.RequestPolicy)
@@ -411,6 +417,7 @@ func (a *App) applyParsedUpstreamConfigImport(parsed parsedUpstreamConfigImport)
 			profile := sharedCompat.UpstreamProfile{
 				ID:                      actualID,
 				Name:                    strings.TrimSpace(incoming.Name),
+				Provider:                normalizeProfileProvider(incoming.Provider),
 				APIMode:                 normalizeProfileAPIMode(incoming.APIMode),
 				ResponsesTransport:      normalizeProfileResponsesTransport(incoming.ResponsesTransport),
 				RequestPolicy:           normalizeProfilePolicy(incoming.RequestPolicy),

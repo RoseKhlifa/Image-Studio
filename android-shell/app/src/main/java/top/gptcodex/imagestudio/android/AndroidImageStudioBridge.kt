@@ -595,18 +595,24 @@ class AndroidImageStudioBridge(
         val apiKey = payload.optString("apiKey").trim()
         val proxyMode = payload.optString("proxyMode", "system")
         val proxyUrl = payload.optString("proxyURL", "")
+        val provider = payload.optString("provider", "openai").lowercase(Locale.US).let {
+            if (it == "google" || it == "grok") it else "openai"
+        }
         val apiMode = payload.optString("apiMode", "responses")
         val responsesTransport = payload.optString("responsesTransport", "sse")
         if (apiKey.isBlank()) throw IllegalArgumentException("API Key 不能为空")
         thread(name = "image-studio-probe-${requestId.take(12)}") {
             try {
-                val connection = openHttpConnection(openAIEndpoint(baseUrl, "models"), proxyMode, proxyUrl, allowInsecureConnection).apply {
+                val endpointLabel = if (provider == "google") "/v1beta/models" else "/v1/models"
+                val modelsEndpoint = if (provider == "google") googleEndpoint(baseUrl, "models") else openAIEndpoint(baseUrl, "models")
+                val connection = openHttpConnection(modelsEndpoint, proxyMode, proxyUrl, allowInsecureConnection).apply {
                     requestMethod = "GET"
                     instanceFollowRedirects = true
                     connectTimeout = 20_000
                     readTimeout = 20_000
                     doInput = true
-                    setRequestProperty("Authorization", "Bearer $apiKey")
+                    if (provider == "google") setRequestProperty("X-Goog-Api-Key", apiKey)
+                    else setRequestProperty("Authorization", "Bearer $apiKey")
                     setRequestProperty("Accept", "application/json")
                     setRequestProperty("User-Agent", "image-studio-android")
                 }
@@ -617,30 +623,30 @@ class AndroidImageStudioBridge(
                 } ?: ""
                 connection.disconnect()
                 if (status !in 200..299) {
-                    throw IllegalStateException("上游 /v1/models 返回 $status${summarizeProbeBody(body).let { if (it.isBlank()) "" else ": $it" }}")
+                    throw IllegalStateException("上游 $endpointLabel 返回 $status${summarizeProbeBody(body).let { if (it.isBlank()) "" else ": $it" }}")
                 }
                 val parsed = JSONObject(body)
-                if (!parsed.has("data") || parsed.isNull("data")) {
-                    throw IllegalStateException("上游 /v1/models 响应缺少 data 数组")
-                }
-                val data = parsed.optJSONArray("data") ?: throw IllegalStateException("上游 /v1/models 响应缺少 data 数组")
+                val data = if (provider == "google") parsed.optJSONArray("models")
+                    ?: throw IllegalStateException("上游 /v1beta/models 响应缺少 models 数组")
+                else parsed.optJSONArray("data")
+                    ?: throw IllegalStateException("上游 /v1/models 响应缺少 data 数组")
                 val models = mutableListOf<Map<String, String>>()
                 for (index in 0 until data.length()) {
                     val item = data.optJSONObject(index) ?: continue
-                    val id = item.optString("id").trim()
+                    val id = if (provider == "google") item.optString("name").trim().removePrefix("models/") else item.optString("id").trim()
                     if (id.isBlank()) continue
                     models += mapOf(
                         "id" to id,
-                        "object" to item.optString("object").trim(),
-                        "ownedBy" to item.optString("owned_by").trim(),
-                        "displayName" to item.optString("name").trim(),
+                        "object" to if (provider == "google") "model" else item.optString("object").trim(),
+                        "ownedBy" to if (provider == "google") "google" else item.optString("owned_by").trim(),
+                        "displayName" to if (provider == "google") item.optString("displayName").trim() else item.optString("name").trim(),
                     )
                 }
                 val result = mutableMapOf<String, Any>(
                     "modelCount" to data.length(),
                     "models" to models,
                 )
-                if (apiMode == "responses" && responsesTransport == "websocket") {
+                if (provider == "openai" && apiMode == "responses" && responsesTransport == "websocket") {
                     result["responsesTransport"] = "websocket"
                     val probePayload = JSONObject()
                         .put("type", "response.create")
@@ -992,6 +998,17 @@ class AndroidImageStudioBridge(
         val uri = URI(cleaned)
         val basePath = (uri.path ?: "").trimEnd('/').lowercase(Locale.US)
         return if (basePath.endsWith("/openai")) "$cleaned/$path" else "$cleaned/v1/$path"
+    }
+
+    private fun googleEndpoint(baseUrl: String, endpointPath: String): String {
+        var cleaned = baseUrl.trim().trimEnd('/')
+        val path = endpointPath.trim().trim('/')
+        cleaned = when {
+            cleaned.endsWith("/v1beta/openai", ignoreCase = true) -> cleaned.dropLast("/openai".length)
+            cleaned.endsWith("/v1beta", ignoreCase = true) -> cleaned
+            else -> "$cleaned/v1beta"
+        }
+        return if (path.isBlank()) cleaned else "$cleaned/$path"
     }
 
     private fun isProbeLoopbackHost(host: String): Boolean {

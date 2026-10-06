@@ -399,16 +399,16 @@ export function AndroidSettingsPanel({
 
       <div className="android-settings-field android-settings-field-stacked">
         <div>
-          <span className="android-settings-field-title">完成提示音</span>
+          <span className="android-settings-field-title">任务提示音</span>
           <span className="android-settings-field-subtitle">
             {completionSound.enabled
               ? (completionSound.mode === "custom" && completionSound.customName
                 ? `当前使用 ${completionSound.customName}`
                 : "当前使用内置默认音")
-              : "生成完成时不播放提示音。"}
+              : "整批完成或生成失败时不播放提示音。"}
           </span>
         </div>
-        <div className="android-settings-segmented" role="group" aria-label="完成提示音开关">
+        <div className="android-settings-segmented" role="group" aria-label="任务提示音开关">
           <button
             type="button"
             className={completionSound.enabled ? "active" : ""}

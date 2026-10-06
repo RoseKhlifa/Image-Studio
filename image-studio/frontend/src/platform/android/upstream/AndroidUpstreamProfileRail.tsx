@@ -1,5 +1,6 @@
 import { Copy, Plus, RadioTower, Trash2 } from "lucide-react";
 import type { UpstreamProfile } from "../../../types/domain";
+import { upstreamProviderLabel } from "../../../lib/profiles";
 
 export function AndroidUpstreamProfileRail({
   profiles,
@@ -50,7 +51,7 @@ export function AndroidUpstreamProfileRail({
               <span className="android-upstream-profile-main">
                 <strong>{profile.name || "未命名配置"}</strong>
                 <small>
-                  {profile.apiMode === "responses" ? "Responses" : "Images"}
+                  {upstreamProviderLabel(profile.provider ?? "openai")}
                   {profile.baseURL ? ` · ${profile.baseURL}` : " · 未填写地址"}
                 </small>
               </span>

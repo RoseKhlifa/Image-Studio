@@ -183,6 +183,23 @@ func (a *App) maybeSendCompletionNotification(item sharedCompat.HistoryItem, com
 	}()
 }
 
+func (a *App) notifyRunFailure(message string) {
+	a.maybePlayCompletionSound(1, 1)
+	a.mu.Lock()
+	enabled := a.completionNotification.Enabled
+	permission := a.completionNotificationPermission
+	focused := a.windowFocused
+	a.mu.Unlock()
+	if !enabled || focused || permission != systemNotificationPermissionGranted {
+		return
+	}
+	go func() {
+		if err := showSystemNotificationFunc("Image Studio · 生成失败", message, notificationOpenResultAction{}); err != nil {
+			a.appendLog("发送失败通知失败: " + err.Error())
+		}
+	}()
+}
+
 func showSystemNotification(title string, body string, action notificationOpenResultAction) error {
 	title = strings.TrimSpace(title)
 	body = strings.TrimSpace(body)

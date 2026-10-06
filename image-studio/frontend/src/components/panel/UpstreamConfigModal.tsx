@@ -12,7 +12,7 @@ import {
   probeCurrentUpstream,
 } from "../../platform/runtime/host";
 import { genProfileId, keyringUserFor } from "../../lib/profiles";
-import type { APIMode, RequestPolicy, UpstreamProfile } from "../../types/domain";
+import type { APIMode, RequestPolicy, UpstreamProfile, UpstreamProvider } from "../../types/domain";
 import { FAQModal } from "./FAQModal";
 import { UpstreamProfileEditor } from "./UpstreamProfileEditor";
 import { UpstreamProfileList } from "./UpstreamProfileList";
@@ -102,7 +102,13 @@ export function UpstreamConfigModal({
 
   function patchDraft(patch: Partial<UpstreamProfile>) {
     if (!draft) return;
-    setDraft({ ...draft, ...patch });
+    const provider = patch.provider ?? draft.provider ?? "openai";
+    setDraft({
+      ...draft,
+      ...patch,
+      provider,
+      apiMode: provider === "openai" ? patch.apiMode ?? draft.apiMode : "images",
+    });
   }
 
   function codexProfileName(provider: string) {
@@ -122,6 +128,7 @@ export function UpstreamConfigModal({
       if (existing) {
         await updateProfile(existing.id, {
           name,
+          provider: "openai",
           apiMode: "responses",
           requestPolicy: "openai",
           imagesNewAPICompat: false,
@@ -137,6 +144,7 @@ export function UpstreamConfigModal({
       } else {
         syncedId = await createProfile({
           name,
+          provider: "openai",
           apiMode: "responses",
           requestPolicy: "openai",
           baseURL: imported.baseURL,
@@ -225,8 +233,9 @@ export function UpstreamConfigModal({
     }
   }
 
-  async function handleNew(apiMode: APIMode = "responses") {
+  async function handleNew(provider: UpstreamProvider = "openai", apiMode: APIMode = provider === "openai" ? "responses" : "images") {
     const id = await createProfile({
+      provider,
       apiMode,
       requestPolicy: "openai",
       setActive: profiles.length === 0, // 第一个自动 active,后续手动切
@@ -254,6 +263,7 @@ export function UpstreamConfigModal({
     if (!draft) return;
         await updateProfile(draft.id, {
           name: draft.name,
+          provider: draft.provider,
           apiMode: draft.apiMode,
           responsesTransport: draft.responsesTransport ?? "sse",
           requestPolicy: draft.requestPolicy,
@@ -326,6 +336,8 @@ export function UpstreamConfigModal({
         draft.apiMode,
         draft.responsesTransport ?? "sse",
         draft.allowInsecureConnection === true,
+        undefined,
+        draft.provider,
       );
       const catalog = buildUpstreamModelCatalog(result.models ?? []);
       setModelCatalog(catalog);
@@ -405,16 +417,22 @@ export function UpstreamConfigModal({
             </button>
             {([
               {
-                id: "responses" as APIMode,
-                title: "Responses API",
-                sub: "首选。支持 SSE 保活，长任务更稳。",
-                note: "适合 GPT 图像链路和提示词优化。",
+                id: "openai" as UpstreamProvider,
+                title: "OpenAI / 兼容中转",
+                sub: "支持 Responses 与 Images API。",
+                note: "适合 OpenAI、NewAPI 和兼容中转。",
               },
               {
-                id: "images" as APIMode,
-                title: "Images API",
-                sub: "兼容性更广，接标准 generations / edits。",
-                note: "适合只想尽快接上常规生图接口。",
+                id: "google" as UpstreamProvider,
+                title: "Google Gemini",
+                sub: "原生 /v1beta/interactions。",
+                note: "使用 x-goog-api-key 与 Google payload。",
+              },
+              {
+                id: "grok" as UpstreamProvider,
+                title: "Grok / xAI",
+                sub: "原生 Imagine generations / edits。",
+                note: "图生图使用 JSON，不使用 multipart。",
               },
             ]).map((item) => (
               <button
@@ -425,7 +443,7 @@ export function UpstreamConfigModal({
               >
                 <div className="flex items-center gap-2">
                   <span className="inline-flex h-8 min-w-[32px] items-center justify-center rounded-full bg-[var(--accent-soft)] px-2 text-[11px] font-semibold text-[var(--accent)]">
-                    {item.id === "responses" ? "R" : "I"}
+                    {item.id === "openai" ? "O" : item.id === "google" ? "G" : "X"}
                   </span>
                   <span className="text-[14px] font-semibold text-zinc-900 dark:text-zinc-100">{item.title}</span>
                 </div>

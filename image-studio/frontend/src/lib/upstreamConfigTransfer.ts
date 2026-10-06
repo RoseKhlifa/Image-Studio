@@ -1,10 +1,12 @@
-import type { APIMode, RequestPolicy, ReasoningEffortValue, ResponsesTransport, UpstreamProfile } from "../types/domain";
+import type { APIMode, RequestPolicy, ReasoningEffortValue, ResponsesTransport, UpstreamProfile, UpstreamProvider } from "../types/domain";
+import { normalizeUpstreamProvider } from "./profiles.ts";
 import { buildUpstreamModelCatalog } from "./upstreamModels.ts";
 import { cleanBaseURL } from "./security.ts";
 
 export type UpstreamConfigExportProfile = {
   id: string;
   name: string;
+  provider?: UpstreamProvider;
   apiMode: APIMode;
   responsesTransport: ResponsesTransport;
   requestPolicy: RequestPolicy;
@@ -39,6 +41,7 @@ export type UpstreamConfigImportActions = {
   getProfiles: () => UpstreamProfile[];
   createProfile: (input: {
     name?: string;
+    provider?: UpstreamProvider;
     apiMode: APIMode;
     responsesTransport?: ResponsesTransport;
     baseURL?: string;
@@ -71,6 +74,7 @@ function toProfileSnapshot(input: UpstreamConfigExportProfile, actualId: string)
   return {
     id: actualId,
     name: input.name,
+    provider: input.provider ?? "openai",
     apiMode: input.apiMode,
     responsesTransport: input.responsesTransport ?? "sse",
     requestPolicy: input.requestPolicy,
@@ -152,10 +156,12 @@ function parseExportProfile(raw: unknown): UpstreamConfigExportProfile | null {
   const id = typeof source.id === "string" ? source.id.trim() : "";
   const name = typeof source.name === "string" ? source.name.trim() : "";
   if (!id || !name) return null;
+  const provider = normalizeUpstreamProvider(source.provider);
   return {
     id,
     name,
-    apiMode: normalizeAPIMode(source.apiMode),
+    ...(source.provider !== undefined ? { provider } : {}),
+    apiMode: provider === "openai" ? normalizeAPIMode(source.apiMode) : "images",
     responsesTransport: normalizeResponsesTransport(source.responsesTransport),
     requestPolicy: normalizeRequestPolicy(source.requestPolicy),
     imagesNewAPICompat: source.imagesNewAPICompat === true,
@@ -328,6 +334,7 @@ function buildProfilePatch(
 ): Partial<Omit<UpstreamProfile, "id" | "createdAt">> & { apiKey?: string } {
   return {
     name: incoming.name,
+    provider: incoming.provider ?? "openai",
     apiMode: incoming.apiMode,
     responsesTransport: incoming.responsesTransport ?? "sse",
     requestPolicy: incoming.requestPolicy,
@@ -366,6 +373,7 @@ export async function applyParsedUpstreamConfigImport(
 
     const newId = await actions.createProfile({
       name: incoming.name,
+      provider: incoming.provider ?? "openai",
       apiMode: incoming.apiMode,
       responsesTransport: incoming.responsesTransport ?? "sse",
       requestPolicy: incoming.requestPolicy,

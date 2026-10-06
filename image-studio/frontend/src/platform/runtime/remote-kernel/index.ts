@@ -3,10 +3,10 @@ import {
   MAX_AUTO_RETRY_COUNT,
   MAX_ATTEMPTS,
   buildPromptOptimizePayload,
+  effectiveAPIMode,
   extractInvalidSize,
   fileNameFromPath,
   isRetryableRaw,
-  normalizeAPIMode,
   normalizeAutoRetryCount,
   normalizeBaseURL,
   repairSizeForOpenAI,
@@ -54,6 +54,7 @@ export async function runRemoteImageJob(
         textModelID: request.payload.fallbackProfile.textModelID || request.payload.textModelID,
         imageModelID: request.payload.fallbackProfile.imageModelID || request.payload.imageModelID,
         reasoningEffort: request.payload.fallbackProfile.reasoningEffort || request.payload.reasoningEffort,
+        provider: request.payload.fallbackProfile.provider || request.payload.provider,
         apiMode: request.payload.fallbackProfile.apiMode || request.payload.apiMode,
         responsesTransport: request.payload.fallbackProfile.responsesTransport || request.payload.responsesTransport,
         requestPolicy: request.payload.fallbackProfile.requestPolicy || request.payload.requestPolicy,
@@ -77,7 +78,7 @@ export async function runRemoteImageJob(
         if (activeRequest.payload.allowInsecureConnection && !shouldUseAndroidNativeHTTP()) {
           throw new RemoteKernelError("允许不安全连接需要桌面本地内核或 Android 原生内核；浏览器不能绕过 HTTPS 证书校验");
         }
-        const apiMode = normalizeAPIMode(activeRequest.payload.apiMode);
+        const apiMode = effectiveAPIMode(activeRequest.payload.provider || "openai", activeRequest.payload.apiMode);
         if (apiMode === "images") {
           return await requestImagesOnce(activeRequest, attempt, maxAttempts, callbacks);
         }

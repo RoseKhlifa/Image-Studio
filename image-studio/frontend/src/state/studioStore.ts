@@ -1,3 +1,5 @@
+import { mergeHistoryItems } from "../lib/history";
+import { createFailureAlertGate } from "../lib/failureAlert";
 import { create } from "zustand";
 import {
   DEFAULT_AUTO_RETRY_COUNT,
@@ -67,7 +69,7 @@ import {
   loadHistoryPage,
 } from "../lib/storage";
 import {
-  compatibilityExportFingerprint,
+  createCompatibilityExportChangeDetector,
   importCompatibilityStateIfNewer,
   readIgnoredReleaseTag,
   scheduleCompatibilityExport,
@@ -76,7 +78,14 @@ import {
 import { normalizeAppUpdateInfo } from "../lib/appUpdate.ts";
 import { appVersion } from "../lib/version.ts";
 import { normalizeSavePromptRequest, type SavePromptRequest } from "../lib/savePromptState";
-import { detectImageMimeTypeFromBase64 } from "../lib/images";
+import { detectImageMimeTypeFromBase64, prioritizeImageSource } from "../lib/images";
+import {
+  createFullEditableMaskDataURL,
+  loadImageDimensionsFromSource,
+  normalizeImportedMaskDataURL,
+  renderMaskPNGDataURL,
+  type MaskDimensions,
+} from "../lib/maskEditor";
 import {
   readSavePromptSuppressed,
   writeSavePromptSuppressed,
@@ -122,6 +131,7 @@ import { isMac, readRuntimePlatformState } from "../platform";
 import { dispatchFullscreenResize, setNativeFullscreen } from "../platform/nativeFullscreen";
 import {
   activeRuntimePatch,
+  completeWorkspaceJob,
   apiModeLabel,
   defaultBatchProcessConfig,
   defaultLoopGenerationConfig,
@@ -159,23 +169,20 @@ import { buildMacWorkspacePreview, buildWindowsRightRailPreview, readPreviewScen
 import {
   applyTheme,
   augmentPromptWithAnnotations,
-  buildMaskPNGDataURL,
   clearLegacyModeLocalStorage,
   genId,
   imageDims,
   loadModeConfig,
+  loadImageDims,
   loadStoredActiveProfileId,
   loadStoredAIProfileId,
   loadStoredProfiles,
-  MAX_HISTORY_ITEMS,
   persistActiveProfileId,
   persistAIProfileId,
   persistProfiles,
-  persistTrimmedHistory,
   registerTrustedOutputRoots,
   stripDataURLPrefix,
   tempDataURLFromB64,
-  trimHistory,
 } from "./studioStore.shared";
 import type { ModeConfig, PromptOptimizeRequest, Stroke, StudioState, UndoEntry } from "./studioStore.types";
 import {
@@ -205,6 +212,7 @@ type RuntimeGenerateOptions = GenerateOptionsLike & {
 };
 
 type JobSnapshot = {
+  failureAlert: (message: string) => boolean;
   workspaceId: string;
   apiMode: APIModeValue;
   batchIndex: number;
@@ -322,6 +330,18 @@ function launchQueuedLoopJobs(controller: LoopRunController): void {
         if (!current || current !== controller) return;
         if (status === "error" && !batchQueueMode) {
           stopLoopRun(controller.workspaceId);
+          useStudioStore.setState((state) => {
+            const runtime = workspaceRuntimeFromState(state, controller.workspaceId);
+            const patch: WorkspacePatch = {
+              runningJobs: runtime.runningJobs,
+              jobsCompleted: runtime.jobsCompleted,
+              jobsTotal: runtime.runningJobs.length > 0 ? runtime.jobsCompleted + runtime.runningJobs.length : 0,
+            };
+            return {
+              workspaces: patchWorkspaceRuntime(state.workspaces, controller.workspaceId, patch),
+              ...(state.activeWorkspaceId === controller.workspaceId ? activeRuntimePatch(patch) : {}),
+            } as Partial<StudioState>;
+          });
           return;
         }
         const currentState = useStudioStore.getState();
@@ -640,6 +660,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   textModelID: "",
   imageModelID: "",
   reasoningEffort: "xhigh",
+  provider: "openai",
   proxyMode: "system",
   proxyURL: "",
   apiMode: "responses",
@@ -670,7 +691,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   history: [],
   historyHasMore: false,
   historyLoading: false,
-  historyCursorBeforeDayStart: null,
+  historyCursor: null,
   batchResults: [],
   resultGridOpen: false,
   historyRailCollapsed: false,
@@ -683,6 +704,9 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   annotationColor: "#ff4d4d",
   selectedAnnotationId: null,
   maskDataURL: null,
+  maskTargetPath: null,
+  maskVisible: true,
+  maskOpacity: 0.45,
   strokes: [],
   annotations: [],
   undoStack: [],
@@ -976,13 +1000,24 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       : key === "loopGeneration"
         ? normalizeLoopGenerationConfig(value)
         : value;
+    const previousCurrentImageId = key === "currentImage" ? get().currentImage?.id ?? null : null;
     set({ [key]: normalizedValue } as any);
     if (key === "currentImage") {
       const item = normalizedValue as HistoryItem | null;
+      const currentImageChanged = previousCurrentImageId !== (item?.id ?? null);
       const workspace = get().workspaces.find((w) => w.id === get().activeWorkspaceId);
       set({
         compareB: null,
         resultGridOpen: false,
+        ...(currentImageChanged ? {
+          maskDataURL: null,
+          maskTargetPath: null,
+          strokes: [],
+          annotations: [],
+          selectedAnnotationId: null,
+          undoStack: [],
+          redoStack: [],
+        } : {}),
         workspaces: patchWorkspaceRuntime(get().workspaces, get().activeWorkspaceId, {
           currentImageId: currentImageIdForWorkspaceSnapshot(item, get().streamPreview, get().streamPreviews, workspace?.currentImageId ?? null),
           resultGridOpen: false,
@@ -1083,7 +1118,6 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       get().pushToast(message, "error", 6000);
     } finally {
       dispatchFullscreenResize();
-      set((state) => ({ canvasViewResetTick: state.canvasViewResetTick + 1 }));
     }
   },
   toggleFullscreen: async () => {
@@ -1184,6 +1218,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       }
     }
     const activeProfile = s.profiles.find((p) => p.id === s.activeProfileId);
+    const provider = activeProfile?.provider ?? s.provider;
     const responsesTransport = activeProfile?.responsesTransport ?? s.responsesTransport;
     if (activeProfile?.allowInsecureConnection && s.kernelRuntimeMode === "remote" && !runtimePlatform.isAndroid) {
       set({
@@ -1226,9 +1261,43 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         return;
       }
     }
+    let effectiveSources = s.sources;
+    let annotationDimensions: { w: number; h: number } | null = null;
+    if (s.mode === "edit" && !batchProcessEnabled && s.annotations.length > 0 && s.currentImage) {
+      let annotationTarget = await materializeHistoryItem(s.currentImage).catch(() => null);
+      annotationTarget = await ensureFullHistoryItem(annotationTarget).catch(() => annotationTarget);
+      const targetPath = annotationTarget?.savedPath?.trim() ?? "";
+      if (!annotationTarget || !targetPath) {
+        set({
+          errorMessage: "无法读取标注所在的画布图。请重新导入图片后再添加参考图。",
+          errorCanRetry: false,
+          errorRawPath: null,
+        });
+        return;
+      }
+      const existingTarget = s.sources.find((source) => source.path === targetPath);
+      const targetSource: SourceImage = existingTarget ?? {
+        path: targetPath,
+        name: targetPath.split(/[\\/]/).pop() ?? "annotation-source.png",
+        size: 0,
+        imageBlob: annotationTarget.previewUrl ? null : (annotationTarget.previewBlob ?? annotationTarget.imageBlob ?? null),
+        imageB64: annotationTarget.previewUrl ? undefined : annotationTarget.imageB64,
+        previewUrl: annotationTarget.previewUrl,
+        previewWidth: annotationTarget.previewWidth,
+        previewHeight: annotationTarget.previewHeight,
+      };
+      effectiveSources = prioritizeImageSource(s.sources, targetSource);
+
+      const targetB64 = annotationTarget.imageB64 || await ReadImageAsBase64(targetPath).catch(() => "");
+      annotationDimensions = await loadImageDims(targetB64);
+      if (!annotationDimensions) {
+        annotationDimensions = await loadImageDimensionsFromSource(annotationTarget.fullUrl || annotationTarget.previewUrl || "");
+      }
+    }
+
     let editSourcePaths: string[] = [];
     if (s.mode === "edit" && !batchProcessEnabled) {
-      editSourcePaths = s.sources.map((src) => src.path).filter(Boolean);
+      editSourcePaths = effectiveSources.map((src) => src.path).filter(Boolean);
       if (editSourcePaths.length === 0 && s.currentImage) {
         const materialized = await materializeHistoryItem(s.currentImage).catch(() => null);
         if (materialized?.savedPath) {
@@ -1263,6 +1332,68 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       jobsCompleted: 0,
       runningJobs: [],
     };
+    const hasMaskDraft = !!s.maskDataURL || s.strokes.some((stroke) => !stroke.erase);
+    if (hasMaskDraft && (s.provider === "google" || s.provider === "grok")) {
+      set({
+        errorMessage: `${s.provider === "google" ? "Google Interactions" : "Grok Imagine"} 不支持 OpenAI 蒙版参数，请清空蒙版或切换上游`,
+        errorCanRetry: false,
+        errorRawPath: null,
+      });
+      return;
+    }
+    if (hasMaskDraft && s.mode !== "edit") {
+      set({
+        errorMessage: "蒙版只能用于图生图。请重新进入蒙版工具，让当前画布图成为主参考图。",
+        errorCanRetry: false,
+        errorRawPath: null,
+      });
+      return;
+    }
+    if (hasMaskDraft && batchProcessEnabled) {
+      set({
+        errorMessage: "批量目录处理不支持复用同一张蒙版。请关闭批量处理后再提交。",
+        errorCanRetry: false,
+        errorRawPath: null,
+      });
+      return;
+    }
+
+    let maskDataURL: string | null = null;
+    if (hasMaskDraft) {
+      const maskTargetPath = s.maskTargetPath || editSourcePaths[0] || "";
+      if (!maskTargetPath || maskTargetPath !== editSourcePaths[0]) {
+        set({
+          errorMessage: "蒙版目标已不是第一张参考图。请重新进入蒙版工具确认目标后再提交。",
+          errorCanRetry: false,
+          errorRawPath: null,
+        });
+        return;
+      }
+      const sourceB64 = await ReadImageAsBase64(maskTargetPath).catch(() => "");
+      const maskTargetDims = await loadImageDims(sourceB64);
+      if (!maskTargetDims) {
+        set({
+          errorMessage: "无法读取蒙版目标图的真实尺寸。请重新导入源图后再试。",
+          errorCanRetry: false,
+          errorRawPath: null,
+        });
+        return;
+      }
+      maskDataURL = await renderMaskPNGDataURL({
+        dimensions: maskTargetDims,
+        baseMaskDataURL: s.maskDataURL,
+        strokes: s.strokes,
+      }).catch(() => null);
+      if (!maskDataURL) {
+        set({
+          errorMessage: "当前蒙版没有可编辑区域，请先涂抹需要修改的范围。",
+          errorCanRetry: false,
+          errorRawPath: null,
+        });
+        return;
+      }
+    }
+    const maskB64 = maskDataURL ? stripDataURLPrefix(maskDataURL) : "";
     set({
       ...runPatch,
       batchCount,
@@ -1270,9 +1401,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       resultGridOpen: requestedJobCount > 1,
       compareB: null,
       currentImage: clearCurrentForNewRun ? null : s.currentImage,
-      maskDataURL: null,
       annotations: [],
-      strokes: [],
       workspaces: patchWorkspaceRuntime(s.workspaces, workspaceId, {
         ...runPatch,
         currentImageId: clearCurrentForNewRun ? null : s.currentImage?.id ?? null,
@@ -1280,15 +1409,11 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         resultGridOpen: requestedJobCount > 1,
       }),
     });
-
-    const importedMaskDataURL = s.maskDataURL && s.maskDataURL !== "__PENDING_MASK__" ? s.maskDataURL : null;
-    const maskDataURL = s.mode === "edit"
-      ? (s.strokes.length > 0
-        ? buildMaskPNGDataURL(s.strokes, s.currentImage?.imageB64 ? imageDims(s.currentImage.imageB64) : null)
-        : importedMaskDataURL)
-      : null;
-    const maskB64 = maskDataURL ? stripDataURLPrefix(maskDataURL) : "";
-    let augmentedPrompt = augmentPromptWithAnnotations(s.prompt, s.annotations, s.currentImage?.imageB64 ? imageDims(s.currentImage.imageB64) : null);
+    let augmentedPrompt = augmentPromptWithAnnotations(
+      s.prompt,
+      s.annotations,
+      annotationDimensions ?? (s.currentImage?.imageB64 ? imageDims(s.currentImage.imageB64) : null),
+    );
     // Append style chip suffix if the user picked one (other than "全部").
     const styleSuffix = STYLE_SUFFIXES[s.styleTag];
     if (styleSuffix) {
@@ -1311,8 +1436,8 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     const effectiveEditAutoAspectResolution = normalizedEditAutoAspectResolution === "auto"
       ? "1k"
       : normalizedEditAutoAspectResolution;
-    const editReferenceDimensions = s.sources[0]?.previewWidth && s.sources[0]?.previewHeight
-      ? { width: s.sources[0].previewWidth, height: s.sources[0].previewHeight }
+    const editReferenceDimensions = effectiveSources[0]?.previewWidth && effectiveSources[0]?.previewHeight
+      ? { width: effectiveSources[0].previewWidth, height: effectiveSources[0].previewHeight }
       : s.currentImage?.previewWidth && s.currentImage?.previewHeight
         ? { width: s.currentImage.previewWidth, height: s.currentImage.previewHeight }
         : null;
@@ -1360,6 +1485,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       textModelID: s.textModelID,
       imageModelID: s.imageModelID,
       reasoningEffort: s.reasoningEffort,
+      provider,
       proxyMode: s.proxyMode,
       proxyURL: s.proxyURL,
       responsesTransport: s.responsesTransport,
@@ -1378,6 +1504,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
             textModelID: fallbackProfile.textModelID,
             imageModelID: fallbackProfile.imageModelID,
             reasoningEffort: fallbackProfile.reasoningEffort,
+            provider: fallbackProfile.provider ?? "openai",
             apiMode: fallbackProfile.apiMode,
             responsesTransport: fallbackProfile.responsesTransport ?? "sse",
             requestPolicy: fallbackProfile.requestPolicy,
@@ -1386,11 +1513,13 @@ export const useStudioStore = create<StudioState>((set, get) => ({
           }
         : undefined,
       autoRetryEnabled: batchProcessEnabled ? batchProcess.retryOnFailure : s.autoRetryEnabled,
-      disablePreview: s.partialImages === 0 || (loopEnabled && !loopGeneration.livePreview) || forceDisableStreamPreview,
+      // Partial frames are not locally composited with the mask and would show
+      // temporary drift in protected areas. Keep masked edits on final-only.
+      disablePreview: !!maskB64 || s.partialImages === 0 || (loopEnabled && !loopGeneration.livePreview) || forceDisableStreamPreview,
     };
     const remotePayload: RuntimeGenerateOptions = {
       ...basePayload,
-      sourceImages: s.mode === "edit" && !batchProcessEnabled ? s.sources : undefined,
+      sourceImages: s.mode === "edit" && !batchProcessEnabled ? effectiveSources : undefined,
     };
     const persistedPayload = basePayload;
 
@@ -1416,12 +1545,13 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     }
 
     const snapshotBase = {
+      failureAlert: createFailureAlertGate(),
       workspaceId,
       apiMode: s.apiMode,
       size: resolvedSize,
       quality: resolvedQuality,
       outputFormat: s.outputFormat,
-      sources: s.sources,
+      sources: effectiveSources,
       currentImage: s.currentImage,
       styleTag: s.styleTag,
       loopGeneration,
@@ -1582,7 +1712,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         history: preview.history,
         historyHasMore: false,
         historyLoading: false,
-        historyCursorBeforeDayStart: null,
+        historyCursor: null,
         batchResults: [],
         resultGridOpen: false,
         historyRailCollapsed: false,
@@ -1651,7 +1781,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       return false;
     });
     const initialHistoryPage = await loadHistoryPage({ limit: INITIAL_HISTORY_LOAD });
-    const items = trimHistory(initialHistoryPage.items);
+    const items = mergeHistoryItems(initialHistoryPage.items);
     const historyHasMore = !!initialHistoryPage.nextCursor;
     let promptHistory: string[] = [];
     let promptTemplates: PromptTemplate[] = [];
@@ -1770,6 +1900,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         synth.push({
           id,
           name: "Responses · 默认",
+          provider: "openai",
           apiMode: "responses",
           responsesTransport: "sse",
           requestPolicy: "openai",
@@ -1791,6 +1922,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         synth.push({
           id,
           name: "Images · 默认",
+          provider: "openai",
           apiMode: "images",
           responsesTransport: "sse",
           requestPolicy: "openai",
@@ -1833,7 +1965,8 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       aiProfileId = aiProfile?.id ?? "";
       persistAIProfileId(aiProfileId);
     }
-    const apiMode: APIMode = activeProfile?.apiMode ?? "responses";
+    const provider = activeProfile?.provider ?? "openai";
+    const apiMode: APIMode = provider === "openai" ? activeProfile?.apiMode ?? "responses" : "images";
     const responsesTransport = activeProfile?.responsesTransport ?? "sse";
     const requestPolicy: RequestPolicy = activeProfile?.requestPolicy ?? "openai";
     const imagesNewAPICompat = activeProfile?.imagesNewAPICompat === true;
@@ -1911,8 +2044,8 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       apiKey: activeKey, history: items, promptHistory, promptTemplates, presets, customAspectRatios, theme, fontScale,
       historyHasMore,
       historyLoading: false,
-      historyCursorBeforeDayStart: initialHistoryPage.nextCursor?.beforeDayStart ?? null,
-      apiMode, responsesTransport, requestPolicy, imagesNewAPICompat, baseURL, textModelID, imageModelID, reasoningEffort, kernelRuntimeMode, noPromptRevision,
+      historyCursor: initialHistoryPage.nextCursor,
+      provider, apiMode, responsesTransport, requestPolicy, imagesNewAPICompat, baseURL, textModelID, imageModelID, reasoningEffort, kernelRuntimeMode, noPromptRevision,
       proxyMode: proxyConfig.mode,
       proxyURL: proxyConfig.url,
       outputFormat,
@@ -1970,15 +2103,75 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     void backfillHistoryPreviewRefs(items);
   },
 
+  activateMaskTool: async () => {
+    const state = get();
+    if (!state.currentImage) return false;
+    if (state.provider === "google" || state.provider === "grok") {
+      state.pushToast(`${state.provider === "google" ? "Google Interactions" : "Grok Imagine"} 不支持 OpenAI 蒙版参数`, "warn");
+      return false;
+    }
+    if (state.batchProcess.enabled) {
+      state.pushToast("请先关闭批量目录处理，再编辑单张图片蒙版", "warn");
+      return false;
+    }
+
+    let targetItem = await materializeHistoryItem(state.currentImage).catch(() => null);
+    targetItem = await ensureFullHistoryItem(targetItem).catch(() => null);
+    if (!targetItem?.savedPath) {
+      state.pushToast("当前画布图无法作为蒙版目标，请先将图片保存或重新导入", "error");
+      return false;
+    }
+    if (!targetItem.previewUrl && !targetItem.previewBlob && !targetItem.imageB64) {
+      const ref = await RegisterImportedImageAsset(targetItem.savedPath).catch(() => null);
+      if (ref) targetItem = withMediaAssetRef(targetItem, ref);
+    }
+
+    const targetPath = targetItem.savedPath;
+    if (!targetPath) return false;
+    const existingSources = get().sources;
+    const existingTarget = existingSources.find((source) => source.path === targetPath);
+    const targetSource: SourceImage = existingTarget ?? {
+      path: targetPath,
+      name: targetPath.split(/[\\/]/).pop() ?? "mask-source.png",
+      size: 0,
+      imageBlob: targetItem.previewUrl ? null : (targetItem.previewBlob ?? targetItem.imageBlob ?? null),
+      imageB64: targetItem.previewUrl ? undefined : targetItem.imageB64,
+      previewUrl: targetItem.previewUrl,
+      previewWidth: targetItem.previewWidth,
+      previewHeight: targetItem.previewHeight,
+    };
+    const targetChanged = !!get().maskTargetPath && get().maskTargetPath !== targetPath;
+    set({
+      mode: "edit",
+      editSourceMode: "manual",
+      currentImage: targetItem,
+      resultGridOpen: false,
+      tool: "mask",
+      sources: [targetSource, ...existingSources.filter((source) => source.path !== targetPath)],
+      maskTargetPath: targetPath,
+      maskVisible: true,
+      ...(targetChanged ? {
+        maskDataURL: null,
+        strokes: [],
+        undoStack: [],
+        redoStack: [],
+      } : {}),
+    });
+    if (targetChanged) get().pushToast("已切换蒙版目标并清空旧蒙版", "info");
+    return true;
+  },
+
   importMaskImage: async () => {
     try {
+      if (!await get().activateMaskTool()) return;
       const res = await OpenMaskImageDialog();
       if (!res?.path) return;
       const b64 = res.imageB64;
       if (!b64) throw new Error("未读取到图片内容");
       const beforeStrokes = get().strokes;
       const beforeMaskDataURL = get().maskDataURL;
-      const nextMaskDataURL = tempDataURLFromB64(b64);
+      const nextMaskDataURL = await normalizeImportedMaskDataURL(tempDataURLFromB64(b64));
+      if (!nextMaskDataURL) throw new Error("蒙版未包含可编辑区域");
       const entry: UndoEntry = {
         label: "import-mask",
         undo: () => ({ strokes: beforeStrokes, maskDataURL: beforeMaskDataURL }),
@@ -1988,6 +2181,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         tool: "mask",
         strokes: [],
         maskDataURL: nextMaskDataURL,
+        maskVisible: true,
         undoStack: [...get().undoStack, entry],
         redoStack: [],
         errorMessage: null,
@@ -2012,23 +2206,87 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     };
     set({
       strokes: after,
+      maskTargetPath: get().maskTargetPath || get().currentImage?.savedPath || get().sources[0]?.path || null,
+      maskVisible: true,
       undoStack: [...get().undoStack, entry],
       redoStack: [],
     });
   },
 
+  fillMask: async () => {
+    if (!await get().activateMaskTool()) return;
+    const dimensions = await resolveMaskTargetDimensions(get());
+    if (!dimensions) {
+      get().pushToast("无法读取蒙版目标图尺寸", "error");
+      return;
+    }
+    const beforeStrokes = get().strokes;
+    const beforeMaskDataURL = get().maskDataURL;
+    const nextMaskDataURL = await createFullEditableMaskDataURL(dimensions);
+    const entry: UndoEntry = {
+      label: "fill-mask",
+      undo: () => ({ strokes: beforeStrokes, maskDataURL: beforeMaskDataURL }),
+      redo: () => ({ strokes: [], maskDataURL: nextMaskDataURL }),
+    };
+    set({
+      strokes: [],
+      maskDataURL: nextMaskDataURL,
+      maskVisible: true,
+      undoStack: [...get().undoStack, entry],
+      redoStack: [],
+    });
+    get().pushToast("已全选可编辑区域", "success");
+  },
+
+  invertMask: async () => {
+    if (!await get().activateMaskTool()) return;
+    const dimensions = await resolveMaskTargetDimensions(get());
+    if (!dimensions) {
+      get().pushToast("无法读取蒙版目标图尺寸", "error");
+      return;
+    }
+    const beforeStrokes = get().strokes;
+    const beforeMaskDataURL = get().maskDataURL;
+    const nextMaskDataURL = await renderMaskPNGDataURL({
+      dimensions,
+      baseMaskDataURL: beforeMaskDataURL,
+      strokes: beforeStrokes,
+      invert: true,
+      allowEmpty: true,
+    });
+    if (!nextMaskDataURL) {
+      get().pushToast("无法反选当前蒙版", "error");
+      return;
+    }
+    const entry: UndoEntry = {
+      label: "invert-mask",
+      undo: () => ({ strokes: beforeStrokes, maskDataURL: beforeMaskDataURL }),
+      redo: () => ({ strokes: [], maskDataURL: nextMaskDataURL }),
+    };
+    set({
+      strokes: [],
+      maskDataURL: nextMaskDataURL,
+      maskVisible: true,
+      undoStack: [...get().undoStack, entry],
+      redoStack: [],
+    });
+    get().pushToast("已反选蒙版", "success");
+  },
+
   resetMask: () => {
     const before = get().strokes;
     const beforeMaskDataURL = get().maskDataURL;
+    const beforeMaskTargetPath = get().maskTargetPath;
     if (before.length === 0 && !beforeMaskDataURL) return;
     const entry: UndoEntry = {
       label: "clear-mask",
-      undo: () => ({ strokes: before, maskDataURL: beforeMaskDataURL }),
-      redo: () => ({ strokes: [], maskDataURL: null }),
+      undo: () => ({ strokes: before, maskDataURL: beforeMaskDataURL, maskTargetPath: beforeMaskTargetPath }),
+      redo: () => ({ strokes: [], maskDataURL: null, maskTargetPath: null }),
     };
     set({
       strokes: [],
       maskDataURL: null,
+      maskTargetPath: null,
       undoStack: [...get().undoStack, entry],
       redoStack: [],
     });
@@ -2126,17 +2384,15 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     set({ historyLoading: true });
     deferredHistoryLoadPromise = (async () => {
       try {
-        const currentHistory = get().history;
-        const cursorBeforeDayStart = get().historyCursorBeforeDayStart;
         const nextPage = await loadHistoryPage({
-          cursor: typeof cursorBeforeDayStart === "number" ? { beforeDayStart: cursorBeforeDayStart } : null,
+          cursor: get().historyCursor,
           limit: INITIAL_HISTORY_LOAD,
         });
-        const merged = trimHistory([...currentHistory, ...nextPage.items]);
+        const merged = mergeHistoryItems([...get().history, ...nextPage.items]);
         set({
           history: merged,
-          historyHasMore: !!nextPage.nextCursor && merged.length < MAX_HISTORY_ITEMS,
-          historyCursorBeforeDayStart: nextPage.nextCursor?.beforeDayStart ?? null,
+          historyHasMore: !!nextPage.nextCursor,
+          historyCursor: nextPage.nextCursor,
         });
         void backfillHistoryPreviewRefs(nextPage.items);
       } catch (error) {
@@ -2209,6 +2465,8 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         s.apiMode,
         s.responsesTransport,
         activeProfile?.allowInsecureConnection === true,
+        undefined,
+        activeProfile?.provider ?? "openai",
       );
       set({ isTestingKey: false });
       if (result.responsesTransport === "websocket" && result.responsesTransportOK === false) {
@@ -2426,6 +2684,16 @@ async function launchOneJob(
   hooks: LaunchOneJobHooks = {},
 ): Promise<void> {
   const store = useStudioStore;
+  const notifyFailure = (message: string) => {
+    if (!snapshot.failureAlert(message)) return;
+    const state = store.getState();
+    state.pushToast(`生成失败:${message}`, "error", 8000);
+    void playCompletionSound(state.completionSound).catch(() => undefined);
+    if (state.completionNotification.enabled && typeof document !== "undefined"
+        && document.visibilityState !== "visible") {
+      showSystemNotification("Image Studio · 生成失败", message);
+    }
+  };
   const jobId = cryptoIDFallback();
   let offProgress = () => {};
   let offLog = () => {};
@@ -2461,14 +2729,15 @@ async function launchOneJob(
       let total = 0;
       store.setState((state) => {
         const runtime = workspaceRuntimeFromState(state, snapshot.workspaceId);
-        const remaining = runtime.runningJobs.filter((id) => id !== jobId);
+        const completion = completeWorkspaceJob(runtime, jobId);
+        const remaining = completion.runningJobs;
         const prunedPreview = removeStreamPreview(runtime.streamPreviews, jobId);
-        completed = runtime.jobsCompleted + 1;
-        total = runtime.jobsTotal;
+        completed = completion.completed;
+        total = completion.total;
         const patch: WorkspacePatch = {
           runningJobs: remaining,
           jobsCompleted: completed,
-          jobsTotal: remaining.length === 0 ? 0 : runtime.jobsTotal,
+          jobsTotal: completion.jobsTotal,
           progress: remaining.length === 0 ? null : runtime.progress,
           streamPreview: remaining.length === 0 ? null : prunedPreview.streamPreview,
           streamPreviews: remaining.length === 0 ? {} : prunedPreview.streamPreviews,
@@ -2544,7 +2813,9 @@ async function launchOneJob(
             mode: r.mode as Mode,
             size: snapshot.size,
             quality: snapshot.quality,
-            outputFormat: snapshot.outputFormat,
+            outputFormat: r.outputFormat === "png" || r.outputFormat === "jpeg" || r.outputFormat === "webp"
+              ? r.outputFormat
+              : snapshot.outputFormat,
             parentId,
             createdAt: Date.now(),
             seed: payload.seed || undefined,
@@ -2572,7 +2843,7 @@ async function launchOneJob(
           };
           const { completed: completedNow, total: totalNow } = removeFromRunning();
           const currentItem = totalNow > 1 ? historyItem : activeItem;
-          const trimmed = trimHistory([historyItem, ...store.getState().history]);
+          const trimmed = mergeHistoryItems([historyItem, ...store.getState().history]);
           store.setState((state) => {
             const workspace = state.workspaces.find((w) => w.id === snapshot.workspaceId);
             const existingBatchIDs = state.activeWorkspaceId === snapshot.workspaceId
@@ -2608,8 +2879,7 @@ async function launchOneJob(
                 : {}),
             } as Partial<StudioState>;
           });
-          persistTrimmedHistory(trimmed);
-          persistHistoryItem(historyItem).catch(() => undefined);
+          await persistHistoryItem(historyItem);
           const loopMode = snapshot.loopGeneration.enabled;
           const isFinalLoopResult = loopMode && completedNow === totalNow;
           const shouldPlaySound = shouldPlayCompletionSound({
@@ -2694,6 +2964,7 @@ async function launchOneJob(
             }
           } catch { /* localStorage 不可用 → 静默跳过 */ }
         } catch (err: any) {
+          notifyFailure(`处理结果失败:${err?.message ?? err}`);
           const patch: WorkspacePatch = {
             errorMessage: `处理结果失败:${err?.message ?? err}`,
             errorCanRetry: true,
@@ -2711,6 +2982,7 @@ async function launchOneJob(
     });
     offError = EventsOn(`error:${jobId}`, (e: { message: string; rawPath?: string }) => {
       cleanup();
+      notifyFailure(e?.message ?? "未知错误");
       store.setState((state) => {
         const runtime = workspaceRuntimeFromState(state, snapshot.workspaceId);
         const prunedPreview = removeStreamPreview(runtime.streamPreviews, jobId);
@@ -2752,6 +3024,7 @@ async function launchOneJob(
     }
   } catch (e: any) {
     cleanup();
+    notifyFailure(`提交失败:${e?.message ?? e}`);
     const patch: WorkspacePatch = {
       errorMessage: `提交失败:${e?.message ?? e}`,
       errorCanRetry: true,
@@ -2761,17 +3034,18 @@ async function launchOneJob(
     let totalNow = 0;
     store.setState((state) => {
       const runtime = workspaceRuntimeFromState(state, snapshot.workspaceId);
-      completedNow = runtime.jobsCompleted + 1;
-      totalNow = runtime.jobsTotal;
+      const completion = completeWorkspaceJob(runtime, jobId);
+      completedNow = completion.completed;
+      totalNow = completion.total;
       const nextMeta = { ...state.runningJobMeta };
       delete nextMeta[jobId];
-      const remaining = runtime.runningJobs.filter((id) => id !== jobId);
+      const remaining = completion.runningJobs;
       const prunedPreview = removeStreamPreview(runtime.streamPreviews, jobId);
       const nextPatch: WorkspacePatch = {
         ...patch,
         runningJobs: remaining,
-        jobsTotal: remaining.length === 0 ? 0 : runtime.jobsTotal,
-        jobsCompleted: remaining.length === 0 ? 0 : runtime.jobsCompleted,
+        jobsTotal: completion.jobsTotal,
+        jobsCompleted: completedNow,
         progress: remaining.length === 0 ? null : runtime.progress,
         streamPreview: remaining.length === 0 ? null : prunedPreview.streamPreview,
         streamPreviews: remaining.length === 0 ? {} : prunedPreview.streamPreviews,
@@ -2791,22 +3065,51 @@ async function launchOneJob(
 export { tempDataURLFromB64, writeBase64ToTempFile };
 
 let compatibilityExportEnabled = false;
-let compatibilityFingerprint = "";
+const compatibilityExportChanged = createCompatibilityExportChangeDetector();
 
 function enableCompatibilityExport() {
   const state = useStudioStore.getState();
   compatibilityExportEnabled = true;
-  compatibilityFingerprint = compatibilityExportFingerprint(state);
+  compatibilityExportChanged(state);
   scheduleCompatibilityExport(state);
 }
 
 useStudioStore.subscribe((state) => {
   if (!compatibilityExportEnabled) return;
-  const next = compatibilityExportFingerprint(state);
-  if (next === compatibilityFingerprint) return;
-  compatibilityFingerprint = next;
+  if (!compatibilityExportChanged(state)) return;
   scheduleCompatibilityExport(state);
 });
+
+async function resolveMaskTargetDimensions(state: StudioState): Promise<MaskDimensions | null> {
+  const targetPath = state.maskTargetPath || state.sources[0]?.path || state.currentImage?.savedPath || "";
+  if (targetPath) {
+    const sourceB64 = await ReadImageAsBase64(targetPath).catch(() => "");
+    const dimensions = await loadImageDims(sourceB64);
+    if (dimensions) return dimensions;
+  }
+
+  const current = state.currentImage;
+  if (!current) return null;
+  if (current.imageB64) {
+    const dimensions = await loadImageDims(current.imageB64);
+    if (dimensions) return dimensions;
+  }
+  if (current.imageBlob) {
+    const objectURL = URL.createObjectURL(current.imageBlob);
+    try {
+      const dimensions = await loadImageDimensionsFromSource(objectURL);
+      if (dimensions) return dimensions;
+    } finally {
+      URL.revokeObjectURL(objectURL);
+    }
+  }
+  const dimensions = await loadImageDimensionsFromSource(current.fullUrl || current.previewUrl || "");
+  if (dimensions) return dimensions;
+  if ((current.previewWidth ?? 0) > 0 && (current.previewHeight ?? 0) > 0) {
+    return { w: current.previewWidth!, h: current.previewHeight! };
+  }
+  return null;
+}
 
 async function materializeHistoryItem(item: HistoryItem): Promise<HistoryItem> {
   return materializeHistoryItemRuntime(item, {

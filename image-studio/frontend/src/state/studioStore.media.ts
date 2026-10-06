@@ -19,13 +19,13 @@ import {
   pickPresetStateSnapshot,
 } from "../lib/presets";
 import { base64ToBlob, orderedNavigationItemsForCurrent } from "../lib/images";
-import { persistHistoryItems } from "../lib/storage";
+import { loadAllHistory, persistHistoryItems, removeHistoryOlderThan } from "../lib/storage";
+import { mergeHistoryItems } from "../lib/history";
+import { buildHistoryCleanupPatch, waitForActiveHistoryLoad } from "./historyCleanup";
 import type { HistoryItem, Preset, Toast } from "../types/domain";
 import type { StudioState } from "./studioStore.types";
 import {
   genId,
-  persistTrimmedHistory,
-  trimHistory,
 } from "./studioStore.shared";
 import {
   ensureFullBatchItem,
@@ -93,7 +93,11 @@ export function createMediaActions(store: StateAdapter) {
         resultGridOpen: false,
         compareB: null,
         maskDataURL: null,
+        maskTargetPath: null,
+        strokes: [],
         annotations: [],
+        undoStack: [],
+        redoStack: [],
         tool: "pan",
         workspaces: patchWorkspaceRuntime(state.workspaces, state.activeWorkspaceId, {
           currentImageId: full.id,
@@ -162,31 +166,18 @@ export function createMediaActions(store: StateAdapter) {
     },
 
     async pruneHistoryOlderThanDays(days: number) {
-      await store.getState().loadMoreHistory();
+      if (!Number.isFinite(days) || days <= 0) return 0;
+      await waitForActiveHistoryLoad(store.getState);
       const cutoff = Date.now() - days * 24 * 3600 * 1000;
+      const removedIDs = await removeHistoryOlderThan(cutoff);
       const state = store.getState();
-      const kept = state.history.filter((item) => item.createdAt >= cutoff);
-      const removed = state.history.length - kept.length;
-      if (removed <= 0) return 0;
-      const keepIds = new Set(kept.map((item) => item.id));
-      const nextBatchResults = state.batchResults.filter((item) => keepIds.has(item.id));
-      const nextWorkspaces = state.workspaces.map((w) => ({
-        ...w,
-        currentImageId: w.currentImageId && keepIds.has(w.currentImageId) ? w.currentImageId : null,
-        batchResultIds: (w.batchResultIds ?? []).filter((id) => keepIds.has(id)),
-        resultGridOpen: (w.batchResultIds ?? []).filter((id) => keepIds.has(id)).length > 1 ? w.resultGridOpen : false,
-      }));
       store.setState({
-        history: kept,
-        currentImage: state.currentImage && keepIds.has(state.currentImage.id) ? state.currentImage : null,
-        compareB: state.compareB && keepIds.has(state.compareB.id) ? state.compareB : null,
-        resultDetail: state.resultDetail && keepIds.has(state.resultDetail.id) ? state.resultDetail : null,
-        batchResults: nextBatchResults,
-        resultGridOpen: nextBatchResults.length > 1 && state.resultGridOpen,
-        workspaces: nextWorkspaces,
+        ...buildHistoryCleanupPatch(state, removedIDs),
+        historyHasMore: state.historyHasMore,
+        historyLoading: state.historyLoading,
+        historyCursor: state.historyCursor,
       });
-      persistTrimmedHistory(kept);
-      return removed;
+      return removedIDs.length;
     },
 
     async rotateCurrent(degrees: number) {
@@ -316,28 +307,27 @@ export function createMediaActions(store: StateAdapter) {
     },
 
     async exportHistory() {
-      await store.getState().loadMoreHistory();
       const state = store.getState();
-      if (state.history.length === 0) {
-        state.pushToast("没有可导出的历史记录", "warn");
-        return;
-      }
-      const payload = {
-        version: 1,
-        exportedAt: new Date().toISOString(),
-        count: state.history.length,
-        items: state.history.map(sanitizeHistoryForExport),
-      };
       try {
+        const items = mergeHistoryItems([...state.history, ...await loadAllHistory()]);
+        if (items.length === 0) {
+          state.pushToast("没有可导出的历史记录", "warn");
+          return;
+        }
+        const payload = {
+          version: 1,
+          exportedAt: new Date().toISOString(),
+          count: items.length,
+          items: items.map(sanitizeHistoryForExport),
+        };
         const dst = await exportHistoryForPlatform(JSON.stringify(payload, null, 2), ExportHistoryToFile);
-        if (dst) state.pushToast(`已导出 ${state.history.length} 条 → ${dst.split(/[\\/]/).pop()}`, "success");
+        if (dst) state.pushToast(`已导出 ${items.length} 条 → ${dst.split(/[\\/]/).pop()}`, "success");
       } catch (e: any) {
         state.pushToast(`导出失败:${e?.message ?? e}`, "error");
       }
     },
 
     async importHistory() {
-      await store.getState().loadMoreHistory();
       const state = store.getState();
       try {
         const json = await ImportHistoryFromFile();
@@ -348,8 +338,7 @@ export function createMediaActions(store: StateAdapter) {
           state.pushToast("文件里没有历史记录", "warn");
           return;
         }
-        const existing = new Set(state.history.map((h) => h.id));
-        const merged = [...state.history];
+        const existing = new Set((await loadAllHistory()).map((h) => h.id));
         const toPersist: HistoryItem[] = [];
         let added = 0;
         for (const item of incoming) {
@@ -368,15 +357,12 @@ export function createMediaActions(store: StateAdapter) {
               // Keep the metadata/legacy preview if the file is unavailable in this environment.
             }
           }
-          merged.push(safeItem);
+          existing.add(safeItem.id);
           toPersist.push(safeItem);
           added++;
         }
-        await persistHistoryItems(toPersist).catch(() => undefined);
-        merged.sort((a, b) => b.createdAt - a.createdAt);
-        const trimmed = trimHistory(merged);
-        store.setState({ history: trimmed });
-        persistTrimmedHistory(trimmed);
+        await persistHistoryItems(toPersist);
+        store.setState({ history: mergeHistoryItems([...store.getState().history, ...toPersist]) });
         state.pushToast(`已导入 ${added} 条(跳过 ${incoming.length - added} 条重复/无效)`, "success");
       } catch (e: any) {
         state.pushToast(`导入失败:${e?.message ?? e}`, "error");

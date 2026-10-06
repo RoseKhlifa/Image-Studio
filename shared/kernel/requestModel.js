@@ -10,6 +10,7 @@ export const DEFAULT_IMAGE_STYLE = "default";
 export const DEFAULT_MODERATION = "low";
 export const DEFAULT_REASONING_EFFORT = "xhigh";
 export const DEFAULT_REQUEST_POLICY = "openai";
+export const DEFAULT_UPSTREAM_PROVIDER = "openai";
 export const DEFAULT_PARTIAL_IMAGES = 1;
 export const DEFAULT_AUTO_RETRY_COUNT = 5;
 export const MAX_AUTO_RETRY_COUNT = 10;
@@ -48,6 +49,22 @@ export function openAIAPIEndpoint(baseURL, endpointPath) {
   return `${normalized}/v1/${path}`;
 }
 
+export function normalizeUpstreamProvider(provider) {
+  return provider === "google" || provider === "grok" ? provider : DEFAULT_UPSTREAM_PROVIDER;
+}
+
+export function effectiveAPIMode(provider, apiMode) {
+  return normalizeUpstreamProvider(provider) === "openai" ? normalizeAPIMode(apiMode) : "images";
+}
+
+export function googleAPIEndpoint(baseURL, endpointPath) {
+  let normalized = normalizeBaseURL(baseURL);
+  const path = String(endpointPath || "").trim().replace(/^\/+|\/+$/g, "");
+  if (/\/v1beta\/openai$/i.test(normalized)) normalized = normalized.replace(/\/openai$/i, "");
+  else if (!/\/v1beta$/i.test(normalized)) normalized += "/v1beta";
+  return path ? `${normalized}/${path}` : normalized;
+}
+
 export function isOfficialGoogleGeminiBaseURL(raw) {
   try {
     const parsed = new URL(normalizeBaseURL(raw));
@@ -61,17 +78,13 @@ export function isGoogleNativeNanoBanana2Model(imageModelID) {
   return normalizeImageModel(imageModelID).toLowerCase() === "gemini-3.1-flash-image";
 }
 
-export function shouldUseGoogleNativeInteractions(baseURL, imageModelID) {
-  return isOfficialGoogleGeminiBaseURL(baseURL) && isGoogleNativeNanoBanana2Model(imageModelID);
+export function shouldUseGoogleNativeInteractions(baseURL, imageModelID, provider = "openai") {
+  return normalizeUpstreamProvider(provider) === "google" ||
+    (isOfficialGoogleGeminiBaseURL(baseURL) && isGoogleNativeNanoBanana2Model(imageModelID));
 }
 
 export function googleInteractionsEndpoint(baseURL) {
-  if (!isOfficialGoogleGeminiBaseURL(baseURL)) return "";
-  const parsed = new URL(normalizeBaseURL(baseURL));
-  parsed.pathname = "/v1beta/interactions";
-  parsed.search = "";
-  parsed.hash = "";
-  return parsed.toString();
+  return googleAPIEndpoint(baseURL, "interactions");
 }
 
 export function normalizeAPIMode(apiMode) {
@@ -372,7 +385,6 @@ export function buildResponsesImageTool(payload, sourceDataURLs, options = {}) {
   const partialImages = payload.disablePreview ? 0 : normalizePartialImages(payload.partialImages);
   const tool = {
     type: "image_generation",
-    model: normalizeImageModel(payload.imageModelID),
     action: sourceDataURLs.length > 0 ? "edit" : "generate",
     size,
     quality,
@@ -389,12 +401,30 @@ export function buildResponsesImageTool(payload, sourceDataURLs, options = {}) {
   if (compatExtensions && negativePrompt) tool.negative_prompt = negativePrompt;
 
   const maskMimeType = String(options.maskMimeType || "image/png").trim() || "image/png";
-  if (payload.maskB64) {
+  const maskB64 = validateMaskRequest(payload, sourceDataURLs);
+  if (maskB64) {
     tool.input_image_mask = {
-      image_url: dataURLFromBase64Image(payload.maskB64, maskMimeType),
+      image_url: dataURLFromBase64Image(maskB64, maskMimeType),
     };
   }
   return tool;
+}
+
+function validateMaskRequest(payload, sourceDataURLs) {
+  const maskB64 = String(payload?.maskB64 || "").replace(/\s+/g, "");
+  if (!maskB64) return "";
+  if (payload?.mode !== "edit") throw new Error("蒙版仅支持图生图模式");
+  if (!Array.isArray(sourceDataURLs) || sourceDataURLs.length === 0) {
+    throw new Error("蒙版任务需要至少一张源图");
+  }
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(maskB64) || maskB64.length % 4 === 1) {
+    throw new Error("蒙版图片 base64 无效");
+  }
+  const padding = maskB64.endsWith("==") ? 2 : maskB64.endsWith("=") ? 1 : 0;
+  const decodedBytes = Math.floor((maskB64.length * 3) / 4) - padding;
+  if (decodedBytes <= 0) throw new Error("蒙版图片为空");
+  if (decodedBytes > 50 * 1024 * 1024) throw new Error("蒙版图片超过 50MB 上限");
+  return maskB64;
 }
 
 export function buildResponsesPayload(payload, sourceDataURLs, options = {}) {

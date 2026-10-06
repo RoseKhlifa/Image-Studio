@@ -40,9 +40,11 @@ test("Responses payload defaults partial_images to streaming preview count", () 
     quality: "low",
     outputFormat: "png",
     imageModelID: "gpt-image-2",
-    textModelID: "gpt-5.5",
+    textModelID: "gpt-image-1.5",
     requestPolicy: "openai",
   }, []);
+  assert.equal(payload.model, "gpt-image-1.5");
+  assert.equal("model" in payload.tools[0], false);
   assert.equal(payload.tools[0].partial_images, DEFAULT_PARTIAL_IMAGES);
   assert.equal(payload.reasoning.effort, DEFAULT_REASONING_EFFORT);
 });
@@ -142,4 +144,23 @@ test("repairSizeForOpenAI snaps invalid sizes to nearest legal 16-aligned value"
     size: "880x2048",
     prompt: "cat",
   });
+});
+
+test("Responses mask requires edit mode and a first source image", () => {
+  const base = {
+    prompt: "edit",
+    mode: "generate",
+    maskB64: "iVBORw0KGgptYXNr",
+    imageModelID: "gpt-image-2",
+    textModelID: "gpt-5.5",
+  };
+  assert.throws(() => buildResponsesPayload(base, []), /图生图模式/);
+  assert.throws(() => buildResponsesPayload({ ...base, mode: "edit" }, []), /至少一张源图/);
+  assert.throws(
+    () => buildResponsesPayload(
+      { ...base, mode: "edit", maskB64: "%%%" },
+      ["data:image/png;base64,iVBORw0KGgpzb3VyY2U="],
+    ),
+    /base64 无效/,
+  );
 });

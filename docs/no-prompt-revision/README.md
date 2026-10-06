@@ -1,14 +1,14 @@
 # 原始提示词传递说明
 
-Image Studio 现在默认要求 Responses API 文本模型不要改写用户输入的 prompt。
+Image Studio 现在默认要求 Responses API 请求模型不要改写用户输入的 prompt。
 
-它用于 Responses API 模式。Image Studio 会在 `/v1/responses` 请求顶层加入一段 `instructions`，要求文本模型把用户 prompt 原样传给 `image_generation`，不要重写、扩写、润色或调整措辞。界面不再提供关闭或开启该行为的按钮；所有 Responses 生成请求都按这个策略发送。
+它用于 Responses API 模式。Image Studio 会在 `/v1/responses` 请求顶层加入一段 `instructions`，要求请求模型把用户 prompt 原样传给 `image_generation`，不要重写、扩写、润色或调整措辞。界面不再提供关闭或开启该行为的按钮；所有 Responses 生成请求都按这个策略发送。
 
 ## 适合什么场景
 
 - 你已经精修过 prompt，希望图像模型尽量逐字执行。
 - prompt 里有固定格式、专有名词、镜头参数、构图要求或中英文混排内容。
-- 你想减少 Responses API 文本模型二次发挥导致的风格漂移。
+- 你想减少 Responses API 请求模型二次发挥导致的风格漂移。
 
 ## 功能边界
 

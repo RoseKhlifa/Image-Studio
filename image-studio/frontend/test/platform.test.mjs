@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const realWindow = globalThis.window;
@@ -134,4 +135,9 @@ test("macOS keeps the Apple UI family", async () => {
     assert.equal(state.usesFluentUI, false);
     assert.equal(state.usesAppleUI, true);
   });
+});
+
+test("Android responsive target changes do not remount the workspace shell", async () => {
+  const source = await readFile(new URL("../src/app/components/PlatformWorkspace.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /key=\{targetPlatform\}/);
 });

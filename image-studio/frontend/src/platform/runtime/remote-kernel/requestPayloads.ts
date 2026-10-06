@@ -3,10 +3,16 @@ import {
   imageExtensionForMimeType,
 } from "../../../lib/images.ts";
 import {
+  assertBase64WithinLimit,
+  assertImageDataURLWithinLimit,
+  normalizeMaskForSource,
+} from "../../../lib/maskComposite.ts";
+import {
   buildResponsesPayload as buildSharedResponsesPayload,
   normalizeBackground,
   normalizeImageStyle,
   normalizeInputFidelity,
+  normalizeUpstreamProvider,
   normalizeOutputCompression,
   normalizePartialImages,
   normalizeModeration,
@@ -27,12 +33,31 @@ import {
 import { normalizeBaseURL, normalizeImageModel } from "./common.ts";
 import { RemoteKernelError, type RemoteGeneratePayload, type RemoteJobRequest } from "./types.ts";
 
-export type ImagesRequestProtocol = "openai-images" | "google-interactions";
+export type ImagesRequestProtocol = "openai-images" | "google-interactions" | "grok-images";
 
-const MAX_MASK_IMAGE_BYTES = 50 * 1024 * 1024;
 const GOOGLE_INTERACTION_ASPECT_RATIOS = [
   "1:8", "1:4", "2:3", "3:4", "4:5", "1:1", "5:4", "4:3", "3:2", "16:9", "21:9", "4:1", "8:1",
 ] as const;
+const GROK_ASPECT_RATIOS = [
+  "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "2:1", "1:2", "19.5:9", "9:19.5", "20:9", "9:20",
+] as const;
+
+function grokImageDimensions(size: string): { aspect_ratio: string; resolution: string } | null {
+  const matched = /^(\d+)x(\d+)$/i.exec(size.trim());
+  if (!matched) return null;
+  const width = Number(matched[1]);
+  const height = Number(matched[2]);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
+  const targetRatio = width / height;
+  const aspectRatio = GROK_ASPECT_RATIOS.reduce((best, candidate) => {
+    const [left, right] = candidate.split(":").map(Number);
+    const [bestLeft, bestRight] = best.split(":").map(Number);
+    return Math.abs(Math.log((left / right) / targetRatio)) < Math.abs(Math.log((bestLeft / bestRight) / targetRatio))
+      ? candidate
+      : best;
+  }, "1:1" as (typeof GROK_ASPECT_RATIOS)[number]);
+  return { aspect_ratio: aspectRatio, resolution: Math.max(width, height) >= 1536 ? "2k" : "1k" };
+}
 
 function googleInteractionResponseFormat(size: string, outputFormat: string): Record<string, string> {
   const format: Record<string, string> = { type: "image", delivery: "inline" };
@@ -102,12 +127,18 @@ export async function buildImagesRequestBody(
   const includeExtended = shouldSendExtendedImageParameters(request.payload.requestPolicy);
   const partialImages = request.payload.disablePreview ? 0 : normalizePartialImages(request.payload.partialImages);
   const useNewAPICompat = shouldUseImagesNewAPICompat(request.payload);
+  const provider = normalizeUpstreamProvider(request.payload.provider || "openai");
+  const maskB64 = String(request.payload.maskB64 || "").trim();
 
-  if (shouldUseGoogleNativeInteractions(baseURL, imageModel)) {
+  if (maskB64 && mode !== "edit") {
+    throw new RemoteKernelError("蒙版仅支持图生图模式");
+  }
+
+  if (shouldUseGoogleNativeInteractions(baseURL, imageModel, provider)) {
     if (mode === "edit" && sourceDataURLs.length === 0) {
       throw new RemoteKernelError("Google Interactions 图生图需要至少一张源图");
     }
-    if (request.payload.maskB64) {
+    if (maskB64) {
       throw new RemoteKernelError("Google Interactions 不支持 OpenAI mask 参数；请清除蒙版，或改用支持 /v1/images/edits 的中转站");
     }
     return {
@@ -126,27 +157,64 @@ export async function buildImagesRequestBody(
     };
   }
 
+  if (provider === "grok") {
+    if (mode === "edit" && sourceDataURLs.length === 0) {
+      throw new RemoteKernelError("Grok Imagine 图生图需要至少一张源图");
+    }
+    if (maskB64) {
+      throw new RemoteKernelError("Grok Imagine 不支持 OpenAI mask 参数；请清除蒙版后重试");
+    }
+    const dimensions = grokImageDimensions(size);
+    const payload: Record<string, unknown> = {
+      model: imageModel,
+      prompt: request.payload.prompt,
+      response_format: "b64_json",
+      ...(dimensions ?? {}),
+    };
+    if (mode === "edit") {
+      const images = sourceDataURLs.map((url) => ({ type: "image_url", url }));
+      payload.image = images.length === 1 ? images[0] : images;
+    }
+    return {
+      url: openAIAPIEndpoint(baseURL, mode === "edit" ? "images/edits" : "images/generations"),
+      protocol: "grok-images",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    };
+  }
+
   if (mode === "edit") {
     if (sourceDataURLs.length === 0) {
       throw new RemoteKernelError("图生图模式需要至少一张源图(请先添加参考图)");
     }
+    let uploadSourceDataURLs = sourceDataURLs;
+    let uploadMaskB64 = maskB64;
+    if (maskB64) {
+      let prepared = request.preparedMask;
+      if (!prepared || prepared.maskB64.trim() !== maskB64) {
+        try {
+          prepared = await normalizeMaskForSource(sourceDataURLs[0], maskB64);
+        } catch (error) {
+          throw new RemoteKernelError(`准备蒙版 PNG 失败: ${String((error as any)?.message || error)}`);
+        }
+      }
+      const sourceUpload = assertPreparedPNGDataURL(prepared.sourceUploadDataURL, "蒙版首张源图");
+      uploadMaskB64 = assertPreparedPNGBase64(prepared.maskB64, "蒙版图片");
+      uploadSourceDataURLs = [sourceUpload, ...sourceDataURLs.slice(1)];
+    }
+
     const form = new FormData();
-    for (let i = 0; i < sourceDataURLs.length; i++) {
-      const dataURL = sourceDataURLs[i];
+    for (let i = 0; i < uploadSourceDataURLs.length; i++) {
+      const dataURL = uploadSourceDataURLs[i];
       const payload = dataURL.slice(dataURL.indexOf(",") + 1);
       const mimeType = dataURL.slice(5, dataURL.indexOf(";")) || "image/png";
       const ext = imageExtensionForMimeType(mimeType);
-      form.append(i === 0 ? "image" : "image[]", new Blob([Uint8Array.from(atob(payload), (ch) => ch.charCodeAt(0))], { type: mimeType }), `source-${i + 1}.${ext}`);
+      const fieldName = uploadSourceDataURLs.length > 1 ? "image[]" : "image";
+      form.append(fieldName, new Blob([Uint8Array.from(atob(payload), (ch) => ch.charCodeAt(0))], { type: mimeType }), `source-${i + 1}.${ext}`);
     }
-    if (request.payload.maskB64) {
-      const maskMime = detectImageMimeTypeFromBase64(request.payload.maskB64);
-      if (!maskMime) throw new RemoteKernelError("蒙版图片不是支持的 PNG/JPEG/WebP 格式");
-      const maskBytes = Uint8Array.from(atob(request.payload.maskB64), (ch) => ch.charCodeAt(0));
-      if (maskBytes.byteLength > MAX_MASK_IMAGE_BYTES) {
-        throw new RemoteKernelError(`蒙版图片过大(${maskBytes.byteLength}B > ${MAX_MASK_IMAGE_BYTES}B 上限)`);
-      }
-      const ext = imageExtensionForMimeType(maskMime);
-      form.append("mask", new Blob([maskBytes], { type: maskMime }), `mask.${ext}`);
+    if (uploadMaskB64) {
+      const maskBytes = decodeCheckedBase64(uploadMaskB64, "蒙版图片");
+      form.append("mask", new Blob([maskBytes], { type: "image/png" }), "mask.png");
     }
     form.append("prompt", request.payload.prompt);
     form.append("model", imageModel);
@@ -219,4 +287,44 @@ export async function buildImagesRequestBody(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   };
+}
+
+function assertPreparedPNGDataURL(value: string, label: string): string {
+  let parsed: { mimeType: string; b64: string };
+  try {
+    parsed = assertImageDataURLWithinLimit(value, label);
+  } catch (error) {
+    throw new RemoteKernelError(String((error as any)?.message || error));
+  }
+  if (parsed.mimeType !== "image/png" || detectImageMimeTypeFromBase64(parsed.b64) !== "image/png") {
+    throw new RemoteKernelError(`${label}必须是 PNG`);
+  }
+  return `data:image/png;base64,${parsed.b64}`;
+}
+
+function assertPreparedPNGBase64(value: string, label: string): string {
+  let encoded: string;
+  try {
+    encoded = assertBase64WithinLimit(value, label);
+  } catch (error) {
+    throw new RemoteKernelError(String((error as any)?.message || error));
+  }
+  if (detectImageMimeTypeFromBase64(encoded) !== "image/png") {
+    throw new RemoteKernelError(`${label}必须是 PNG`);
+  }
+  return encoded;
+}
+
+function decodeCheckedBase64(value: string, label: string): ArrayBuffer {
+  const encoded = assertPreparedPNGBase64(value, label);
+  try {
+    const binary = atob(encoded);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index++) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+    return bytes.buffer;
+  } catch {
+    throw new RemoteKernelError(`${label} base64 无效`);
+  }
 }

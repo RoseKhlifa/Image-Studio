@@ -464,6 +464,35 @@ func TestImagesAPIWithRetriesSkipsOuterRetryWhenWorkerAlreadyRetried(t *testing.
 	}
 }
 
+func TestImagesAPIWithRetriesExplainsMissingImageResult(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[]}`))
+	}))
+	defer srv.Close()
+
+	_, _, err := RequestAndExtractWithRetries(
+		context.Background(), nil,
+		Options{
+			APIKey:           "sk-test",
+			Prompt:           "p",
+			Size:             "1024x1024",
+			Quality:          "auto",
+			BaseURL:          srv.URL,
+			APIMode:          APIModeImages,
+			AutoRetryEnabled: func() *bool { value := false; return &value }(),
+		},
+		t.TempDir(), "20260728-100002",
+		nil, nil,
+	)
+	if err == nil || !strings.Contains(err.Error(), "b64_json 或 url") {
+		t.Fatalf("err = %v, want actionable missing-image explanation", err)
+	}
+	if strings.Contains(err.Error(), ErrNoImageInResponse.Error()) {
+		t.Fatalf("err leaked internal sentinel: %v", err)
+	}
+}
+
 func TestRequestAndExtractWithRetriesRepairsInvalidSizeAndRetriesOnce(t *testing.T) {
 	pngB64 := base64.StdEncoding.EncodeToString([]byte("\x89PNG\r\n\x1a\nfixed"))
 	hits := 0

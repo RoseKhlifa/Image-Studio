@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Stage, Layer, Image as KonvaImage, Line, Rect, Arrow } from "react-konva";
 import Konva from "konva";
 import { useStudioStore } from "../../state/studioStore";
+import { useStudioFields } from "../../state/useStudioFields";
 import { HistoryItem } from "../../types/domain";
 import { usePlatform } from "../../platform/context";
 import { ContextMenu, MenuItem } from "../common/ContextMenu";
@@ -16,15 +17,16 @@ import { StreamPreviewBadge } from "./StreamPreviewBadge";
 import { streamPreviewItemsFromPreviews } from "../../state/studioStore.streamPreview";
 import { historyFullSrc, orderedNavigationItemsForCurrent, sortHistoryItemsByCreatedAtAsc } from "../../lib/images";
 import { DragExportHandle } from "./DragExportHandle";
+import { MaskOverlayLayer } from "./MaskOverlayLayer";
 
-export function CanvasStage() {
+function CanvasStageContent() {
   const {
     currentImage, tool, brushSize, brushMode,
     annotationKind, annotationColor,
     selectedAnnotationId,
     annotations, addAnnotation, removeAnnotation, clearAnnotations,
-    setMaskDataURL,
     maskDataURL,
+    maskVisible, maskOpacity, activateMaskTool,
     strokes, pushStroke,
     undoStack, redoStack, undo, redo,
     compareB, compareSplit, setCompareSplit, setCompareB,
@@ -34,24 +36,38 @@ export function CanvasStage() {
     runningJobs,
     jobsTotal,
     jobsCompleted,
+    fullscreen,
     toggleFullscreen,
     history,
     batchResults, resultGridOpen, selectBatchResult, closeResultGrid,
     canvasViewResetTick,
     stepBatchResult,
-  } = useStudioStore();
+    activeWorkspaceId, mode, prompt, size, quality, outputFormat,
+  } = useStudioFields([
+    "currentImage", "tool", "brushSize", "brushMode",
+    "annotationKind", "annotationColor", "selectedAnnotationId", "annotations",
+    "addAnnotation", "removeAnnotation", "clearAnnotations", "maskDataURL",
+    "maskVisible", "maskOpacity", "activateMaskTool", "strokes",
+    "pushStroke", "undoStack", "redoStack", "undo",
+    "redo", "compareB", "compareSplit", "setCompareSplit",
+    "setCompareB", "isRunning", "cancel", "errorMessage",
+    "setField", "streamPreview", "streamPreviews", "runningJobs",
+    "jobsTotal", "jobsCompleted", "fullscreen", "toggleFullscreen",
+    "history", "batchResults", "resultGridOpen", "selectBatchResult",
+    "closeResultGrid", "canvasViewResetTick", "stepBatchResult",
+    "activeWorkspaceId", "mode", "prompt", "size", "quality", "outputFormat",
+  ]);
   const { isMac } = usePlatform();
   const streamPreviewItems = streamPreviewItemsFromPreviews(streamPreviews, {
-    workspaceId: useStudioStore.getState().activeWorkspaceId,
-    mode: useStudioStore.getState().mode,
-    prompt: useStudioStore.getState().prompt,
-    size: useStudioStore.getState().size,
-    quality: useStudioStore.getState().quality,
-    outputFormat: useStudioStore.getState().outputFormat,
+    workspaceId: activeWorkspaceId,
+    mode, prompt, size, quality, outputFormat,
     currentImage,
   });
-  const orderedBatchResults = sortHistoryItemsByCreatedAtAsc(batchResults);
-  const navigationItems = orderedNavigationItemsForCurrent(currentImage?.id, history, batchResults);
+  const orderedBatchResults = useMemo(() => sortHistoryItemsByCreatedAtAsc(batchResults), [batchResults]);
+  const navigationItems = useMemo(
+    () => orderedNavigationItemsForCurrent(currentImage?.id, history, batchResults),
+    [currentImage?.id, history, batchResults],
+  );
   const liveBatchSlotCount = runningJobs.length;
   const liveBatchSlots: BatchGridSlot[] = Array.from({ length: liveBatchSlotCount }, (_, index) => ({ type: "pending", id: `pending-${index}` }));
   for (const item of [...orderedBatchResults].reverse()) {
@@ -81,13 +97,11 @@ export function CanvasStage() {
 
   const stageRef = useRef<Konva.Stage | null>(null);
   const imageLayerRef = useRef<Konva.Layer | null>(null);
-  const maskLayerRef = useRef<Konva.Layer | null>(null);
   const roRef = useRef<ResizeObserver | null>(null);
 
   const currentImageURL = historyFullSrc(currentImage, null);
   const image = useImageFromSource(currentImage?.imageBlob ?? null, currentImage?.imageB64, currentImageURL);
-  const importedMaskURL = maskDataURL && maskDataURL !== "__PENDING_MASK__" ? maskDataURL : null;
-  const importedMaskImage = useImageFromSource(null, undefined, importedMaskURL);
+  const importedMaskImage = useImageFromSource(null, undefined, maskDataURL);
 
   useEffect(() => {
     if (!currentImage?.previewOnly) return;
@@ -194,23 +208,60 @@ export function CanvasStage() {
   // store (so we don't spam zustand on every mousemove). Forces re-render via
   // a tick counter when the in-progress stroke needs to redraw.
   const drawingRef = useRef<{ active: boolean; current: Stroke | null }>({ active: false, current: null });
+  const previousImageIDRef = useRef(currentImage?.id);
+  const previousCanvasResetTickRef = useRef(canvasViewResetTick);
   const [, setDrawingTick] = useState(0);
+  const [maskCursor, setMaskCursor] = useState<{ x: number; y: number } | null>(null);
 
   // Annotation drag state.
   const [drag, setDrag] = useState<null | { kind: "rect" | "arrow" | "freehand" | "text"; sx: number; sy: number; x: number; y: number }>(null);
   const [canvasMenu, setCanvasMenu] = useState<null | { x: number; y: number }>(null);
 
-  // When the displayed image identity changes, clear the user's manual view
-  // and per-image canvas state. This guarantees the new image starts at fit.
-  // canvasViewResetTick 触发同样的重置 —— 用于 旋转 / 翻转 / 裁剪 这些「就地编辑」
-  // 操作:currentImage.id 没变(就是原来那张),但底图尺寸 / 坐标已变,残留的 pan/zoom
-  // 与蒙版坐标系都失效了。
+  useEffect(() => {
+    const imageChanged = previousImageIDRef.current !== currentImage?.id;
+    previousImageIDRef.current = currentImage?.id;
+    setUserView(null);
+    if (imageChanged) {
+      useStudioStore.setState({
+        maskDataURL: null,
+        maskTargetPath: null,
+        strokes: [],
+        annotations: [],
+        selectedAnnotationId: null,
+        undoStack: [],
+        redoStack: [],
+      });
+    }
+    drawingRef.current = { active: false, current: null };
+    setMaskCursor(null);
+  }, [currentImage?.id]);
+
+  // Transform actions keep the history id but change the underlying pixels
+  // and coordinate system. Skip the initial mount so layout remounts such as
+  // Android fullscreen do not destroy an existing draft.
+  useEffect(() => {
+    const canvasChanged = previousCanvasResetTickRef.current !== canvasViewResetTick;
+    previousCanvasResetTickRef.current = canvasViewResetTick;
+    if (!canvasChanged) return;
+    setUserView(null);
+    useStudioStore.setState({
+      maskDataURL: null,
+      maskTargetPath: null,
+      strokes: [],
+      annotations: [],
+      selectedAnnotationId: null,
+      undoStack: [],
+      redoStack: [],
+    });
+    drawingRef.current = { active: false, current: null };
+    setMaskCursor(null);
+  }, [canvasViewResetTick]);
+
   useEffect(() => {
     setUserView(null);
-    setMaskDataURL(null);
     drawingRef.current = { active: false, current: null };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentImage?.id, canvasViewResetTick]);
+    setMaskCursor(null);
+  }, [fullscreen]);
 
   // setView is the only writer of userView. Treat any explicit pan/zoom as a
   // user override; auto-recenter happens by resetting to null elsewhere.
@@ -251,13 +302,17 @@ export function CanvasStage() {
     };
   }
 
+  function isInsideImage(point: { x: number; y: number }): boolean {
+    return !!image && point.x >= 0 && point.y >= 0 && point.x <= image.width && point.y <= image.height;
+  }
+
   // In-progress freehand annotation buffer (kept in ref to keep mousemove cheap).
   const freehandRef = useRef<number[] | null>(null);
 
   function onMouseDown(e: Konva.KonvaEventObject<MouseEvent>) {
     if (!image) return;
     const local = stagePointerToImageCoord();
-    if (!local) return;
+    if (!local || !isInsideImage(local)) return;
     if (effectiveTool === "mask") {
       drawingRef.current = { active: true, current: { points: [local.x, local.y], size: brushSize, erase: brushMode === "erase" } };
     } else if (effectiveTool === "annotate") {
@@ -310,6 +365,12 @@ export function CanvasStage() {
     if (!image) return;
     const local = stagePointerToImageCoord();
     if (!local) return;
+    const insideImage = isInsideImage(local);
+    setMaskCursor(effectiveTool === "mask" && insideImage ? local : null);
+    if (!insideImage) {
+      if (effectiveTool === "mask" && drawingRef.current.active) finishMaskStroke();
+      return;
+    }
     if (effectiveTool === "mask" && drawingRef.current.active && drawingRef.current.current) {
       drawingRef.current.current.points.push(local.x, local.y);
       setDrawingTick((n) => n + 1);
@@ -322,10 +383,8 @@ export function CanvasStage() {
   }
 
   function onMouseUp() {
-    if (effectiveTool === "mask" && drawingRef.current.active && drawingRef.current.current) {
-      const finished = drawingRef.current.current;
-      drawingRef.current = { active: false, current: null };
-      pushStroke(finished);
+    if (effectiveTool === "mask" && drawingRef.current.active) {
+      finishMaskStroke();
     } else if (effectiveTool === "annotate" && annotationKind === "freehand" && freehandRef.current) {
       const pts = freehandRef.current;
       freehandRef.current = null;
@@ -369,21 +428,16 @@ export function CanvasStage() {
     }
   }
 
-  // Keep the store flag in sync so submit can cheaply know whether any mask
-  // exists, but defer the expensive PNG export until the user actually submits.
-  useEffect(() => {
-    const hasImportedMask = !!maskDataURL && maskDataURL !== "__PENDING_MASK__";
-    if (!image) {
-      setMaskDataURL(null);
-      return;
-    }
-    if (strokes.length === 0) {
-      if (!hasImportedMask) setMaskDataURL(null);
-      return;
-    }
-    const hasWhite = strokes.some((s) => !s.erase);
-    setMaskDataURL(hasWhite ? "__PENDING_MASK__" : null);
-  }, [strokes, image, maskDataURL, setMaskDataURL]);
+  function finishMaskStroke() {
+    const finished = drawingRef.current.current;
+    drawingRef.current = { active: false, current: null };
+    if (finished) pushStroke(finished);
+  }
+
+  function onMouseLeave() {
+    setMaskCursor(null);
+    onMouseUp();
+  }
 
   function resetView() {
     setUserView(null);
@@ -399,6 +453,7 @@ export function CanvasStage() {
 
   useCanvasShortcuts({
     brushSize,
+    brushMode,
     canNavigateBatchResults,
     cancel,
     compareB,
@@ -427,11 +482,16 @@ export function CanvasStage() {
     resetView,
     selectedAnnotationId,
     setBrushSize: (value) => setField("brushSize", value),
+    setBrushMode: (value) => setField("brushMode", value),
     setCompareB,
     setErrorMessage: (value) => setField("errorMessage", value),
     toggleFullscreen,
     setSelectedAnnotationId: (value) => setField("selectedAnnotationId", value),
-    setTool: (value) => setField("tool", value),
+    setTool: (value) => {
+      if (value === "mask") void activateMaskTool();
+      else setField("tool", value);
+    },
+    tool,
     undo,
   });
 
@@ -464,8 +524,14 @@ export function CanvasStage() {
     <>
       <div
         ref={hostRef}
-        className="stage-host"
-        style={{ cursor: !currentImage ? "default" : (effectiveTool === "pan" ? (spacePan ? "grabbing" : "grab") : "crosshair") }}
+        className={`stage-host ${currentImage ? "has-image" : ""}`}
+        style={{ cursor: !currentImage
+          ? "default"
+          : effectiveTool === "pan"
+            ? (spacePan ? "grabbing" : "grab")
+            : effectiveTool === "mask" && maskCursor
+              ? "none"
+              : "crosshair" }}
       >
         {!currentImage && !showingResultGrid && <EmptyState />}
         {streamPreview && currentImage && !showingLiveBatchGrid ? (
@@ -526,7 +592,7 @@ export function CanvasStage() {
           onMouseDown={onMouseDown}
           onMouseMove={onMouseMove}
           onMouseUp={onMouseUp}
-          onMouseLeave={onMouseUp}
+          onMouseLeave={onMouseLeave}
           onDblClick={onStageDblClick}
           onContextMenu={openCanvasMenu}
         >
@@ -534,47 +600,24 @@ export function CanvasStage() {
             {image && <KonvaImage image={image} listening={false} />}
           </Layer>
 
-          <Layer ref={maskLayerRef}>
-            {image && importedMaskImage ? (
-              <KonvaImage
-                image={importedMaskImage}
-                width={image.width}
-                height={image.height}
-                opacity={0.35}
-                listening={false}
-              />
-            ) : null}
-            {strokes.map((s, i) => (
-              <Line
-                key={i}
-                points={s.points}
-                stroke={s.erase ? "rgba(226,85,85,0.55)" : "rgba(77,124,255,0.55)"}
-                strokeWidth={s.size}
-                lineCap="round"
-                lineJoin="round"
-                tension={0.4}
-                dash={s.erase ? [s.size * 0.4, s.size * 0.4] : undefined}
-                listening={false}
-                globalCompositeOperation={s.erase ? "destination-out" : "source-over"}
-              />
-            ))}
-            {drawingRef.current.current && (
-              <Line
-                // ★ 必须 .slice() 出新数组引用 —— onMouseMove 原地 push 不会改变
-                // points 数组引用,react-konva 走 prop 浅比较会跳过更新,导致
-                // 拖拽期间只画起点 / 终点,松手才一次性补全所有中间点。
-                points={drawingRef.current.current.points.slice()}
-                stroke={drawingRef.current.current.erase ? "rgba(226,85,85,0.55)" : "rgba(77,124,255,0.55)"}
-                strokeWidth={drawingRef.current.current.size}
-                lineCap="round"
-                lineJoin="round"
-                tension={0.4}
-                dash={drawingRef.current.current.erase ? [drawingRef.current.current.size * 0.4, drawingRef.current.current.size * 0.4] : undefined}
-                listening={false}
-                globalCompositeOperation={drawingRef.current.current.erase ? "destination-out" : "source-over"}
-              />
-            )}
-          </Layer>
+          {image ? (
+            <MaskOverlayLayer
+              image={image}
+              baseMaskImage={importedMaskImage}
+              strokes={strokes}
+              draft={drawingRef.current.current ? {
+                ...drawingRef.current.current,
+                points: drawingRef.current.current.points.slice(),
+              } : null}
+              visible={maskVisible}
+              opacity={maskOpacity}
+              cursor={maskCursor}
+              showCursor={effectiveTool === "mask" && !spacePan}
+              brushSize={brushSize}
+              brushMode={brushMode}
+              viewScale={view.scale}
+            />
+          ) : null}
 
           <Layer>
             {annotations.map((a) => (
@@ -636,6 +679,8 @@ export function CanvasStage() {
     </>
   );
 }
+
+export const CanvasStage = memo(CanvasStageContent);
 
 function modeLabelForMenu(item: HistoryItem) {
   return item.mode === "edit" ? "设为继续编辑源图" : "设为图生图源图";

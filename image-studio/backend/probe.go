@@ -17,7 +17,11 @@ const probeUpstreamTimeout = 20 * time.Second
 const probeUpstreamMaxBody = 1 << 20
 
 type modelsListProbeResponse struct {
-	Data []upstreamModelDescriptorJSON `json:"data"`
+	Data   []upstreamModelDescriptorJSON `json:"data"`
+	Models []struct {
+		Name        string `json:"name"`
+		DisplayName string `json:"displayName"`
+	} `json:"models"`
 }
 
 type upstreamModelDescriptorJSON struct {
@@ -46,11 +50,22 @@ func probeUpstream(parent context.Context, opts ProbeUpstreamOptions) (ProbeUpst
 	ctx, cancel := context.WithTimeout(parent, probeUpstreamTimeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, client.OpenAIAPIEndpoint(baseURL, "models"), nil)
+	provider := client.NormalizeProvider(client.Provider(opts.Provider))
+	modelsEndpoint := client.OpenAIAPIEndpoint(baseURL, "models")
+	endpointLabel := "/v1/models"
+	if provider == client.ProviderGoogle {
+		modelsEndpoint = client.GoogleAPIEndpoint(baseURL, "models")
+		endpointLabel = "/v1beta/models"
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsEndpoint, nil)
 	if err != nil {
 		return ProbeUpstreamResult{}, fmt.Errorf("构造测活请求失败: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+apiKey)
+	if provider == client.ProviderGoogle {
+		req.Header.Set("X-Goog-Api-Key", apiKey)
+	} else {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", client.UserAgent())
 
@@ -72,9 +87,9 @@ func probeUpstream(parent context.Context, opts ProbeUpstreamOptions) (ProbeUpst
 			summary = readErr.Error()
 		}
 		if summary != "" {
-			return ProbeUpstreamResult{}, fmt.Errorf("上游 /v1/models 返回 %d: %s", resp.StatusCode, summary)
+			return ProbeUpstreamResult{}, fmt.Errorf("上游 %s 返回 %d: %s", endpointLabel, resp.StatusCode, summary)
 		}
-		return ProbeUpstreamResult{}, fmt.Errorf("上游 /v1/models 返回 %d", resp.StatusCode)
+		return ProbeUpstreamResult{}, fmt.Errorf("上游 %s 返回 %d", endpointLabel, resp.StatusCode)
 	}
 	if readErr != nil {
 		return ProbeUpstreamResult{}, fmt.Errorf("读取上游响应失败: %w", readErr)
@@ -82,10 +97,18 @@ func probeUpstream(parent context.Context, opts ProbeUpstreamOptions) (ProbeUpst
 
 	var parsed modelsListProbeResponse
 	if err := json.Unmarshal(body, &parsed); err != nil {
-		return ProbeUpstreamResult{}, fmt.Errorf("上游 /v1/models 返回的 JSON 无效: %w", err)
+		return ProbeUpstreamResult{}, fmt.Errorf("上游 %s 返回的 JSON 无效: %w", endpointLabel, err)
 	}
-	if parsed.Data == nil {
-		return ProbeUpstreamResult{}, fmt.Errorf("上游 /v1/models 响应缺少 data 数组")
+	if provider == client.ProviderGoogle {
+		for _, item := range parsed.Models {
+			id := strings.TrimPrefix(strings.TrimSpace(item.Name), "models/")
+			if id == "" {
+				continue
+			}
+			parsed.Data = append(parsed.Data, upstreamModelDescriptorJSON{ID: id, Object: "model", OwnedBy: "google", DisplayName: item.DisplayName})
+		}
+	} else if parsed.Data == nil {
+		return ProbeUpstreamResult{}, fmt.Errorf("上游 %s 响应缺少 data 数组", endpointLabel)
 	}
 	models := make([]UpstreamModelDescriptor, 0, len(parsed.Data))
 	for _, item := range parsed.Data {
@@ -104,7 +127,7 @@ func probeUpstream(parent context.Context, opts ProbeUpstreamOptions) (ProbeUpst
 		ModelCount: len(parsed.Data),
 		Models:     models,
 	}
-	if strings.TrimSpace(opts.APIMode) == string(client.APIModeResponses) &&
+	if provider == client.ProviderOpenAI && strings.TrimSpace(opts.APIMode) == string(client.APIModeResponses) &&
 		client.NormalizeProxyTransportValue(strings.TrimSpace(opts.ResponsesTransport)) == string(client.ResponsesTransportWebSocket) {
 		result.ResponsesTransport = string(client.ResponsesTransportWebSocket)
 		if wsErr := client.ProbeResponsesWebSocket(ctx, client.ProbeResponsesWebSocketOptions{

@@ -49,6 +49,9 @@ func BuildPayload(opts Options) ([]byte, error) {
 	}
 	action := "generate"
 	imageURLs := opts.EffectiveImageDataURLs()
+	if err := validateResponsesMaskInput(opts.Mode, imageURLs, opts.MaskB64); err != nil {
+		return nil, err
+	}
 	for _, url := range imageURLs {
 		content = append(content, map[string]any{
 			"type":      "input_image",
@@ -65,7 +68,6 @@ func BuildPayload(opts Options) ([]byte, error) {
 	}
 	tool := map[string]any{
 		"type":           "image_generation",
-		"model":          imgModel,
 		"action":         action,
 		"size":           size,
 		"quality":        quality,
@@ -84,9 +86,9 @@ func BuildPayload(opts Options) ([]byte, error) {
 	if supportsImageModeration(imgModel) {
 		tool["moderation"] = moderation
 	}
-	if opts.MaskB64 != "" {
+	if strings.TrimSpace(opts.MaskB64) != "" {
 		tool["input_image_mask"] = map[string]any{
-			"image_url": imageDataURLFromBase64(opts.MaskB64, ""),
+			"image_url": imageDataURLFromBase64(strings.TrimSpace(opts.MaskB64), ""),
 		}
 	}
 	if includeExtended && opts.Seed != 0 {

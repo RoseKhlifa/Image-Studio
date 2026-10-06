@@ -5,13 +5,12 @@ import {
   RegisterTrustedOutputDir,
 } from "../platform/runtime/host";
 import type { ThemeMode, HistoryItem, Annotation } from "../types/domain";
-import type { ModeConfig, Stroke } from "./studioStore.types";
+import type { ModeConfig } from "./studioStore.types";
 import { isWindows } from "../platform";
 import { ACTIVE_PROFILE_LS_KEY, PROFILES_LS_KEY, tryParseProfile } from "../lib/profiles";
 export { loadStoredAIProfileId, persistAIProfileId } from "../lib/profiles";
 import type { UpstreamProfile } from "../types/domain";
-import { pruneHistoryStorage } from "../lib/storage";
-import { dataURLFromBase64, getImageDimensionsFromBase64 } from "../lib/images";
+import { dataURLFromBase64, detectImageMimeTypeFromBase64, getImageDimensionsFromBase64 } from "../lib/images";
 
 export const EMPTY_MODE_CFG: ModeConfig = {
   baseURL: "",
@@ -20,8 +19,6 @@ export const EMPTY_MODE_CFG: ModeConfig = {
   imageModelID: "",
   concurrencyLimit: 0,
 };
-
-export const MAX_HISTORY_ITEMS = 120;
 
 let detachSystemThemeListener: (() => void) | null = null;
 
@@ -149,34 +146,6 @@ export function stripDataURLPrefix(dataURL: string): string {
   return idx >= 0 ? dataURL.slice(idx + 1) : dataURL;
 }
 
-export function buildMaskPNGDataURL(strokes: Stroke[], dims: { w: number; h: number } | null): string | null {
-  if (!dims || strokes.length === 0) return null;
-  const c = document.createElement("canvas");
-  c.width = dims.w;
-  c.height = dims.h;
-  const ctx = c.getContext("2d");
-  if (!ctx) return null;
-  ctx.fillStyle = "#000";
-  ctx.fillRect(0, 0, c.width, c.height);
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
-  let hasWhite = false;
-  for (const s of strokes) {
-    ctx.strokeStyle = s.erase ? "#000" : "#fff";
-    ctx.lineWidth = s.size;
-    ctx.beginPath();
-    for (let i = 0; i < s.points.length; i += 2) {
-      const x = s.points[i];
-      const y = s.points[i + 1];
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    }
-    ctx.stroke();
-    if (!s.erase) hasWhite = true;
-  }
-  return hasWhite ? c.toDataURL("image/png") : null;
-}
-
 export async function registerTrustedOutputRoots(roots: string[]): Promise<void> {
   for (const root of roots) {
     if (!root.trim()) continue;
@@ -184,18 +153,23 @@ export async function registerTrustedOutputRoots(roots: string[]): Promise<void>
   }
 }
 
-export function trimHistory(items: HistoryItem[]): HistoryItem[] {
-  if (items.length <= MAX_HISTORY_ITEMS) return items;
-  return items.slice(0, MAX_HISTORY_ITEMS);
-}
-
-export function persistTrimmedHistory(items: HistoryItem[]): void {
-  const keptIDs = items.map((item) => item.id);
-  void pruneHistoryStorage(keptIDs);
-}
-
 export function imageDims(b64: string): { w: number; h: number } | null {
   return getImageDimensionsFromBase64(b64);
+}
+
+export async function loadImageDims(b64: string): Promise<{ w: number; h: number } | null> {
+  if (!b64) return null;
+  const fast = detectImageMimeTypeFromBase64(b64) === "image/png" ? imageDims(b64) : null;
+  if (fast) return fast;
+  if (typeof Image === "undefined") return null;
+  return new Promise((resolve) => {
+    const image = new Image();
+    image.onload = () => resolve(image.naturalWidth > 0 && image.naturalHeight > 0
+      ? { w: image.naturalWidth, h: image.naturalHeight }
+      : null);
+    image.onerror = () => resolve(null);
+    image.src = tempDataURLFromB64(b64);
+  });
 }
 
 export function augmentPromptWithAnnotations(
@@ -215,5 +189,5 @@ export function augmentPromptWithAnnotations(
     return `${vPart}${hPart}部`;
   };
   const positions = rects.map(describe).join("、");
-  return `${prompt}\n(请重点关注${positions}标注区域)`;
+  return `${prompt}\n(请重点关注第 1 张参考图的${positions}标注区域)`;
 }

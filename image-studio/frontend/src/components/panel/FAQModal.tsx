@@ -36,19 +36,19 @@ export function FAQModal({ open, onClose }: { open: boolean; onClose: () => void
                 <code>image_generation</code> 工具触发生图，支持 <code>HTTP SSE</code> 与 <code>WebSocket mode</code> 两种传输。
                 <strong>能防 Cloudflare 524/504 超时</strong>(图像推理常常超过 100 秒)。
                 <br />
-                <strong>Key 要绑「拥有 gpt-5.5 模型的分组」</strong>(中转站后台通常叫「余额分组」或「套餐分组」),
-                不要选 image-2 分组。
+                <strong>Key 需要拥有请求模型的权限</strong>(中转站后台通常按「余额分组」或「套餐分组」授权)。
+                请求模型可以是该 Responses 上游支持的文本或图像模型。
               </li>
               <li>
                 <strong>Images API · 兼容广</strong>:标准 OpenAI <code>/v1/images/generations</code>(文生图)+
                 <code>/v1/images/edits</code>(图生图,multipart 上传)。一次性 JSON 响应,无 SSE 保活,
                 长推理上 CF 超时风险更高。几乎所有 OpenAI 兼容中转站都开了这两个端点。
                 <br />
-                <strong>Key 可使用标准的 image-2 / image API 分组</strong>,不需要 gpt-5.5 权限。
+                <strong>Key 需要拥有请求模型及 Images 端点权限</strong>。
               </li>
             </ul>
             <p>
-              <strong>选哪个?</strong>看你 key 绑的是哪个分组。
+              <strong>选哪个?</strong>看上游实际支持的端点和请求模型。
               两边都有的话优先 Responses(SSE 更抗 524)。
             </p>
             <p>
@@ -96,23 +96,19 @@ export function FAQModal({ open, onClose }: { open: boolean; onClose: () => void
         </details>
 
         <details className="faq-item">
-          <summary className="faq-summary">能换其他文本 / 图像模型吗?</summary>
+          <summary className="faq-summary">能换其他请求模型吗?</summary>
           <div className="faq-content">
             <p>
-              可以。在「🔧 上游配置」里填即可,不同 API 形态用到的字段不一样:
+              可以。在「🔧 上游配置」里填写请求模型 ID 即可:
             </p>
             <ul>
               <li>
-                <strong>Responses API</strong> 用<strong>两个</strong>模型 ID:
-                <ul>
-                  <li><strong>文本模型 ID</strong>(默认 <code>gpt-5.5</code>):承担推理 + 调用 image_generation 工具</li>
-                  <li><strong>图像模型 ID</strong>(默认 <code>gpt-image-2</code>):工具实际用哪个图像模型出图</li>
-                </ul>
+                <strong>Responses API</strong> 只用<strong>一个</strong>请求模型 ID，直接写入请求的 <code>model</code> 字段。它可以是文本模型，也可以是上游支持的图像模型；应用不会再要求分别配置两种模型。
               </li>
               <li>
                 <strong>Images API</strong> 只用<strong>一个</strong>模型 ID:
                 <ul>
-                  <li><strong>图像模型 ID</strong>(默认 <code>gpt-image-2</code>):通常直接传给 <code>/v1/images/generations</code> 的 <code>model</code> 字段。Google 官方主机上的 <code>gemini-3.1-flash-image</code> 会按官方 Interactions API 请求；第三方 Gemini / Imagen 中转仍使用非流式 Images 兼容请求。文本模型 ID 在此模式下不读。</li>
+                  <li><strong>请求模型 ID</strong>(通常为 <code>gpt-image-2</code>):直接传给 <code>/v1/images/generations</code> 的 <code>model</code> 字段。Google 官方主机上的 <code>gemini-3.1-flash-image</code> 会按官方 Interactions API 请求；第三方 Gemini / Imagen 中转仍使用非流式 Images 兼容请求。</li>
                 </ul>
               </li>
             </ul>

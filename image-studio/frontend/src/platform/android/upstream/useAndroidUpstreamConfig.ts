@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { GetStoredAPIKey, probeCurrentUpstream } from "../../runtime/host";
 import { keyringUserFor } from "../../../lib/profiles";
 import { useStudioStore } from "../../../state/studioStore";
-import type { APIMode, ReasoningEffortValue, RequestPolicy, UpstreamProfile } from "../../../types/domain";
+import type { APIMode, ReasoningEffortValue, RequestPolicy, UpstreamProfile, UpstreamProvider } from "../../../types/domain";
 import { buildUpstreamModelCatalog, type UpstreamModelCatalog } from "../../../lib/upstreamModels";
 import {
   applyParsedUpstreamConfigImport,
@@ -16,6 +16,16 @@ export const ANDROID_API_MODE_OPTIONS: Array<{
 }> = [
   { id: "responses", title: "Responses", meta: "SSE 长任务" },
   { id: "images", title: "Images", meta: "标准图像接口" },
+];
+
+export const ANDROID_PROVIDER_OPTIONS: Array<{
+  id: UpstreamProvider;
+  title: string;
+  meta: string;
+}> = [
+  { id: "openai", title: "OpenAI / 兼容", meta: "Responses 或 Images" },
+  { id: "google", title: "Google Gemini", meta: "Interactions 原生协议" },
+  { id: "grok", title: "Grok / xAI", meta: "Imagine 原生协议" },
 ];
 
 export const ANDROID_REQUEST_POLICY_OPTIONS: Array<{
@@ -122,12 +132,22 @@ export function useAndroidUpstreamConfig(open: boolean) {
     && !saving;
 
   function patchDraft(patch: Partial<UpstreamProfile>) {
-    setDraft((current) => (current ? { ...current, ...patch } : current));
+    setDraft((current) => {
+      if (!current) return current;
+      const provider = patch.provider ?? current.provider ?? "openai";
+      return {
+        ...current,
+        ...patch,
+        provider,
+        apiMode: provider === "openai" ? patch.apiMode ?? current.apiMode : "images",
+      };
+    });
   }
 
-  async function handleNew(apiMode: APIMode = "responses") {
+  async function handleNew(provider: UpstreamProvider = "openai") {
     const id = await createProfile({
-      apiMode,
+      provider,
+      apiMode: provider === "openai" ? "responses" : "images",
       requestPolicy: "openai",
       setActive: profiles.length === 0,
     });
@@ -158,6 +178,7 @@ export function useAndroidUpstreamConfig(open: boolean) {
     try {
       const ok = await updateProfile(draft.id, {
         name: draft.name,
+        provider: draft.provider,
         apiMode: draft.apiMode,
         responsesTransport: draft.responsesTransport ?? "sse",
         requestPolicy: draft.requestPolicy,
@@ -227,6 +248,8 @@ export function useAndroidUpstreamConfig(open: boolean) {
         draft.apiMode,
         draft.responsesTransport ?? "sse",
         draft.allowInsecureConnection === true,
+        undefined,
+        draft.provider,
       );
       const catalog = buildUpstreamModelCatalog(result.models ?? []);
       setModelCatalog(catalog);

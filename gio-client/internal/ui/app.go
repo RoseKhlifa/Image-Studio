@@ -25,6 +25,7 @@ import (
 	"gioui.org/unit"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
+	"github.com/yuanhua/image-gptcodex/pkg/client"
 	"github.com/yuanhua/image-gptcodex/pkg/promptimport"
 )
 
@@ -239,6 +240,7 @@ type App struct {
 	customSizeHeightInput          widget.Editor
 
 	mode                     string
+	provider                 string
 	api                      string
 	size                     string
 	quality                  string
@@ -283,6 +285,7 @@ type App struct {
 	batchCount               int
 
 	modeButtons                              []widget.Clickable
+	providerButtons                          []widget.Clickable
 	apiButtons                               []widget.Clickable
 	sizeButtons                              []widget.Clickable
 	aspectButtons                            []widget.Clickable
@@ -908,6 +911,7 @@ func New() *App {
 		th:                                      th,
 		runner:                                  kernel.Runner{},
 		mode:                                    string(cfg.Mode),
+		provider:                                string(client.NormalizeProvider(cfg.Provider)),
 		api:                                     string(cfg.APIMode),
 		size:                                    cfg.Size,
 		quality:                                 cfg.Quality,
@@ -1007,6 +1011,7 @@ func New() *App {
 		workflowPreviewButtons:                  make([]widget.Clickable, len(partialPreviewChoices)),
 		pruneGeneralHistoryButtons:              make([]widget.Clickable, 2),
 		modeButtons:                             make([]widget.Clickable, len(modeChoices)),
+		providerButtons:                         make([]widget.Clickable, 3),
 		apiButtons:                              make([]widget.Clickable, len(apiChoices)),
 		sizeButtons:                             make([]widget.Clickable, len(sizeChoices)),
 		aspectButtons:                           make([]widget.Clickable, len(aspectChoices)+len(compatState.Settings.CustomAspectRatios)+24),
@@ -1220,6 +1225,7 @@ func (a *App) configureEditors(cfg kernel.Config) {
 	a.baseURLInput.SetText(cfg.BaseURL)
 	a.textModelInput.SetText(cfg.TextModelID)
 	a.imageModelInput.SetText(cfg.ImageModelID)
+	a.provider = string(client.NormalizeProvider(cfg.Provider))
 	a.outputDirInput.SetText(cfg.OutputDir)
 	a.partialImagesInput.SetText(strconv.Itoa(cfg.PartialImages))
 	a.outputCompressionInput.SetText(strconv.Itoa(cfg.OutputCompression))

@@ -292,6 +292,14 @@ html[data-target-platform="macos"] .source-strip {
   will-change: background-position;
 }
 
+/* The Konva canvas fully covers the checkerboard once an image is present.
+   Stop the hidden background animation so an idle/backgrounded WebView does
+   not keep repainting the whole desktop canvas. */
+.stage-host.has-image {
+  animation: none;
+  will-change: auto;
+}
+
 .stream-preview-overlay {
   position: absolute;
   top: 12px;

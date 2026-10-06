@@ -2,8 +2,11 @@ import {
   ArrowRight,
   Brush,
   CheckCircle2,
+  Contrast,
   Crop,
   Eraser,
+  Eye,
+  EyeOff,
   Expand,
   FlipHorizontal,
   FlipVertical,
@@ -16,6 +19,7 @@ import {
   ZoomIn,
   ZoomOut,
   Pencil,
+  PaintBucket,
   RotateCcw,
   RotateCw,
   Save,
@@ -32,6 +36,7 @@ import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { ANNOTATION_COLORS, type AnnotationKind, type HistoryItem, type SourceImage } from "../../../types/domain";
 import { useStudioStore } from "../../../state/studioStore";
+import { useStudioFields } from "../../../state/useStudioFields";
 import { base64ToBlob, useBlobURL } from "../../../lib/images";
 import { qualityLabel, sizeLabel } from "../../../components/history/historyLabels";
 import { StreamPreviewBadge } from "../../../components/canvas/StreamPreviewBadge";
@@ -49,6 +54,8 @@ export function AndroidCanvasWorkspace() {
     currentImage,
     mode,
     sources,
+    provider,
+    batchProcess,
     isRunning,
     progress,
     streamPreview,
@@ -59,6 +66,10 @@ export function AndroidCanvasWorkspace() {
     tool,
     brushMode,
     brushSize,
+    maskDataURL,
+    maskVisible,
+    maskOpacity,
+    strokes,
     annotationKind,
     annotationColor,
     annotations,
@@ -72,7 +83,10 @@ export function AndroidCanvasWorkspace() {
     setField,
     undo,
     redo,
+    activateMaskTool,
     importMaskImage,
+    fillMask,
+    invertMask,
     resetMask,
     clearAnnotations,
     saveCurrentImageAs,
@@ -91,10 +105,27 @@ export function AndroidCanvasWorkspace() {
     reuseAsSource,
     pushToast,
     toggleFullscreen,
-  } = useStudioStore();
+  } = useStudioFields([
+    "currentImage", "mode", "sources", "provider",
+    "batchProcess", "isRunning", "progress", "streamPreview",
+    "runningJobs", "jobsCompleted", "jobsTotal", "tool",
+    "brushMode", "brushSize", "maskDataURL", "maskVisible",
+    "maskOpacity", "strokes", "annotationKind", "annotationColor",
+    "annotations", "selectedAnnotationId", "fullscreen", "viewZoom",
+    "batchResults", "resultGridOpen", "undoStack", "redoStack",
+    "setField", "undo", "redo", "activateMaskTool",
+    "importMaskImage", "fillMask", "invertMask", "resetMask",
+    "clearAnnotations", "saveCurrentImageAs", "rotateCurrent", "flipCurrent",
+    "cropToRect", "openResultGrid", "closeResultGrid", "openResultDetail",
+    "selectSourceImage", "viewSourceOnCanvas", "compareSourceOnCanvas", "removeSource",
+    "reorderSources", "clearSources", "reuseAsSource", "pushToast",
+    "toggleFullscreen",
+  ]);
   const { isAndroidPad, androidOrientation } = usePlatform();
   const [sourceOpen, setSourceOpen] = useState(true);
   const hasImage = !!currentImage;
+  const hasMask = !!maskDataURL || strokes.some((stroke) => !stroke.erase);
+  const maskDisabled = providerDoesNotSupportMask(provider) || batchProcess.enabled;
   const hasSources = mode === "edit" && sources.length > 0;
   const selRect = annotations.find((a) => a.id === selectedAnnotationId && a.kind === "rect");
   const cropAction = selRect && selRect.width && selRect.height
@@ -108,6 +139,10 @@ export function AndroidCanvasWorkspace() {
   useEffect(() => {
     if (hasSources) setSourceOpen(true);
   }, [hasSources]);
+
+  useEffect(() => {
+    if (tool === "mask" && maskDisabled) setField("tool", "pan");
+  }, [maskDisabled, setField, tool]);
 
   const runAction = (action: () => void | Promise<void>, vibration = 8) => {
     vibrateForPlatform(vibration);
@@ -242,7 +277,11 @@ export function AndroidCanvasWorkspace() {
           <AndroidToolSegment
             value={tool}
             disabled={!hasImage}
-            onChange={(next) => runAction(() => setField("tool", next), 8)}
+            maskDisabled={maskDisabled}
+            onChange={(next) => runAction(async () => {
+              if (next === "mask") await activateMaskTool();
+              else setField("tool", next);
+            }, 8)}
           />
           <div className="android-canvas-dock-group compact">
             <DockIconButton title="撤销" disabled={undoStack.length === 0} onClick={() => runAction(undo, 6)}>
@@ -257,9 +296,16 @@ export function AndroidCanvasWorkspace() {
             <AndroidMaskControls
               brushMode={brushMode}
               brushSize={brushSize}
+              maskVisible={maskVisible}
+              maskOpacity={maskOpacity}
+              hasMask={hasMask}
               onSetBrushMode={(next) => runAction(() => setField("brushMode", next), 5)}
               onSetBrushSize={(next) => setField("brushSize", next)}
+              onToggleMaskVisible={() => runAction(() => setField("maskVisible", !maskVisible), 4)}
+              onSetMaskOpacity={(next) => setField("maskOpacity", next)}
               onImportMask={() => runAction(importMaskImage, 8)}
+              onFillMask={() => runAction(fillMask, 8)}
+              onInvertMask={() => runAction(invertMask, 8)}
               onResetMask={() => runAction(resetMask, 6)}
             />
           ) : null}
@@ -443,10 +489,12 @@ function AndroidCanvasHeader({
 function AndroidToolSegment({
   value,
   disabled,
+  maskDisabled,
   onChange,
 }: {
   value: CanvasTool;
   disabled: boolean;
+  maskDisabled: boolean;
   onChange: (value: CanvasTool) => void;
 }) {
   return (
@@ -454,7 +502,7 @@ function AndroidToolSegment({
       <SegmentButton active={value === "pan"} disabled={disabled} label="移动" onClick={() => onChange("pan")}>
         <Hand />
       </SegmentButton>
-      <SegmentButton active={value === "mask"} disabled={disabled} label="蒙版" onClick={() => onChange("mask")}>
+      <SegmentButton active={value === "mask"} disabled={disabled || maskDisabled} label="蒙版" onClick={() => onChange("mask")}>
         <Brush />
       </SegmentButton>
       <SegmentButton active={value === "annotate"} disabled={disabled} label="标注" onClick={() => onChange("annotate")}>
@@ -467,16 +515,30 @@ function AndroidToolSegment({
 function AndroidMaskControls({
   brushMode,
   brushSize,
+  maskVisible,
+  maskOpacity,
+  hasMask,
   onSetBrushMode,
   onSetBrushSize,
+  onToggleMaskVisible,
+  onSetMaskOpacity,
   onImportMask,
+  onFillMask,
+  onInvertMask,
   onResetMask,
 }: {
   brushMode: BrushMode;
   brushSize: number;
+  maskVisible: boolean;
+  maskOpacity: number;
+  hasMask: boolean;
   onSetBrushMode: (value: BrushMode) => void;
   onSetBrushSize: (value: number) => void;
+  onToggleMaskVisible: () => void;
+  onSetMaskOpacity: (value: number) => void;
   onImportMask: () => void;
+  onFillMask: () => void;
+  onInvertMask: () => void;
   onResetMask: () => void;
 }) {
   return (
@@ -491,7 +553,16 @@ function AndroidMaskControls({
         <DockIconButton title="导入蒙版图片" onClick={onImportMask}>
           <Upload />
         </DockIconButton>
-        <button type="button" className="android-canvas-text-action danger" onClick={onResetMask}>
+        <DockIconButton title="全选可编辑区域" onClick={onFillMask}>
+          <PaintBucket />
+        </DockIconButton>
+        <DockIconButton title="反选可编辑区域" onClick={onInvertMask}>
+          <Contrast />
+        </DockIconButton>
+        <DockIconButton title={maskVisible ? "隐藏蒙版叠加" : "显示蒙版叠加"} active={maskVisible} disabled={!hasMask} onClick={onToggleMaskVisible}>
+          {maskVisible ? <Eye /> : <EyeOff />}
+        </DockIconButton>
+        <button type="button" className="android-canvas-text-action danger" disabled={!hasMask} onClick={onResetMask}>
           清空
         </button>
       </div>
@@ -506,8 +577,24 @@ function AndroidMaskControls({
         />
         <strong>{brushSize}</strong>
       </label>
+      <label className="android-canvas-slider-row">
+        <span>叠加</span>
+        <input
+          type="range"
+          min={10}
+          max={90}
+          value={Math.round(maskOpacity * 100)}
+          disabled={!hasMask}
+          onChange={(event) => onSetMaskOpacity(Number(event.target.value) / 100)}
+        />
+        <strong>{Math.round(maskOpacity * 100)}%</strong>
+      </label>
     </div>
   );
+}
+
+function providerDoesNotSupportMask(provider: "openai" | "google" | "grok") {
+  return provider === "google" || provider === "grok";
 }
 
 function AndroidAnnotationControls({

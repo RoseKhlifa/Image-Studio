@@ -75,7 +75,7 @@ export function UpstreamProfileList({
                   {isActive ? <span className="shrink-0 text-[9px] font-medium text-[var(--accent)]">生图</span> : null}
                   {isAI ? <span className="shrink-0 text-[9px] font-medium text-emerald-600 dark:text-emerald-400">AI</span> : null}
                   <span className="shrink-0 text-[9px] uppercase tracking-wider opacity-70">
-                    {p.apiMode === "responses" ? "R" : "I"}
+                    {(p.provider ?? "openai") === "openai" ? (p.apiMode === "responses" ? "R" : "I") : p.provider === "google" ? "G" : "X"}
                   </span>
                 </button>
               );

@@ -46,3 +46,16 @@ test("historyPreviewSrc remains preview-first for grids and thumbnails", () => {
 
   assert.equal(images.historyPreviewSrc(item, null), "/media/preview/img-3");
 });
+
+test("annotated canvas target stays first when another reference is added", () => {
+  const annotated = { path: "/tmp/annotated.png", name: "annotated.png", size: 1 };
+  const added = { path: "/tmp/new-reference.png", name: "new-reference.png", size: 1 };
+  assert.deepEqual(
+    images.prioritizeImageSource([added], annotated).map((source) => source.path),
+    ["/tmp/annotated.png", "/tmp/new-reference.png"],
+  );
+  assert.deepEqual(
+    images.prioritizeImageSource([annotated, added], annotated).map((source) => source.path),
+    ["/tmp/annotated.png", "/tmp/new-reference.png"],
+  );
+});

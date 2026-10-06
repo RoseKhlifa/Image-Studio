@@ -44,8 +44,8 @@ func TestBuildPayloadUsesSizeAndQuality(t *testing.T) {
 	if tool["moderation"] != "low" {
 		t.Errorf("moderation = %v, want low", tool["moderation"])
 	}
-	if tool["model"] != "gpt-image-2" {
-		t.Errorf("model = %v, want gpt-image-2", tool["model"])
+	if _, ok := tool["model"]; ok {
+		t.Errorf("Responses image_generation tool unexpectedly contains a second model: %v", tool["model"])
 	}
 	if tool["action"] != "generate" {
 		t.Errorf("action = %v, want generate", tool["action"])
@@ -345,27 +345,70 @@ func TestBuildPayloadOmitsMaskWhenEmpty(t *testing.T) {
 }
 
 func TestBuildPayloadIncludesMaskWhenSet(t *testing.T) {
-	raw, _ := BuildPayload(Options{Prompt: "x", MaskB64: "AAAA"})
+	maskB64 := base64.StdEncoding.EncodeToString(testAlphaMaskPNGBytes(t, 2, 1))
+	sourceB64 := base64.StdEncoding.EncodeToString(testPNGBytes(t, 2, 1))
+	raw, err := BuildPayload(Options{
+		Prompt:        "x",
+		Mode:          ModeEdit,
+		ImageDataURLs: []string{"data:image/png;base64," + sourceB64},
+		MaskB64:       maskB64,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	v := mustDecodePayload(t, raw)
 	tool := v["tools"].([]any)[0].(map[string]any)
 	mask, ok := tool["input_image_mask"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected input_image_mask object, got %T", tool["input_image_mask"])
 	}
-	if mask["image_url"] != "data:image/png;base64,AAAA" {
-		t.Errorf("input_image_mask.image_url = %v, want data:image/png;base64,AAAA", mask["image_url"])
+	want := "data:image/png;base64," + maskB64
+	if mask["image_url"] != want {
+		t.Errorf("input_image_mask.image_url = %v, want %s", mask["image_url"], want)
 	}
 }
 
 func TestBuildPayloadDetectsMaskMimeTypeFromBase64(t *testing.T) {
-	jpegMask := base64.StdEncoding.EncodeToString([]byte{0xff, 0xd8, 0xff, 0xdb, 0x00, 0x43})
-	raw, _ := BuildPayload(Options{Prompt: "x", MaskB64: jpegMask})
+	jpegMask := base64.StdEncoding.EncodeToString(testJPEGBytes(t, 1, 1))
+	sourceB64 := base64.StdEncoding.EncodeToString(testPNGBytes(t, 1, 1))
+	raw, err := BuildPayload(Options{
+		Prompt:        "x",
+		Mode:          ModeEdit,
+		ImageDataURLs: []string{"data:image/png;base64," + sourceB64},
+		MaskB64:       jpegMask,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	v := mustDecodePayload(t, raw)
 	tool := v["tools"].([]any)[0].(map[string]any)
 	mask := tool["input_image_mask"].(map[string]any)
 	want := "data:image/jpeg;base64," + jpegMask
 	if mask["image_url"] != want {
 		t.Fatalf("input_image_mask.image_url = %v, want %s", mask["image_url"], want)
+	}
+}
+
+func TestBuildPayloadRejectsMaskWithoutEditSource(t *testing.T) {
+	maskB64 := base64.StdEncoding.EncodeToString(testAlphaMaskPNGBytes(t, 1, 1))
+	if _, err := BuildPayload(Options{Prompt: "x", Mode: ModeGenerate, MaskB64: maskB64}); err == nil || !strings.Contains(err.Error(), "图生图") {
+		t.Fatalf("err = %v, want edit-mode validation", err)
+	}
+	if _, err := BuildPayload(Options{Prompt: "x", Mode: ModeEdit, MaskB64: maskB64}); err == nil || !strings.Contains(err.Error(), "源图") {
+		t.Fatalf("err = %v, want source validation", err)
+	}
+}
+
+func TestBuildPayloadRejectsInvalidMaskImage(t *testing.T) {
+	sourceB64 := base64.StdEncoding.EncodeToString(testPNGBytes(t, 1, 1))
+	_, err := BuildPayload(Options{
+		Prompt:        "x",
+		Mode:          ModeEdit,
+		ImageDataURLs: []string{"data:image/png;base64," + sourceB64},
+		MaskB64:       base64.StdEncoding.EncodeToString([]byte("not-an-image")),
+	})
+	if err == nil || !strings.Contains(err.Error(), "不是支持的") {
+		t.Fatalf("err = %v, want invalid-image validation", err)
 	}
 }
 

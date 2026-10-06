@@ -5,6 +5,7 @@ type Tool = "pan" | "mask" | "annotate";
 
 type UseCanvasShortcutsArgs = {
   brushSize: number;
+  brushMode: "paint" | "erase";
   canNavigateBatchResults?: boolean;
   cancel: () => void;
   compareB: HistoryItem | null;
@@ -19,16 +20,19 @@ type UseCanvasShortcutsArgs = {
   resetView: () => void;
   selectedAnnotationId: string | null;
   setBrushSize: (value: number) => void;
+  setBrushMode: (value: "paint" | "erase") => void;
   setCompareB: (item: HistoryItem | null) => void;
   setErrorMessage: (value: string | null) => void;
   toggleFullscreen: () => void | Promise<void>;
   setSelectedAnnotationId: (value: string | null) => void;
   setTool: (value: Tool) => void;
+  tool: Tool;
   undo: () => void;
 };
 
 export function useCanvasShortcuts({
   brushSize,
+  brushMode,
   canNavigateBatchResults = false,
   cancel,
   compareB,
@@ -43,11 +47,13 @@ export function useCanvasShortcuts({
   resetView,
   selectedAnnotationId,
   setBrushSize,
+  setBrushMode,
   setCompareB,
   setErrorMessage,
   toggleFullscreen,
   setSelectedAnnotationId,
   setTool,
+  tool,
   undo,
 }: UseCanvasShortcutsArgs) {
   useEffect(() => {
@@ -121,7 +127,12 @@ export function useCanvasShortcuts({
           return;
         }
       }
-      if (k === "[" || k === "]") {
+      if (tool === "mask" && k === "x") {
+        e.preventDefault();
+        setBrushMode(brushMode === "paint" ? "erase" : "paint");
+        return;
+      }
+      if (tool === "mask" && (k === "[" || k === "]")) {
         e.preventDefault();
         const delta = k === "[" ? -5 : 5;
         setBrushSize(Math.max(5, Math.min(120, brushSize + delta)));
@@ -132,6 +143,7 @@ export function useCanvasShortcuts({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [
     brushSize,
+    brushMode,
     canNavigateBatchResults,
     cancel,
     compareB,
@@ -146,11 +158,13 @@ export function useCanvasShortcuts({
     resetView,
     selectedAnnotationId,
     setBrushSize,
+    setBrushMode,
     setCompareB,
     setErrorMessage,
     toggleFullscreen,
     setSelectedAnnotationId,
     setTool,
+    tool,
     undo,
   ]);
 }

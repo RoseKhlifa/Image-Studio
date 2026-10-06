@@ -85,3 +85,19 @@ func TestGoogleInteractionsEndpointIsNarrowToOfficialNanoBanana2(t *testing.T) {
 		t.Fatal("non-Nano-Banana-2 model must stay on the documented OpenAI-compatible path")
 	}
 }
+
+func TestProviderRoutingDefaultsAndNativeModes(t *testing.T) {
+	t.Parallel()
+	if got := NormalizeProvider(""); got != ProviderOpenAI {
+		t.Fatalf("provider=%q", got)
+	}
+	if got := EffectiveAPIMode(ProviderGoogle, APIModeResponses); got != APIModeImages {
+		t.Fatalf("google mode=%q", got)
+	}
+	if got := EffectiveAPIMode(ProviderGrok, APIModeResponses); got != APIModeImages {
+		t.Fatalf("grok mode=%q", got)
+	}
+	if got := GoogleAPIEndpoint("https://generativelanguage.googleapis.com/v1beta/openai", "models"); got != "https://generativelanguage.googleapis.com/v1beta/models" {
+		t.Fatalf("google endpoint=%q", got)
+	}
+}

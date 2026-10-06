@@ -5,7 +5,7 @@
 ## 环境要求
 
 - Go 1.25.x。当前 `go.mod` 使用 `go 1.25.5` 与 `toolchain go1.26.3`。
-- Node.js 20 或更新版本。
+- Node.js 24 或更新版本。前端测试直接加载 TypeScript，平台验证 CI 使用 Node 24；仓库 `.nvmrc` 与此一致。
 - Wails CLI v2.12.0。非 macOS release workflow 使用 `go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0`。
 - Android 构建需要 JDK 17、Android SDK 34、Build Tools 34.0.0、Gradle 8.7。
 

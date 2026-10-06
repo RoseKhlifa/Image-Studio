@@ -3,7 +3,7 @@ import {
   GetStoredAPIKey,
   SetStoredAPIKey,
 } from "../platform/runtime/host";
-import type { APIMode, ReasoningEffortValue, RequestPolicy, UpstreamProfile } from "../types/domain";
+import type { APIMode, ReasoningEffortValue, RequestPolicy, UpstreamProfile, UpstreamProvider } from "../types/domain";
 import type { StudioState } from "./studioStore.types";
 import {
   duplicateProfile as cloneProfile,
@@ -28,6 +28,7 @@ export function createProfileActions(store: StateAdapter) {
   return {
     async createProfile(input: {
       name?: string;
+      provider?: UpstreamProvider;
       apiMode: APIMode;
       responsesTransport?: UpstreamProfile["responsesTransport"];
       baseURL?: string;
@@ -46,7 +47,8 @@ export function createProfileActions(store: StateAdapter) {
       const profile: UpstreamProfile = {
         id,
         name: input.name?.trim() || nextDefaultProfileName(list),
-        apiMode: input.apiMode,
+        provider: input.provider ?? "openai",
+        apiMode: input.provider && input.provider !== "openai" ? "images" : input.apiMode,
         responsesTransport: normalizeResponsesTransport(input.apiMode === "responses" ? input.responsesTransport : "sse"),
         requestPolicy: input.requestPolicy ?? "openai",
         imagesNewAPICompat: input.imagesNewAPICompat === true,
@@ -86,7 +88,10 @@ export function createProfileActions(store: StateAdapter) {
       const next: UpstreamProfile = {
         ...current,
         name: patch.name !== undefined ? patch.name.trim() : current.name,
-        apiMode: patch.apiMode ?? current.apiMode,
+        provider: patch.provider ?? current.provider ?? "openai",
+        apiMode: (patch.provider ?? current.provider ?? "openai") !== "openai"
+          ? "images"
+          : patch.apiMode ?? current.apiMode,
         responsesTransport: patch.responsesTransport !== undefined
           ? normalizeResponsesTransport(patch.responsesTransport)
           : normalizeResponsesTransport(current.responsesTransport),
@@ -118,6 +123,7 @@ export function createProfileActions(store: StateAdapter) {
       if (id === store.getState().activeProfileId) {
         const apiKey = patch.apiKey !== undefined ? patch.apiKey.trim() : store.getState().apiKey;
         store.setState({
+          provider: next.provider,
           apiMode: next.apiMode,
           responsesTransport: next.responsesTransport ?? "sse",
           requestPolicy: next.requestPolicy,
@@ -159,6 +165,7 @@ export function createProfileActions(store: StateAdapter) {
             textModelID: "",
             imageModelID: "",
             reasoningEffort: "xhigh",
+            provider: "openai",
             apiMode: "responses",
             responsesTransport: "sse",
             requestPolicy: "openai",
@@ -198,6 +205,7 @@ export function createProfileActions(store: StateAdapter) {
       store.setState({
         profiles: nextProfiles,
         activeProfileId: id,
+        provider: profile.provider ?? "openai",
         apiMode: profile.apiMode,
         responsesTransport: profile.responsesTransport ?? "sse",
         requestPolicy: profile.requestPolicy,

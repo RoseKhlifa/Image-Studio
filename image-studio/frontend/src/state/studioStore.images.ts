@@ -187,6 +187,13 @@ export function createImageActions(store: StateAdapter) {
         editSourceMode: "manual",
         currentImage: toPreviewOnlyHistoryItem(localItem),
         resultGridOpen: false,
+        maskDataURL: null,
+        maskTargetPath: null,
+        strokes: [],
+        annotations: [],
+        selectedAnnotationId: null,
+        undoStack: [],
+        redoStack: [],
         sources: alreadyIn
           ? existing
           : [...existing, {
@@ -263,7 +270,7 @@ export function createImageActions(store: StateAdapter) {
         store.setState({
           historyHasMore: before.historyHasMore,
           historyLoading: before.historyLoading,
-          historyCursorBeforeDayStart: before.historyCursorBeforeDayStart,
+          historyCursor: before.historyCursor,
         });
         throw error;
       }
@@ -317,6 +324,13 @@ export function createImageActions(store: StateAdapter) {
           currentImage: ref ? { ...importedItem, previewOnly: true } : importedItem,
           batchResults: [],
           resultGridOpen: false,
+          maskDataURL: null,
+          maskTargetPath: null,
+          strokes: [],
+          annotations: [],
+          selectedAnnotationId: null,
+          undoStack: [],
+          redoStack: [],
           mode: "edit",
           editSourceMode: "manual",
           size: alreadyIn || existingSources.length > 0 ? store.getState().size : "auto",

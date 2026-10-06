@@ -74,6 +74,7 @@ type CompletionNotificationSettings struct {
 type UpstreamProfile struct {
 	ID                      string `json:"id"`
 	Name                    string `json:"name"`
+	Provider                string `json:"provider,omitempty"`
 	APIMode                 string `json:"apiMode"`
 	ResponsesTransport      string `json:"responsesTransport,omitempty"`
 	RequestPolicy           string `json:"requestPolicy"`
@@ -240,6 +241,12 @@ func Normalize(state State) State {
 		state.Profiles = []UpstreamProfile{}
 	}
 	for i := range state.Profiles {
+		switch state.Profiles[i].Provider {
+		case "google", "grok":
+			state.Profiles[i].APIMode = "images"
+		default:
+			state.Profiles[i].Provider = "openai"
+		}
 		if state.Profiles[i].ReasoningEffort == "" {
 			state.Profiles[i].ReasoningEffort = "xhigh"
 		}

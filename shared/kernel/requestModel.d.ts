@@ -10,6 +10,7 @@ export const DEFAULT_IMAGE_STYLE: string;
 export const DEFAULT_MODERATION: string;
 export const DEFAULT_REASONING_EFFORT: string;
 export const DEFAULT_REQUEST_POLICY: string;
+export const DEFAULT_UPSTREAM_PROVIDER: string;
 export const DEFAULT_PARTIAL_IMAGES: number;
 export const DEFAULT_AUTO_RETRY_COUNT: number;
 export const MAX_AUTO_RETRY_COUNT: number;
@@ -23,6 +24,7 @@ export const MAX_OPENAI_IMAGE_PIXELS: number;
 export const MAX_OPENAI_IMAGE_ASPECT_RATIO: number;
 
 export type RequestPolicy = "openai" | "compat";
+export type UpstreamProvider = "openai" | "google" | "grok";
 export type ReasoningEffort = "low" | "medium" | "high" | "xhigh";
 
 export type SharedImageRequestPayload = {
@@ -52,9 +54,12 @@ export type SharedImageRequestPayload = {
 export function normalizeBaseURL(raw: string): string;
 export function isVersionedOpenAICompatibilityBaseURL(raw: string): boolean;
 export function openAIAPIEndpoint(baseURL: string, endpointPath: string): string;
+export function normalizeUpstreamProvider(provider: string): UpstreamProvider;
+export function effectiveAPIMode(provider: string, apiMode: string): "responses" | "images";
+export function googleAPIEndpoint(baseURL: string, endpointPath: string): string;
 export function isOfficialGoogleGeminiBaseURL(raw: string): boolean;
 export function isGoogleNativeNanoBanana2Model(imageModelID: string): boolean;
-export function shouldUseGoogleNativeInteractions(baseURL: string, imageModelID: string): boolean;
+export function shouldUseGoogleNativeInteractions(baseURL: string, imageModelID: string, provider?: string): boolean;
 export function googleInteractionsEndpoint(baseURL: string): string;
 export function normalizeAPIMode(apiMode: string): "responses" | "images";
 export function normalizeRequestPolicy(requestPolicy: string): RequestPolicy;

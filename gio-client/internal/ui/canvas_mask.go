@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"image/draw"
 	"image/png"
 	"math"
 	"strings"
@@ -306,7 +307,7 @@ func (a *App) redoLatestCanvasAction() {
 	}
 }
 
-func drawMaskDot(img *image.Gray, center f32.Point, radius float32, value uint8) {
+func drawMaskDot(img *image.NRGBA, center f32.Point, radius float32, alpha uint8) {
 	if img == nil || radius <= 0 {
 		return
 	}
@@ -322,25 +323,25 @@ func drawMaskDot(img *image.Gray, center f32.Point, radius float32, value uint8)
 			if dx*dx+dy*dy > r2 {
 				continue
 			}
-			img.SetGray(x, y, color.Gray{Y: value})
+			img.SetNRGBA(x, y, color.NRGBA{A: alpha})
 		}
 	}
 }
 
-func rasterizeMaskStroke(img *image.Gray, stroke canvasMaskStroke, dims image.Point) {
+func rasterizeMaskStroke(img *image.NRGBA, stroke canvasMaskStroke, dims image.Point) {
 	if img == nil || len(stroke.Points) == 0 {
 		return
 	}
-	value := uint8(255)
+	alpha := uint8(0)
 	if stroke.Erase {
-		value = 0
+		alpha = 0xff
 	}
 	radius := denormalizeCanvasBrushSize(stroke.SizeNorm, dims) / 2
 	if radius < 0.5 {
 		radius = 0.5
 	}
 	last := denormalizeCanvasMaskPoint(stroke.Points[0], dims)
-	drawMaskDot(img, last, radius, value)
+	drawMaskDot(img, last, radius, alpha)
 	for _, point := range stroke.Points[1:] {
 		current := denormalizeCanvasMaskPoint(point, dims)
 		dx := current.X - last.X
@@ -351,7 +352,7 @@ func rasterizeMaskStroke(img *image.Gray, stroke canvasMaskStroke, dims image.Po
 		}
 		for step := 1; step <= steps; step++ {
 			t := float32(step) / float32(steps)
-			drawMaskDot(img, f32.Pt(last.X+dx*t, last.Y+dy*t), radius, value)
+			drawMaskDot(img, f32.Pt(last.X+dx*t, last.Y+dy*t), radius, alpha)
 		}
 		last = current
 	}
@@ -361,18 +362,15 @@ func buildCanvasMaskB64(strokes []canvasMaskStroke, dims image.Point) string {
 	if len(strokes) == 0 || dims.X <= 0 || dims.Y <= 0 {
 		return ""
 	}
-	img := image.NewGray(image.Rect(0, 0, dims.X, dims.Y))
-	hasWhite := false
+	img := image.NewNRGBA(image.Rect(0, 0, dims.X, dims.Y))
+	draw.Draw(img, img.Bounds(), image.NewUniform(color.NRGBA{A: 0xff}), image.Point{}, draw.Src)
 	for _, stroke := range strokes {
 		if len(stroke.Points) == 0 {
 			continue
 		}
-		if !stroke.Erase {
-			hasWhite = true
-		}
 		rasterizeMaskStroke(img, stroke, dims)
 	}
-	if !hasWhite {
+	if !maskImageHasEditablePixels(img) {
 		return ""
 	}
 	var buf bytes.Buffer
@@ -380,6 +378,20 @@ func buildCanvasMaskB64(strokes []canvasMaskStroke, dims image.Point) string {
 		return ""
 	}
 	return base64.StdEncoding.EncodeToString(buf.Bytes())
+}
+
+func maskImageHasEditablePixels(img *image.NRGBA) bool {
+	if img == nil {
+		return false
+	}
+	for y := img.Bounds().Min.Y; y < img.Bounds().Max.Y; y++ {
+		for x := img.Bounds().Min.X; x < img.Bounds().Max.X; x++ {
+			if img.NRGBAAt(x, y).A < 0xff {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func paintCanvasMaskStroke(gtx layout.Context, stroke canvasMaskStroke, origin image.Point, displaySize image.Point) {

@@ -61,9 +61,9 @@ func preferredProbeModels(apiMode string, models []kernel.UpstreamModelDescripto
 		}
 		return nil, image
 	}
-	if len(text) == 0 {
-		text = all
-	}
+	// Responses accepts any supported upstream model as the request model;
+	// keep the suggestions unclassified so image-capable models are not hidden.
+	text = all
 	if len(image) == 0 {
 		image = all
 	}

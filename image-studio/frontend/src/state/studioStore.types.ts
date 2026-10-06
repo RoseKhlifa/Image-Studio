@@ -1,3 +1,4 @@
+import type { HistoryPageCursor } from "../lib/storage";
 import type { GenerateOptionsLike } from "../platform/runtime/hostTypes";
 import type { SavePromptRequest } from "../lib/savePromptState";
 import type {
@@ -34,6 +35,7 @@ import type {
   ThemeMode,
   Toast,
   UpstreamProfile,
+  UpstreamProvider,
   Workspace,
 } from "../types/domain";
 import type { RunningJobMeta } from "./workspaceRuntime";
@@ -104,6 +106,7 @@ export interface StudioState {
   proxyURL: string;
   imageModelID: string;
   reasoningEffort: import("../types/domain").ReasoningEffortValue;
+  provider: UpstreamProvider;
   apiMode: APIMode;
   responsesTransport: import("../types/domain").ResponsesTransport;
   requestPolicy: RequestPolicy;
@@ -133,7 +136,7 @@ export interface StudioState {
   history: HistoryItem[];
   historyHasMore: boolean;
   historyLoading: boolean;
-  historyCursorBeforeDayStart: number | null;
+  historyCursor: HistoryPageCursor | null;
   batchResults: HistoryItem[];
   resultGridOpen: boolean;
   historyRailCollapsed: boolean;
@@ -145,6 +148,9 @@ export interface StudioState {
   annotationColor: string;
   selectedAnnotationId: string | null;
   maskDataURL: string | null;
+  maskTargetPath: string | null;
+  maskVisible: boolean;
+  maskOpacity: number;
   strokes: Stroke[];
   annotations: Annotation[];
   compareB: HistoryItem | null;
@@ -175,6 +181,7 @@ export interface StudioState {
   clearError: () => void;
   createProfile: (input: {
     name?: string;
+    provider?: UpstreamProvider;
     apiMode: APIMode;
     responsesTransport?: import("../types/domain").ResponsesTransport;
     baseURL?: string;
@@ -211,9 +218,12 @@ export interface StudioState {
   clearHistory: () => Promise<number>;
   saveCurrentImageAs: () => Promise<void>;
   bootstrap: () => Promise<void>;
+  activateMaskTool: () => Promise<boolean>;
   importMaskImage: () => Promise<void>;
   setMaskDataURL: (v: string | null) => void;
   pushStroke: (s: Stroke) => void;
+  fillMask: () => Promise<void>;
+  invertMask: () => Promise<void>;
   resetMask: () => void;
   addAnnotation: (a: Annotation) => void;
   removeAnnotation: (id: string) => void;

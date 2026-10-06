@@ -301,3 +301,9 @@ export function blobSourceToURL(source: { imageBlob?: Blob | null; imageB64?: st
   if (source.imageB64) return URL.createObjectURL(base64ToBlob(source.imageB64));
   return null;
 }
+
+export function prioritizeImageSource<T extends { path: string }>(sources: T[], target: T): T[] {
+  const targetPath = target.path.trim();
+  if (!targetPath) return sources;
+  return [target, ...sources.filter((source) => source.path.trim() !== targetPath)];
+}

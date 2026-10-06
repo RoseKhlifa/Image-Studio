@@ -25,6 +25,18 @@ func (s *Service) BeginNativeFileDrag(path string) error {
 	if err != nil {
 		return err
 	}
+	s.nativeDragMu.Lock()
+	if s.nativeDragActive {
+		s.nativeDragMu.Unlock()
+		return errors.New("已有文件正在拖动，请先松开鼠标或按 Esc 取消")
+	}
+	s.nativeDragActive = true
+	s.nativeDragMu.Unlock()
+	defer func() {
+		s.nativeDragMu.Lock()
+		s.nativeDragActive = false
+		s.nativeDragMu.Unlock()
+	}()
 	if s.ctx != nil {
 		runtime.EventsEmit(s.ctx, "native-file-drag", allowed)
 	}

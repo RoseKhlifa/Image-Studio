@@ -44,17 +44,24 @@ export function normalizeBaseURL(raw: string): string {
 
 export function validateRemoteBaseURL(raw: string, allowInsecureConnection: boolean): string {
   const normalized = normalizeBaseURL(raw);
-  let parsed: URL;
+  let protocol = "";
+  let hostname = "";
   try {
-    parsed = new URL(normalized);
+    if (typeof URL !== "function") throw new TypeError("URL constructor unavailable");
+    const parsed = new URL(normalized);
+    protocol = parsed.protocol;
+    hostname = parsed.hostname;
   } catch {
-    throw new Error("BASE_URL 必须包含协议和主机，例如 https://example.com");
+    const fallback = /^(https?):\/\/(\[[^\]]+\]|[^/?#:]+)(?::\d+)?(?:[/?#]|$)/i.exec(normalized);
+    if (!fallback) throw new Error("BASE_URL 必须包含协议和主机，例如 https://example.com");
+    protocol = `${fallback[1].toLowerCase()}:`;
+    hostname = fallback[2];
   }
-  if (parsed.protocol === "https:") return normalized;
-  if (parsed.protocol !== "http:") {
+  if (protocol === "https:") return normalized;
+  if (protocol !== "http:") {
     throw new Error("BASE_URL 仅支持 http:// 或 https://");
   }
-  const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
   const loopback = host === "localhost"
     || host.endsWith(".localhost")
     || host === "127.0.0.1"

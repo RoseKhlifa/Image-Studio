@@ -33,9 +33,9 @@ for (const item of data.closable) {
 lines.push("");
 lines.push("统一验证基线：");
 lines.push("");
-lines.push(`- ${data.updatedAt} 已重新跑通本地平台总链：`);
+lines.push(`- ${data.updatedAt} 已重新完成本机验证：`);
 lines.push(`  - \`${data.verificationBaseline.summaryCommand}\``);
-lines.push(`  - \`platform-kernel-summary.json\`：\`status = ${data.verificationBaseline.summaryStatus}\``);
+lines.push(`  - \`${data.verificationBaseline.summaryFile ?? "platform-kernel-summary.json"}\`：\`status = ${data.verificationBaseline.summaryStatus}\``);
 lines.push("  - 结构化结果：");
 for (const file of data.verificationBaseline.resultFiles) {
   lines.push(`    - \`${file}\``);
@@ -66,14 +66,14 @@ lines.push("- `manifest.json`");
 lines.push("- `README.md`");
 lines.push("- `plan.json`");
 lines.push("- `plan.md`");
-lines.push("- `issue-24.md` ... `issue-42.md`");
+for (const item of data.closable) lines.push(`- \`issue-${item.number}.md\``);
 
 lines.push("");
 lines.push("如果只是想先确认“当前哪些 issue 会被处理、处理方式是什么”，优先用：");
 lines.push("");
 lines.push("```bash");
 lines.push("node scripts/issue-close-helper.mjs plan");
-lines.push("node scripts/issue-close-helper.mjs plan 24 25 --comment-only");
+lines.push(`node scripts/issue-close-helper.mjs plan ${data.closable.slice(0, 2).map((item) => item.number).join(" ")} --comment-only`);
 lines.push("```");
 
 lines.push("");

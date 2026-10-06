@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { CalendarDays, Loader2, Search } from "lucide-react";
 import { Modal } from "../common/Modal";
 import { useStudioStore } from "../../state/studioStore";
+import { useStudioFields } from "../../state/useStudioFields";
 import type { HistoryItem, Mode } from "../../types/domain";
 import { usePlatform } from "../../platform/context";
 import { ContextMenu } from "../common/ContextMenu";
@@ -29,8 +30,6 @@ export function HistoryTimelineModal() {
     historyHasMore,
     historyLoading,
     loadMoreHistory,
-    currentImage,
-    compareB,
     setCompareB,
     deleteHistoryItem,
     reuseAsSource,
@@ -40,7 +39,15 @@ export function HistoryTimelineModal() {
     regenerateFromHistory,
     openResultDetail,
     pushToast,
-  } = useStudioStore();
+  } = useStudioFields([
+    "historyTimelineOpen", "closeHistoryTimeline", "history", "historyHasMore",
+    "historyLoading", "loadMoreHistory", "setCompareB", "deleteHistoryItem",
+    "reuseAsSource", "materializeCurrentImage",
+    "setField", "applyHistoryParams", "regenerateFromHistory", "openResultDetail",
+    "pushToast",
+  ]);
+  const currentImageId = useStudioStore((state) => state.currentImage?.id ?? null);
+  const compareItemId = useStudioStore((state) => state.compareB?.id ?? null);
   const { usesFluentUI } = usePlatform();
   const [query, setQuery] = useState("");
   const [modeFilter, setModeFilter] = useState<ModeFilter>("all");
@@ -56,13 +63,13 @@ export function HistoryTimelineModal() {
     openMenu,
     rawPath,
   } = useHistoryContextMenu({
-    currentImageId: currentImage?.id ?? null,
-    compareItemId: compareB?.id ?? null,
+    currentImageId,
+    compareItemId,
     onOpenDetail: openResultDetail,
     onApplyParams: applyHistoryParams,
     onRegenerate: (item) => void regenerateFromHistory(item),
     onReuseAsSource: (item) => void reuseAsSource(item),
-    onToggleCompare: (item) => setCompareB(compareB?.id === item.id ? null : item),
+    onToggleCompare: (item) => setCompareB(compareItemId === item.id ? null : item),
     onDelete: (item) => void deleteHistoryItem(item.id),
     pushToast,
   });
@@ -110,7 +117,7 @@ export function HistoryTimelineModal() {
     if (query.trim() || modeFilter !== "all" || dateFilter !== "all") {
       void loadMoreHistory();
     }
-  }, [dateFilter, historyTimelineOpen, loadMoreHistory, modeFilter, query]);
+  }, [dateFilter, historyTimelineOpen, historyHasMore, historyLoading, loadMoreHistory, modeFilter, query]);
 
   function handleScroll() {
     const node = listRef.current;
@@ -185,13 +192,13 @@ export function HistoryTimelineModal() {
                       <TimelineHistoryEntry
                         key={entry.key}
                         entry={entry}
-                        currentItemId={currentImage?.id ?? null}
-                        compareItemId={compareB?.id ?? null}
+                        currentItemId={currentImageId}
+                        compareItemId={compareItemId}
                         expanded={entry.kind === "group" && expandedPromptGroups.has(entry.key)}
                         onSelect={(item) => void selectHistory(item)}
                         onDelete={(item) => void deleteHistoryItem(item.id)}
                         onReuse={(item) => void reuseAsSource(item)}
-                        onToggleCompare={(item) => setCompareB(item && compareB?.id !== item.id ? item : null)}
+                        onToggleCompare={(item) => setCompareB(item && compareItemId !== item.id ? item : null)}
                         onOpenMenu={openMenu}
                         onToggleExpanded={() => togglePromptGroup(entry.key)}
                         usesFluentUI={usesFluentUI}

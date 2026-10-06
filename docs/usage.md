@@ -9,9 +9,8 @@
 1. API 形态:Responses API 或 Images API。
 2. BASE_URL:你自己的 OpenAI 兼容中转站地址。
 3. API Key。
-4. 文本模型 ID:Responses API 与 prompt 优化会用到，默认 `gpt-5.5`。
-5. 图像模型 ID:两种 API 形态都会用到，默认 `gpt-image-2`。
-6. 测试连接:保存前建议先点一次，确认当前 profile 能真正走通。
+4. 请求模型 ID:Responses API 直接把它写入请求的 `model` 字段，支持上游允许的文本或图像模型；Images API 也把它作为请求的 `model` 字段。
+5. 测试连接:保存前建议先点一次，确认当前 profile 能真正走通。
 
 本应用不内置任何默认上游，也不会向除你配置的 BASE_URL 以外的生成服务发请求。
 
@@ -25,7 +24,7 @@
 
 - 图像推理容易超过 100 秒。
 - 上游在 Cloudflare / Nginx 后面，常见 524/504。
-- 你的 key 有文本模型权限，例如默认的 `gpt-5.5`。
+- 你的 key 有所填请求模型的权限，例如默认的 `gpt-5.5`，或上游支持的图像模型。
 
 特点:
 

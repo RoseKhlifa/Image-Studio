@@ -146,7 +146,7 @@ func RequestAndExtractWithRetriesAndPartial(
 	onProgress func(stage string, elapsed int, bytes int64),
 	onPartial func(PartialImage),
 ) (ImageResult, string, error) {
-	if opts.APIMode == APIModeImages {
+	if EffectiveAPIMode(opts.Provider, opts.APIMode) == APIModeImages {
 		return imagesAPIWithRetries(ctx, opts, outputDir, timestamp, onLog, onProgress, onPartial)
 	}
 	return responsesAPIWithRetries(ctx, transport, opts, outputDir, timestamp, onLog, onProgress, onPartial)
@@ -160,7 +160,7 @@ func RequestAndExtractWithRetriesAndPartialInMemory(
 	onProgress func(stage string, elapsed int, bytes int64),
 	onPartial func(PartialImage),
 ) (ImageResult, string, error) {
-	if opts.APIMode == APIModeImages {
+	if EffectiveAPIMode(opts.Provider, opts.APIMode) == APIModeImages {
 		return imagesAPIWithRetriesInMemory(ctx, opts, onLog, onProgress, onPartial)
 	}
 	return responsesAPIWithRetriesInMemory(ctx, transport, opts, onLog, onProgress, onPartial)
@@ -442,6 +442,9 @@ func imagesAPIWithRetries(
 			}
 			continue
 		}
+		if errors.Is(reqErr, ErrNoImageInResponse) {
+			return ImageResult{}, lastPath, errors.New(describeImagesNoResult(raw))
+		}
 		// 同上,raw 路径靠返回值带,不再嵌进 error message。
 		return ImageResult{}, lastPath, reqErr
 	}
@@ -499,10 +502,25 @@ func imagesAPIWithRetriesInMemory(
 			}
 			continue
 		}
+		if errors.Is(reqErr, ErrNoImageInResponse) {
+			return ImageResult{}, raw, errors.New(describeImagesNoResult(raw))
+		}
 		return ImageResult{}, raw, reqErr
 	}
 
 	return ImageResult{}, lastRaw, fmt.Errorf("多次请求后仍未成功:%w", lastErr)
+}
+
+func describeImagesNoResult(raw string) string {
+	reason := DescribeProblem(raw)
+	switch reason {
+	case "接口返回为空。":
+		return "Images API 返回为空，未收到最终图片。"
+	case "接口已返回内容,但没有发现 image_generation_call.result。":
+		return "Images API 已返回内容，但没有发现 b64_json 或 url 图片。请查看原始响应日志确认中转站返回格式。"
+	default:
+		return reason
+	}
 }
 
 func repairSizeRetryOptions(opts Options, raw string, reqErr error) (Options, bool, string) {

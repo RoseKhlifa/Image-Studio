@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useStudioStore } from "../../state/studioStore";
+import { useStudioFields } from "../../state/useStudioFields";
 import { SizeValue, QualityValue, Mode } from "../../types/domain";
 import { usePlatform } from "../../platform/context";
 import { ChooseDirectory } from "../../platform/runtime/host";
@@ -55,7 +56,23 @@ export function ControlPanel({
     openCustomSizeModal,
     openUpstreamConfig,
     submit, cancel, retryLast, optimizePrompt, inferPromptFromCanvas,
-  } = useStudioStore();
+  } = useStudioFields([
+    "apiKey", "mode", "prompt", "background",
+    "imageStyle", "inputFidelity", "moderation", "negativePrompt",
+    "outputCompression", "size", "quality", "seed",
+    "styleTag", "userIdentifier", "partialImages", "outputFormat",
+    "batchCount", "editSourceMode", "editAutoAspectResolution", "batchProcess",
+    "loopGeneration", "sources", "currentImage", "errorMessage",
+    "errorCanRetry", "errorRawPath", "isRunning", "lastPayload",
+    "isTestingKey", "isOptimizingPrompt", "isInferringPrompt", "apiMode",
+    "requestPolicy", "baseURL", "profiles", "aiProfileId",
+    "imageModelID", "customAspectRatios", "setField", "clearError",
+    "pushToast", "selectSourceImage", "chooseBatchInputDir", "chooseBatchInputFiles",
+    "refreshBatchInputDir", "removeSource", "clearSources", "viewSourceOnCanvas",
+    "compareSourceOnCanvas", "openCustomAspectRatioModal", "openCustomSizeModal", "openUpstreamConfig",
+    "submit", "cancel", "retryLast", "optimizePrompt",
+    "inferPromptFromCanvas",
+  ]);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [promptPopover, setPromptPopover] = useState(false);
   const [macComposeOpen, setMacComposeOpen] = useState(false);

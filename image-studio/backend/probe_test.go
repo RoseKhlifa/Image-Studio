@@ -49,6 +49,37 @@ func TestProbeUpstreamRequestsModelsFromBackend(t *testing.T) {
 	}
 }
 
+func TestProbeUpstreamGoogleProviderUsesNativeModelsEndpoint(t *testing.T) {
+	var gotPath string
+	var gotGoogleKey string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotGoogleKey = r.Header.Get("X-Goog-Api-Key")
+		if auth := r.Header.Get("Authorization"); auth != "" {
+			t.Fatalf("Google probe must not send Authorization: %q", auth)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"models":[{"name":"models/gemini-3.1-flash-image","displayName":"Nano Banana 2"}]}`))
+	}))
+	defer srv.Close()
+
+	got, err := probeUpstream(context.Background(), ProbeUpstreamOptions{
+		APIKey:   "google-key",
+		BaseURL:  srv.URL,
+		Provider: "google",
+		APIMode:  "images",
+	})
+	if err != nil {
+		t.Fatalf("Google probe returned error: %v", err)
+	}
+	if gotPath != "/v1beta/models" || gotGoogleKey != "google-key" {
+		t.Fatalf("path=%q X-Goog-Api-Key=%q", gotPath, gotGoogleKey)
+	}
+	if got.ModelCount != 1 || len(got.Models) != 1 || got.Models[0].ID != "gemini-3.1-flash-image" || got.Models[0].OwnedBy != "google" {
+		t.Fatalf("unexpected Google models: %+v", got)
+	}
+}
+
 func TestProbeUpstreamSkipsModelItemsWithoutID(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

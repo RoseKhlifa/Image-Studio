@@ -305,6 +305,7 @@ func (a *App) startRunWithConfig(cfg kernel.Config, total int, workflowWorkspace
 		var once sync.Once
 		var firstErr atomic.Pointer[error]
 		var jobsDone atomic.Int32
+		var jobsFailed atomic.Int32
 		concurrency := runConcurrency
 		if concurrency < 1 {
 			concurrency = 1
@@ -377,12 +378,16 @@ func (a *App) startRunWithConfig(cfg kernel.Config, total int, workflowWorkspace
 				})
 				previewOnlyRemote := normalizeKernelRuntimeMode(kernelRuntimeMode) == "remote"
 				if previewOnlyRemote && strings.TrimSpace(res.SavedPath) == "" && strings.TrimSpace(res.ImageB64) != "" {
+					resultFormat := strings.TrimSpace(res.OutputFormat)
+					if resultFormat == "" {
+						resultFormat = jobCfg.OutputFormat
+					}
 					res.SavedPath = registerVirtualImage(res.ImageB64, suggestedSaveNameForHistoryItem(sharedCompat.HistoryItem{
 						Prompt:       jobCfg.Prompt,
 						Mode:         string(jobCfg.Mode),
-						OutputFormat: jobCfg.OutputFormat,
+						OutputFormat: resultFormat,
 						CreatedAt:    time.Now().UnixMilli(),
-					}), jobCfg.OutputFormat)
+					}), resultFormat)
 				}
 				if previewOnlyRemote && strings.TrimSpace(res.RawText) != "" {
 					res.RawPath = registerVirtualText(res.RawText, fmt.Sprintf("raw-response-%d-%d.txt", i+1, time.Now().UnixNano()))
@@ -392,6 +397,11 @@ func (a *App) startRunWithConfig(cfg kernel.Config, total int, workflowWorkspace
 						return
 					}
 					if batchMode {
+						jobsFailed.Add(1)
+						errCopy := err
+						if firstErr.CompareAndSwap(nil, &errCopy) {
+							a.notifyRunFailure(err.Error())
+						}
 						a.appendLog(fmt.Sprintf("[%s] 失败并跳过: %v", jobLabel, err))
 						completed := int(jobsDone.Add(1))
 						a.mu.Lock()
@@ -401,15 +411,14 @@ func (a *App) startRunWithConfig(cfg kernel.Config, total int, workflowWorkspace
 							a.cancel = nil
 							a.lastRunConcurrency = 0
 							a.clearBatchPreviewItemsLocked()
-							a.status = fmt.Sprintf("完成 - %.1fs", time.Since(batchStarted).Seconds())
+							a.status = fmt.Sprintf("完成，%d 项失败 - %.1fs", jobsFailed.Load(), time.Since(batchStarted).Seconds())
 						}
 						a.mu.Unlock()
 						a.invalidateNow()
 						return
 					}
-					if firstErr.Load() == nil {
-						errCopy := err
-						firstErr.Store(&errCopy)
+					errCopy := err
+					if firstErr.CompareAndSwap(nil, &errCopy) {
 						a.finishWithError(err, res.RawPath)
 					}
 					cancelAll()
@@ -534,6 +543,9 @@ func (a *App) startRunWithConfig(cfg kernel.Config, total int, workflowWorkspace
 					a.lastRunConcurrency = 0
 					a.clearBatchPreviewItemsLocked()
 					a.status = fmt.Sprintf("完成 - %.1fs", time.Since(batchStarted).Seconds())
+					if failed := jobsFailed.Load(); failed > 0 {
+						a.status = fmt.Sprintf("完成，%d 项失败 - %.1fs", failed, time.Since(batchStarted).Seconds())
+					}
 				}
 				a.mu.Unlock()
 				if openSavePromptAfterUnlock {
@@ -542,7 +554,7 @@ func (a *App) startRunWithConfig(cfg kernel.Config, total int, workflowWorkspace
 				if openBatchSavePromptAfterUnlock {
 					a.openBatchSavePrompt(batchSaveItems)
 				}
-				if completed == total {
+				if completed == total && firstErr.Load() == nil {
 					a.maybePlayCompletionSound(completed, total)
 					a.maybeSendCompletionNotification(displayItem, completed, total)
 				}
@@ -598,6 +610,7 @@ func (a *App) currentConfig() kernel.Config {
 		ImageModelID:            a.imageModelInput.Text(),
 		Prompt:                  prompt,
 		Mode:                    client.Mode(a.mode),
+		Provider:                client.Provider(a.provider),
 		APIMode:                 client.APIMode(a.api),
 		RequestPolicy:           client.RequestPolicy(a.policy),
 		ResponsesTransport:      client.ResponsesTransport(a.responsesTransport),
@@ -769,6 +782,7 @@ func resolveFallbackProfileConfig(state sharedCompat.State, fallbackProfileID st
 		BaseURL:                 strings.TrimSpace(profile.BaseURL),
 		TextModelID:             strings.TrimSpace(profile.TextModelID),
 		ImageModelID:            strings.TrimSpace(profile.ImageModelID),
+		Provider:                client.Provider(normalizeProfileProvider(profile.Provider)),
 		APIMode:                 client.APIMode(normalizeProfileAPIMode(profile.APIMode)),
 		ResponsesTransport:      client.ResponsesTransport(normalizeProfileResponsesTransport(profile.ResponsesTransport)),
 		RequestPolicy:           client.RequestPolicy(normalizeProfilePolicy(profile.RequestPolicy)),

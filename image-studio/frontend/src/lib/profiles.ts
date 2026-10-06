@@ -1,4 +1,4 @@
-import type { APIMode, ReasoningEffortValue, RequestPolicy, ResponsesTransport, UpstreamProfile } from "../types/domain";
+import type { APIMode, ReasoningEffortValue, RequestPolicy, ResponsesTransport, UpstreamProfile, UpstreamProvider } from "../types/domain";
 
 function normalizeReasoningEffort(value: unknown): ReasoningEffortValue {
   return value === "low" || value === "medium" || value === "high" || value === "xhigh"
@@ -8,6 +8,17 @@ function normalizeReasoningEffort(value: unknown): ReasoningEffortValue {
 
 export function normalizeResponsesTransport(value: unknown): ResponsesTransport {
   return value === "websocket" ? "websocket" : "sse";
+}
+
+export function normalizeUpstreamProvider(value: unknown): UpstreamProvider {
+  if (value === "google" || value === "grok") return value;
+  return "openai";
+}
+
+export function upstreamProviderLabel(provider: UpstreamProvider): string {
+  if (provider === "google") return "Google Gemini";
+  if (provider === "grok") return "Grok / xAI";
+  return "OpenAI / 兼容中转";
 }
 
 // localStorage 键名规范:
@@ -57,7 +68,8 @@ export function tryParseProfile(raw: unknown): UpstreamProfile | null {
   const o = raw as Record<string, unknown>;
   const id = typeof o.id === "string" ? o.id : "";
   const name = typeof o.name === "string" ? o.name : "";
-  const apiMode = o.apiMode === "images" ? "images" : "responses";
+  const provider = normalizeUpstreamProvider(o.provider);
+  const apiMode = provider !== "openai" || o.apiMode === "images" ? "images" : "responses";
   const responsesTransport = normalizeResponsesTransport(o.responsesTransport);
   const requestPolicy = o.requestPolicy === "compat" ? "compat" : "openai";
   const imagesNewAPICompat = o.imagesNewAPICompat === true;
@@ -75,6 +87,7 @@ export function tryParseProfile(raw: unknown): UpstreamProfile | null {
   return {
     id,
     name,
+    provider,
     apiMode,
     responsesTransport,
     requestPolicy,
@@ -145,6 +158,7 @@ export function makeBlankProfile(apiMode: APIMode = "responses", profiles: Upstr
   return {
     id: genProfileId(),
     name: nextDefaultProfileName(profiles),
+    provider: "openai",
     apiMode,
     responsesTransport: "sse",
     requestPolicy: "openai",

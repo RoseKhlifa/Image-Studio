@@ -48,7 +48,7 @@
 
 ## 设置
 
-- 上游配置:API 形态、BASE_URL、API Key、文本模型 ID、图像模型 ID、连接测试。
+- 上游配置:API 形态、BASE_URL、API Key、请求模型 ID、连接测试。Responses API 和 Images API 都只填写一个请求模型 ID。
 - API Key:
   - 桌面端使用系统安全存储(Keychain / Credential Manager / Secret Service)。
   - Android 壳层使用应用私有 SharedPreferences。

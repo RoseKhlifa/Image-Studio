@@ -18,7 +18,10 @@ import {
   registerVirtualText,
   releaseVirtualPath,
   rotateVirtualImage,
+  sourceToDataURL,
 } from "../../lib/virtualHostStore.ts";
+import { compositeMaskedEdit, normalizeMaskForSource, type PreparedMaskComposite } from "../../lib/maskComposite.ts";
+import { dataURLFromBase64 } from "../../lib/images.ts";
 import {
   browserStoredAPIKey,
   fileNameFromPath,
@@ -146,12 +149,30 @@ async function startRemoteJob(options: GenerateOptionsLike): Promise<JobStartedL
   remoteJobControllers.set(jobId, controller);
   void (async () => {
     try {
-      const result = await runRemoteImageJob({ payload: {
-        ...options,
-        requestPolicy: normalizeRequestPolicy(options.requestPolicy),
-        imagesNewAPICompat: options.imagesNewAPICompat === true,
-        allowInsecureConnection: options.allowInsecureConnection === true,
-      }, sourceImages: options.sourceImages }, {
+      let preparedMask: PreparedMaskComposite | null = null;
+      let remoteOptions = options;
+      if (options.mode === "edit" && options.maskB64) {
+        const firstSource = options.sourceImages?.[0];
+        let sourceDataURL = await sourceToDataURL(firstSource);
+        const sourcePath = firstSource?.path || options.imagePaths?.[0] || options.imagePath;
+        if (!sourceDataURL && sourcePath) {
+          const sourceB64 = await ReadImageAsBase64(sourcePath);
+          sourceDataURL = dataURLFromBase64(sourceB64);
+        }
+        if (!sourceDataURL) throw new RemoteKernelError("蒙版任务无法读取第一张源图");
+        preparedMask = await normalizeMaskForSource(sourceDataURL, options.maskB64);
+        remoteOptions = { ...options, maskB64: preparedMask.maskB64 };
+      }
+      const result = await runRemoteImageJob({
+        payload: {
+          ...remoteOptions,
+          requestPolicy: normalizeRequestPolicy(remoteOptions.requestPolicy),
+          imagesNewAPICompat: remoteOptions.imagesNewAPICompat === true,
+          allowInsecureConnection: remoteOptions.allowInsecureConnection === true,
+        },
+        sourceImages: remoteOptions.sourceImages,
+        preparedMask,
+      }, {
         signal: controller.signal,
         onLog: (line) => emitLocalEvent(`log:${jobId}`, line),
         onProgress: (stage, elapsed, bytes) => emitLocalEvent(`progress:${jobId}`, { stage, elapsed, bytes }),
@@ -164,18 +185,23 @@ async function startRemoteJob(options: GenerateOptionsLike): Promise<JobStartedL
         }),
       });
       if (controller.signal.aborted) return;
+      const finalImageB64 = preparedMask
+        ? await compositeMaskedEdit(preparedMask, result.imageB64)
+        : result.imageB64;
+      const finalOutputFormat = preparedMask ? "png" : (options.outputFormat || "png");
       const saved = registerVirtualImage({
-        imageB64: result.imageB64,
-        suggestedName: `image-${options.mode || "generate"}.${options.outputFormat || "png"}`,
+        imageB64: finalImageB64,
+        suggestedName: `image-${options.mode || "generate"}.${finalOutputFormat}`,
       });
       emitLocalEvent(`result:${jobId}`, {
-        imageB64: result.imageB64,
+        imageB64: finalImageB64,
         revisedPrompt: result.revisedPrompt,
         sourceEvent: result.sourceEvent,
         savedPath: saved.path,
         rawPath: result.rawPath,
         mode: result.mode,
         prompt: result.prompt,
+        outputFormat: finalOutputFormat,
       });
     } catch (error) {
       if (controller.signal.aborted) return;
@@ -764,6 +790,7 @@ export async function probeCurrentUpstream(
   responsesTransport = "sse",
   allowInsecureConnection = false,
   signal?: AbortSignal,
+  provider: ProbeUpstreamOptionsLike["provider"] = "openai",
 ): Promise<ProbeUpstreamResultLike> {
   if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
   const options: ProbeUpstreamOptionsLike = {
@@ -773,6 +800,7 @@ export async function probeCurrentUpstream(
     proxyURL,
     apiMode,
     responsesTransport,
+    ...(provider !== "openai" ? { provider } : {}),
     ...(allowInsecureConnection ? { allowInsecureConnection: true } : {}),
   };
   if (hasServiceMethod("ProbeUpstream")) {
