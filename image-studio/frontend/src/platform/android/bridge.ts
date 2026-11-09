@@ -1,5 +1,6 @@
 import { readRuntimePlatformState } from "..";
 import { invokeAndroidNative } from "./nativeInvoke";
+import { guessImageMimeTypeFromName } from "../../lib/images";
 
 export type AndroidBridge = {
   invoke?: (requestId: string, method: string, payloadJson: string) => void;
@@ -41,7 +42,7 @@ function byteStringToBlobURL(imageB64: string, type = "image/png"): string {
 }
 
 function triggerDownload(imageB64: string, suggestedName: string): string {
-  const objectURL = byteStringToBlobURL(imageB64);
+  const objectURL = byteStringToBlobURL(imageB64, guessImageMimeTypeFromName(suggestedName) || "image/png");
   const anchor = document.createElement("a");
   anchor.href = objectURL;
   anchor.download = suggestedName || "image-studio.png";
@@ -53,7 +54,7 @@ function triggerDownload(imageB64: string, suggestedName: string): string {
   return suggestedName;
 }
 
-function ensurePngName(name: string): string {
+function ensureImageName(name: string): string {
   const trimmed = name.trim() || "image-studio.png";
   return /\.[a-z0-9]+$/i.test(trimmed) ? trimmed : `${trimmed}.png`;
 }
@@ -79,7 +80,7 @@ export async function saveImageForPlatform(
   suggestedName: string,
   desktopSave: (imageB64: string, suggestedName: string) => Promise<string>,
 ): Promise<string> {
-  const filename = ensurePngName(suggestedName);
+  const filename = ensureImageName(suggestedName);
   const platform = readRuntimePlatformState();
   if (!platform.isAndroid) return desktopSave(imageB64, filename);
 
@@ -91,8 +92,9 @@ export async function saveImageForPlatform(
 
   if (navigator.share && typeof File !== "undefined") {
     try {
-      const blob = await (await fetch(`data:image/png;base64,${imageB64}`)).blob();
-      const file = new File([blob], filename, { type: "image/png" });
+      const mimeType = guessImageMimeTypeFromName(filename) || "image/png";
+      const blob = await (await fetch(`data:${mimeType};base64,${imageB64}`)).blob();
+      const file = new File([blob], filename, { type: mimeType });
       const canShare = !navigator.canShare || navigator.canShare({ files: [file] });
       if (canShare) {
         await navigator.share({ files: [file], title: filename });

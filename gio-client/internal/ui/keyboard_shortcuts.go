@@ -329,6 +329,7 @@ func (a *App) handleCanvasKeyboardShortcuts(gtx layout.Context, snap snapshot) {
 			transfer.TargetFilter{Target: &a.keyboardShortcutTag, Type: "image/png"},
 			transfer.TargetFilter{Target: &a.keyboardShortcutTag, Type: "image/jpeg"},
 			transfer.TargetFilter{Target: &a.keyboardShortcutTag, Type: "image/webp"},
+			transfer.TargetFilter{Target: &a.keyboardShortcutTag, Type: "image/gif"},
 		)
 		if !ok {
 			break

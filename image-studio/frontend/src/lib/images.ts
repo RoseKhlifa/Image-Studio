@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 
-export function base64ToBlob(b64: string, mimeType = "image/png"): Blob {
+export function base64ToBlob(b64: string, mimeType?: string): Blob {
   const bin = atob(b64);
   const bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return new Blob([bytes], { type: mimeType });
+  return new Blob([bytes], { type: mimeType || detectImageMimeTypeFromBase64(b64) || "image/png" });
 }
 
 export async function blobToBase64(blob: Blob): Promise<string> {
@@ -46,7 +46,7 @@ export function releaseBlobObjectURL(blob: Blob): void {
 
 export function detectImageMimeTypeFromBase64(b64: string): string | null {
   try {
-    const bin = atob(b64.slice(0, 64));
+    const bin = atob(b64.slice(0, 1024));
     const bytes = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
     if (
@@ -78,6 +78,14 @@ export function detectImageMimeTypeFromBase64(b64: string): string | null {
     ) {
       return "image/webp";
     }
+    if (bytes.length >= 6) {
+      const signature = String.fromCharCode(...bytes.slice(0, 6));
+      if (signature === "GIF87a" || signature === "GIF89a") return "image/gif";
+    }
+    // SVG is UTF-8 XML rather than a binary format. Inspect a bounded prefix
+    // after decoding so data URLs and generated vector output render correctly.
+    const prefix = new TextDecoder().decode(bytes).trimStart().toLowerCase();
+    if (prefix.includes("<svg") && prefix.includes(">")) return "image/svg+xml";
   } catch {
     // ignore
   }
@@ -89,6 +97,8 @@ export function guessImageMimeTypeFromName(name: string | null | undefined): str
   if (lower.endsWith(".png")) return "image/png";
   if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
   if (lower.endsWith(".webp")) return "image/webp";
+  if (lower.endsWith(".gif")) return "image/gif";
+  if (lower.endsWith(".svg")) return "image/svg+xml";
   return null;
 }
 
@@ -98,6 +108,10 @@ export function imageExtensionForMimeType(mimeType: string | null | undefined): 
       return "jpg";
     case "image/webp":
       return "webp";
+    case "image/gif":
+      return "gif";
+    case "image/svg+xml":
+      return "svg";
     default:
       return "png";
   }

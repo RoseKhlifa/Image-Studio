@@ -1,25 +1,35 @@
 package client
 
-import "errors"
+import (
+	"errors"
+	"strings"
+)
 
 const (
-	BaseURL                  = "" // 不再内置默认上游;调用方必须显式提供 Options.BaseURL
-	TextModel                = "gpt-5.5"
-	ImageModel               = "gpt-image-2"
-	DefaultSize              = "1024x1024"
-	DefaultQuality           = "auto"
-	OutputFormat             = "png"
-	DefaultBackground        = "auto"
-	DefaultOutputCompression = 100
-	DefaultInputFidelity     = "auto"
-	DefaultImageStyle        = "default"
-	DefaultModeration        = "low"
-	DefaultReasoningEffort   = "xhigh"
-	DefaultPartialImages     = 1
-	DefaultAutoRetryCount    = 5
-	MaxAutoRetryCount        = 10
-	MaxInputImageBytes       = 50 * 1024 * 1024
-	MaxAttempts              = DefaultAutoRetryCount + 1
+	BaseURL                   = "" // 不再内置默认上游;调用方必须显式提供 Options.BaseURL
+	TextModel                 = "gpt-5.5"
+	ImageModel                = "gpt-image-2.6-sunburst"
+	DefaultSize               = "1024x1024"
+	DefaultQuality            = "auto"
+	DefaultComplexity         = "high"
+	OutputFormat              = "png"
+	DefaultBackground         = "auto"
+	DefaultOutputCompression  = 100
+	DefaultInputFidelity      = "auto"
+	DefaultImageStyle         = "default"
+	DefaultModeration         = "low"
+	DefaultReasoningEffort    = "xhigh"
+	DefaultPartialImages      = 1
+	DefaultGIFFrameCount      = 9
+	DefaultGIFFrameDurationMs = 200
+	MinGIFFrameCount          = 2
+	MaxGIFFrameCount          = 16
+	MinGIFFrameDurationMs     = 20
+	MaxGIFFrameDurationMs     = 2000
+	DefaultAutoRetryCount     = 5
+	MaxAutoRetryCount         = 10
+	MaxInputImageBytes        = 50 * 1024 * 1024
+	MaxAttempts               = DefaultAutoRetryCount + 1
 )
 
 // Tunable knobs (exposed as vars so tests can shrink them).
@@ -40,6 +50,8 @@ var SupportedImageMime = map[string]string{
 	".jpg":  "image/jpeg",
 	".jpeg": "image/jpeg",
 	".webp": "image/webp",
+	".gif":  "image/gif",
+	".svg":  "image/svg+xml",
 }
 
 type SizeOption struct {
@@ -63,6 +75,8 @@ type QualityOption struct {
 
 var QualityOptions = []QualityOption{
 	{"标准 auto(推荐)", "auto"},
+	{"极高 max", "max"},
+	{"超高 xhigh", "xhigh"},
 	{"高质量 high", "high"},
 	{"中等 medium", "medium"},
 	{"快速草稿 low", "low"},
@@ -80,18 +94,37 @@ var OutputFormatOptions = []OutputFormatOption{
 	{"PNG(无损,推荐)", "png"},
 	{"JPEG(更小)", "jpeg"},
 	{"WebP", "webp"},
+	{"GIF(动画)", "gif"},
+	{"SVG(矢量)", "svg"},
 }
 
 // FileExtForFormat 把 output_format(如 "jpeg")映射到文件扩展名(不含点)。
 // 未知 / 空 → 回退到默认 OutputFormat 常量(png)。
 func FileExtForFormat(format string) string {
-	switch format {
+	normalized := strings.ToLower(strings.TrimSpace(format))
+	switch normalized {
 	case "jpeg":
 		return "jpg"
-	case "jpg", "png", "webp":
-		return format
+	case "jpg", "png", "webp", "gif", "svg":
+		return normalized
 	}
 	return OutputFormat
+}
+
+// NormalizeOutputFormat accepts the formats supported by the current Images API
+// contract and falls back to PNG for stale or unsupported persisted settings.
+func NormalizeOutputFormat(format string) string {
+	switch strings.ToLower(strings.TrimSpace(format)) {
+	case "png", "jpeg", "webp", "gif", "svg":
+		return strings.ToLower(strings.TrimSpace(format))
+	default:
+		return OutputFormat
+	}
+}
+
+func IsNonStreamingOutputFormat(format string) bool {
+	format = NormalizeOutputFormat(format)
+	return format == "gif" || format == "svg"
 }
 
 // Mode is "generate" (text-to-image) or "edit" (image-to-image).
@@ -147,11 +180,18 @@ type Options struct {
 	Mode    Mode
 	Size    string
 	Quality string
+	// Complexity controls GPT Image 2.6 planning effort: low, medium, high.
+	// Empty values fall back to the model default.
+	Complexity string
 
-	// OutputFormat:"png" | "jpeg" | "webp"。空时回退到 OutputFormat 常量。
+	// OutputFormat:"png" | "jpeg" | "webp" | "gif" | "svg"。空时回退到 OutputFormat 常量。
 	// Responses API 会把它放进 image_generation 工具的 output_format 参数;
 	// Images API 同名字段(JSON 与 multipart 都支持)。落盘时按此值选扩展名。
 	OutputFormat string
+
+	// GIF-only animation controls. Zero values use the official defaults.
+	FrameCount      int
+	FrameDurationMs int
 
 	// ImageDataURLs holds one or more data: URLs for edit / multi-reference
 	// requests. When non-empty the request switches to "edit" action and each

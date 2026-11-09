@@ -1,7 +1,8 @@
 export const DEFAULT_TEXT_MODEL = "gpt-5.5";
-export const DEFAULT_IMAGE_MODEL = "gpt-image-2";
+export const DEFAULT_IMAGE_MODEL = "gpt-image-2.6-sunburst";
 export const DEFAULT_SIZE = "1024x1024";
 export const DEFAULT_QUALITY = "auto";
+export const DEFAULT_COMPLEXITY = "high";
 export const DEFAULT_OUTPUT_FORMAT = "png";
 export const DEFAULT_BACKGROUND = "auto";
 export const DEFAULT_OUTPUT_COMPRESSION = 100;
@@ -12,6 +13,12 @@ export const DEFAULT_REASONING_EFFORT = "xhigh";
 export const DEFAULT_REQUEST_POLICY = "openai";
 export const DEFAULT_UPSTREAM_PROVIDER = "openai";
 export const DEFAULT_PARTIAL_IMAGES = 1;
+export const DEFAULT_GIF_FRAME_COUNT = 9;
+export const DEFAULT_GIF_FRAME_DURATION_MS = 200;
+export const MIN_GIF_FRAME_COUNT = 2;
+export const MAX_GIF_FRAME_COUNT = 16;
+export const MIN_GIF_FRAME_DURATION_MS = 20;
+export const MAX_GIF_FRAME_DURATION_MS = 2000;
 export const DEFAULT_AUTO_RETRY_COUNT = 5;
 export const MAX_AUTO_RETRY_COUNT = 10;
 export const MAX_ATTEMPTS = DEFAULT_AUTO_RETRY_COUNT + 1;
@@ -127,6 +134,33 @@ export function normalizeOutputCompression(value) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return DEFAULT_OUTPUT_COMPRESSION;
   return Math.max(0, Math.min(100, Math.round(numeric)));
+}
+
+export function normalizeOutputFormat(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return ["png", "jpeg", "webp", "gif", "svg"].includes(normalized) ? normalized : DEFAULT_OUTPUT_FORMAT;
+}
+
+export function normalizeImageComplexity(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return ["low", "medium", "high"].includes(normalized) ? normalized : DEFAULT_COMPLEXITY;
+}
+
+export function normalizeGIFFrameCount(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return DEFAULT_GIF_FRAME_COUNT;
+  return Math.max(MIN_GIF_FRAME_COUNT, Math.min(MAX_GIF_FRAME_COUNT, Math.floor(numeric)));
+}
+
+export function normalizeGIFFrameDurationMs(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return DEFAULT_GIF_FRAME_DURATION_MS;
+  return Math.max(MIN_GIF_FRAME_DURATION_MS, Math.min(MAX_GIF_FRAME_DURATION_MS, Math.floor(numeric / 10) * 10));
+}
+
+export function isNonStreamingOutputFormat(value) {
+  const normalized = normalizeOutputFormat(value);
+  return normalized === "gif" || normalized === "svg";
 }
 
 export function normalizeInputFidelity(value) {
@@ -324,6 +358,26 @@ export function supportsOutputCompression(imageModelID, outputFormat) {
   return supportsImageBackground(imageModelID) && (outputFormat === "jpeg" || outputFormat === "webp");
 }
 
+export function supportsImageComplexity(imageModelID) {
+  return normalizeImageModel(imageModelID).toLowerCase().startsWith("gpt-image-2.6-");
+}
+
+export function supportsAnimatedImageOutput(imageModelID) {
+  return supportsImageComplexity(imageModelID);
+}
+
+export function validateImageOutputFormat(imageModelID, mode, outputFormat) {
+  const normalized = normalizeOutputFormat(outputFormat);
+  if (!isNonStreamingOutputFormat(normalized)) return null;
+  if (!supportsAnimatedImageOutput(imageModelID)) {
+    return `模型 ${normalizeImageModel(imageModelID)} 不支持 ${normalized} 输出；GIF/SVG 需要 GPT Image 2.6 Sunburst 或 Flare`;
+  }
+  if (normalized === "svg" && mode === "edit") {
+    return "SVG 输出仅支持文生图，图生图请改用 PNG/JPEG/WebP/GIF";
+  }
+  return null;
+}
+
 export function supportsInputFidelity(imageModelID) {
   const normalized = normalizeImageModel(imageModelID).toLowerCase();
   if (normalized.startsWith("gpt-image-2")) return false;
@@ -375,14 +429,18 @@ export function buildResponsesInputContent(prompt, sourceDataURLs) {
 export function buildResponsesImageTool(payload, sourceDataURLs, options = {}) {
   const size = payload.size || DEFAULT_SIZE;
   const quality = payload.quality || DEFAULT_QUALITY;
-  const outputFormat = payload.outputFormat || DEFAULT_OUTPUT_FORMAT;
+  const outputFormat = normalizeOutputFormat(payload.outputFormat);
   const background = normalizeBackground(payload.background);
   const outputCompression = normalizeOutputCompression(payload.outputCompression);
   const inputFidelity = normalizeInputFidelity(payload.inputFidelity);
   const negativePrompt = normalizeNegativePrompt(payload.negativePrompt);
   const moderation = normalizeModeration(payload.moderation);
   const compatExtensions = shouldSendExtendedImageParameters(payload.requestPolicy);
-  const partialImages = payload.disablePreview ? 0 : normalizePartialImages(payload.partialImages);
+  const partialImages = payload.disablePreview || isNonStreamingOutputFormat(outputFormat)
+    ? 0
+    : normalizePartialImages(payload.partialImages);
+  const outputFormatError = validateImageOutputFormat(payload.imageModelID, payload.mode, outputFormat);
+  if (outputFormatError) throw new Error(outputFormatError);
   const tool = {
     type: "image_generation",
     action: sourceDataURLs.length > 0 ? "edit" : "generate",
@@ -391,7 +449,8 @@ export function buildResponsesImageTool(payload, sourceDataURLs, options = {}) {
     output_format: outputFormat,
     partial_images: partialImages,
   };
-  if (supportsImageBackground(payload.imageModelID)) tool.background = background;
+  if (supportsImageComplexity(payload.imageModelID)) tool.complexity = normalizeImageComplexity(payload.complexity);
+  if (supportsImageBackground(payload.imageModelID) && !isNonStreamingOutputFormat(outputFormat)) tool.background = background;
   if (supportsOutputCompression(payload.imageModelID, outputFormat)) tool.output_compression = outputCompression;
   if (supportsInputFidelity(payload.imageModelID) && sourceDataURLs.length > 0 && inputFidelity !== DEFAULT_INPUT_FIDELITY) {
     tool.input_fidelity = inputFidelity;

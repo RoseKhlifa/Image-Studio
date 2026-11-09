@@ -279,7 +279,9 @@ export function createImageActions(store: StateAdapter) {
     async saveCurrentImageAs() {
       const current = store.getState().currentImage;
       if (!current) return;
-      const suggested = `image-${current.mode}-${current.id.slice(0, 8)}.png`;
+      const outputFormat = current.outputFormat || "png";
+      const extension = outputFormat === "jpeg" ? "jpg" : outputFormat;
+      const suggested = `image-${current.mode}-${current.id.slice(0, 8)}.${extension}`;
       try {
         const saved = current.savedPath
           ? await SaveImagePathAs(current.savedPath, suggested)
@@ -296,8 +298,8 @@ export function createImageActions(store: StateAdapter) {
 
     async importImageFile(file: File) {
       try {
-        if (!/^image\/(png|jpe?g|webp)$/.test(file.type)) {
-          store.setState({ errorMessage: `不支持的图片类型:${file.type || "(未知)"},请用 PNG/JPG/WebP`, errorCanRetry: false, errorRawPath: null });
+        if (!/^image\/(png|jpe?g|webp|gif)$/.test(file.type)) {
+          store.setState({ errorMessage: `不支持的图片类型:${file.type || "(未知)"},请用 PNG/JPG/WebP/GIF`, errorCanRetry: false, errorRawPath: null });
           return;
         }
         const b64 = await fileToBase64(file);

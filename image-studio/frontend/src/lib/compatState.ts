@@ -574,7 +574,7 @@ function normalizeKernelRuntimeMode(value: unknown): KernelRuntimeMode {
 }
 
 function normalizeOutputFormat(value: unknown): OutputFormatValue {
-  return value === "jpeg" || value === "webp" || value === "png" ? value : "png";
+  return value === "jpeg" || value === "webp" || value === "gif" || value === "svg" || value === "png" ? value : "png";
 }
 
 function normalizeBackground(value: unknown): BackgroundValue {
@@ -617,7 +617,7 @@ function normalizeSize(value: unknown): HistoryItem["size"] {
 }
 
 function normalizeQuality(value: unknown): HistoryItem["quality"] {
-  return value === "auto" || value === "high" || value === "low" || value === "medium" || value === "standard" || value === "hd"
+  return value === "auto" || value === "high" || value === "low" || value === "medium" || value === "xhigh" || value === "max" || value === "standard" || value === "hd"
     ? value
     : "medium";
 }

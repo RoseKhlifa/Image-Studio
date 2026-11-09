@@ -1,8 +1,10 @@
 package client
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -32,10 +34,7 @@ func BuildPayload(opts Options) ([]byte, error) {
 	if quality == "" {
 		quality = DefaultQuality
 	}
-	outputFormat := opts.OutputFormat
-	if outputFormat == "" {
-		outputFormat = OutputFormat
-	}
+	outputFormat := NormalizeOutputFormat(opts.OutputFormat)
 	background := normalizeBackground(opts.Background)
 	outputCompression := normalizeOutputCompression(opts.OutputCompression)
 	inputFidelity := normalizeInputFidelity(opts.InputFidelity)
@@ -66,6 +65,10 @@ func BuildPayload(opts Options) ([]byte, error) {
 	if imgModel == "" {
 		imgModel = ImageModel
 	}
+	if err := validateImageOutputFormat(imgModel, opts.Mode, outputFormat); err != nil {
+		return nil, err
+	}
+	complexity := normalizeImageComplexity(opts.Complexity)
 	tool := map[string]any{
 		"type":           "image_generation",
 		"action":         action,
@@ -74,7 +77,10 @@ func BuildPayload(opts Options) ([]byte, error) {
 		"output_format":  outputFormat,
 		"partial_images": 0,
 	}
-	if supportsImageBackground(imgModel) {
+	if supportsImageComplexity(imgModel) {
+		tool["complexity"] = complexity
+	}
+	if supportsImageBackground(imgModel) && !IsNonStreamingOutputFormat(outputFormat) {
 		tool["background"] = background
 	}
 	if supportsOutputCompression(imgModel, outputFormat) {
@@ -98,6 +104,9 @@ func BuildPayload(opts Options) ([]byte, error) {
 		tool["negative_prompt"] = opts.NegativePrompt
 	}
 	tool["partial_images"] = normalizePartialImages(opts.PartialImages)
+	if IsNonStreamingOutputFormat(outputFormat) {
+		tool["partial_images"] = 0
+	}
 	if opts.DisablePreview {
 		tool["partial_images"] = 0
 	}
@@ -432,9 +441,12 @@ func ImageFileToDataURL(path string) (string, error) {
 		return "", fmt.Errorf("路径不是文件:%s", path)
 	}
 	ext := strings.ToLower(filepath.Ext(path))
+	if ext == ".svg" {
+		return "", errors.New("SVG 不能作为图生图源图，请改用 PNG/JPEG/WebP/GIF")
+	}
 	mime, ok := SupportedImageMime[ext]
 	if !ok {
-		supported := strings.Join([]string{".jpeg", ".jpg", ".png", ".webp"}, ", ")
+		supported := strings.Join([]string{".jpeg", ".jpg", ".png", ".webp", ".gif", ".svg"}, ", ")
 		extLabel := ext
 		if extLabel == "" {
 			extLabel = "(无扩展名)"
@@ -505,6 +517,16 @@ func detectImageMimeTypeFromBytes(data []byte) string {
 		data[11] == 0x50 {
 		return "image/webp"
 	}
+	if len(data) >= 6 && (string(data[:6]) == "GIF87a" || string(data[:6]) == "GIF89a") {
+		return "image/gif"
+	}
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) > 0 {
+		lower := strings.ToLower(string(trimmed))
+		if strings.Contains(lower, "<svg") && strings.Contains(lower, ">") {
+			return "image/svg+xml"
+		}
+	}
 	return ""
 }
 
@@ -514,6 +536,10 @@ func imageExtensionForMimeType(mime string) string {
 		return "jpg"
 	case "image/webp":
 		return "webp"
+	case "image/gif":
+		return "gif"
+	case "image/svg+xml":
+		return "svg"
 	default:
 		return "png"
 	}

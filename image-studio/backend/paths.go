@@ -40,7 +40,7 @@ func writeBase64PNG(b64, path string) (string, error) {
 
 // buildImageName composes the canonical filename for a generated image, e.g.
 // `image-generate-cyberpunk-cat-20260518-210500.png`.
-// outputFormat 来自 GenerateOptions.OutputFormat,空时回退到 client.OutputFormat。
+// outputFormat 来自 GenerateOptions.OutputFormat (png/jpeg/webp/gif/svg),空时回退到 client.OutputFormat。
 // 扩展名走 client.FileExtForFormat 标准化(jpeg→jpg)。
 func buildImageName(mode client.Mode, prompt, timestamp, outputFormat string) string {
 	prefix := "generate"

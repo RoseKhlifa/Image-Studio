@@ -7,6 +7,7 @@ import {
   extractInvalidSize,
   fileNameFromPath,
   isRetryableRaw,
+  isNonStreamingOutputFormat,
   normalizeAutoRetryCount,
   normalizeBaseURL,
   repairSizeForOpenAI,
@@ -79,7 +80,7 @@ export async function runRemoteImageJob(
           throw new RemoteKernelError("允许不安全连接需要桌面本地内核或 Android 原生内核；浏览器不能绕过 HTTPS 证书校验");
         }
         const apiMode = effectiveAPIMode(activeRequest.payload.provider || "openai", activeRequest.payload.apiMode);
-        if (apiMode === "images") {
+        if (apiMode === "images" || isNonStreamingOutputFormat(activeRequest.payload.outputFormat)) {
           return await requestImagesOnce(activeRequest, attempt, maxAttempts, callbacks);
         }
         return await requestResponsesOnce(activeRequest, attempt, maxAttempts, callbacks);

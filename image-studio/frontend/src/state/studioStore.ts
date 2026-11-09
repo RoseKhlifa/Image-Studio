@@ -1811,7 +1811,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     let outputFormat: OutputFormatValue = "png";
     try {
       const v = localStorage.getItem("gptcodex.outputFormat");
-      if (v === "png" || v === "jpeg" || v === "webp") outputFormat = v;
+      if (v === "png" || v === "jpeg" || v === "webp" || v === "gif" || v === "svg") outputFormat = v;
     } catch {}
     let background: BackgroundValue = "auto";
     try {
@@ -2790,7 +2790,7 @@ async function launchOneJob(
             mode: r.mode as Mode,
             size: snapshot.size,
             quality: snapshot.quality,
-            outputFormat: r.outputFormat === "png" || r.outputFormat === "jpeg" || r.outputFormat === "webp"
+            outputFormat: r.outputFormat === "png" || r.outputFormat === "jpeg" || r.outputFormat === "webp" || r.outputFormat === "gif" || r.outputFormat === "svg"
               ? r.outputFormat
               : snapshot.outputFormat,
             parentId,

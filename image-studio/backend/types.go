@@ -16,8 +16,11 @@ type GenerateOptions struct {
 	Prompt         string `json:"prompt"`
 	Size           string `json:"size"`
 	Quality        string `json:"quality"`
-	// OutputFormat:"png" | "jpeg" | "webp"。空时回退到 client.OutputFormat 默认("png")。
-	OutputFormat string `json:"outputFormat"`
+	// OutputFormat:"png" | "jpeg" | "webp" | "gif" | "svg"。空时回退到 client.OutputFormat 默认。
+	OutputFormat    string `json:"outputFormat"`
+	Complexity      string `json:"complexity,omitempty"`
+	FrameCount      int    `json:"frameCount,omitempty"`
+	FrameDurationMs int    `json:"frameDurationMs,omitempty"`
 
 	// Multi-reference: zero or more source images for edit mode. Each is a
 	// path on disk (frontend writes imports / generated PNGs to disk so we

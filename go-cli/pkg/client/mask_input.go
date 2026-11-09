@@ -8,6 +8,7 @@ import (
 	"image"
 	"image/color"
 	"image/draw"
+	_ "image/gif"
 	_ "image/jpeg"
 	"image/png"
 	"os"

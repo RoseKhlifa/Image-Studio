@@ -44,7 +44,7 @@ export function AndroidAdvancedSection({
   const backgroundLabel = background === "transparent" ? "透明" : background === "opaque" ? "纯色" : "自动";
   const inputFidelityLabel = inputFidelity === "auto" ? "默认" : inputFidelity;
   const imageStyleLabel = imageStyle === "default" ? "默认" : imageStyle;
-  const outputCompressionLabel = outputFormat === "png" ? "N/A" : String(outputCompression);
+  const outputCompressionLabel = outputFormat === "png" || outputFormat === "gif" || outputFormat === "svg" ? "N/A" : String(outputCompression);
   const moderationLabel = moderation === "auto" ? "auto" : "low";
   const userIdentifierLabel = userIdentifier.trim() ? "已填写" : "未填写";
   const partialImagesLabel = partialImages === 0 ? "仅最终图" : `${partialImages} 帧`;

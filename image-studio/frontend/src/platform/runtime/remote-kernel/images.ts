@@ -121,7 +121,7 @@ function parseImagesResponseSync(raw: string, status: number): ExtractedImageRes
 
 function ensureSupportedImageBase64(imageB64: string, source: string): string {
   if (!imageB64 || !detectImageMimeTypeFromBase64(imageB64)) {
-    throw new RemoteKernelError(`${source}没有返回支持的 PNG/JPEG/WebP 图片`);
+    throw new RemoteKernelError(`${source}没有返回支持的 PNG/JPEG/WebP/GIF/SVG 图片`);
   }
   return imageB64;
 }
@@ -146,7 +146,7 @@ async function imageURLToBase64(
     const native = await nativeHttpRequestText(
       parsed.toString(),
       "GET",
-      { Accept: "image/png, image/jpeg, image/webp, */*" },
+      { Accept: "image/png, image/jpeg, image/webp, image/gif, image/svg+xml, */*" },
       null,
       signal,
       undefined,
@@ -165,7 +165,7 @@ async function imageURLToBase64(
   }
   const response = await fetch(parsed.toString(), {
     method: "GET",
-    headers: { Accept: "image/png, image/jpeg, image/webp, */*" },
+    headers: { Accept: "image/png, image/jpeg, image/webp, image/gif, image/svg+xml, */*" },
     signal,
   });
   if (!response.ok) {
@@ -175,7 +175,7 @@ async function imageURLToBase64(
   if (blob.size > MAX_IMAGE_URL_BYTES) {
     throw new RemoteKernelError(`上游 URL 图片过大(${blob.size}B > ${MAX_IMAGE_URL_BYTES}B 上限)`);
   }
-  if (blob.type && !["image/png", "image/jpeg", "image/webp"].includes(blob.type.toLowerCase())) {
+  if (blob.type && !["image/png", "image/jpeg", "image/webp", "image/gif", "image/svg+xml"].includes(blob.type.toLowerCase())) {
     throw new RemoteKernelError(`上游 URL 图片类型不支持:${blob.type}`);
   }
   const buffer = await blob.arrayBuffer();

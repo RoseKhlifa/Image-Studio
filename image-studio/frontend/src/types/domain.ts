@@ -53,11 +53,11 @@ export interface PromptTemplate {
 }
 
 export type SizeValue = "auto" | `${number}x${number}`;
-export type QualityValue = "auto" | "high" | "medium" | "low" | "standard" | "hd";
+export type QualityValue = "auto" | "high" | "medium" | "low" | "xhigh" | "max" | "standard" | "hd";
 export type KernelRuntimeMode = "auto" | "local" | "remote";
 export type ProxyMode = "none" | "system" | "custom";
 // 让上游做编码;落盘扩展名 jpeg → .jpg,其他原样。
-export type OutputFormatValue = "png" | "jpeg" | "webp";
+export type OutputFormatValue = "png" | "jpeg" | "webp" | "gif" | "svg";
 export type BackgroundValue = "auto" | "opaque" | "transparent";
 export type InputFidelityValue = "auto" | "low" | "high";
 export type ImageStyleValue = "default" | "vivid" | "natural";
@@ -117,6 +117,8 @@ export const SIZE_OPTIONS: SizeOption[] = [
 
 export const QUALITY_OPTIONS: QualityOption[] = [
   { value: "auto",   label: "自适应 auto" },
+  { value: "max",    label: "极高 max" },
+  { value: "xhigh",  label: "超高 xhigh" },
   { value: "high",   label: "高质量 high" },
   { value: "medium", label: "中等 medium" },
   { value: "low",    label: "快速草稿 low" },
@@ -126,6 +128,8 @@ export const OUTPUT_FORMAT_OPTIONS: OutputFormatOption[] = [
   { value: "png",  label: "PNG" },
   { value: "jpeg", label: "JPEG" },
   { value: "webp", label: "WebP" },
+  { value: "gif",  label: "GIF 动画" },
+  { value: "svg",  label: "SVG 矢量" },
 ];
 
 export const BACKGROUND_OPTIONS: BackgroundOption[] = [

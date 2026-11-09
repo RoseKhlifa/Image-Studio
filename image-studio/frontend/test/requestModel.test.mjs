@@ -16,6 +16,12 @@ import {
   openAIAPIEndpoint,
   repairSizeForOpenAI,
   normalizePartialImages,
+  normalizeOutputFormat,
+  normalizeGIFFrameCount,
+  normalizeGIFFrameDurationMs,
+  isNonStreamingOutputFormat,
+  buildResponsesImageTool,
+  validateImageOutputFormat,
   shouldUseImagesNewAPICompat,
   shouldUseGoogleNativeInteractions,
 } from "../../../shared/kernel/requestModel.js";
@@ -54,6 +60,26 @@ test("normalizePartialImages clamps OpenAI range", () => {
   assert.equal(normalizePartialImages(-1), DEFAULT_PARTIAL_IMAGES);
   assert.equal(normalizePartialImages(2.8), 2);
   assert.equal(normalizePartialImages(9), 3);
+});
+
+test("GPT Image 2.6 GIF and SVG outputs disable streaming", () => {
+  assert.equal(normalizeOutputFormat("GIF"), "gif");
+  assert.equal(normalizeOutputFormat("svg"), "svg");
+  assert.equal(normalizeGIFFrameCount(99), 16);
+  assert.equal(normalizeGIFFrameDurationMs(337), 330);
+  assert.equal(isNonStreamingOutputFormat("gif"), true);
+  const gifTool = buildResponsesImageTool({
+    prompt: "looping lantern",
+    mode: "generate",
+    imageModelID: "gpt-image-2.6-sunburst",
+    outputFormat: "gif",
+    partialImages: 3,
+  }, []);
+  assert.equal(gifTool.output_format, "gif");
+  assert.equal(gifTool.partial_images, 0);
+  assert.equal(validateImageOutputFormat("gpt-image-2.6-flare", "generate", "svg"), null);
+  assert.match(validateImageOutputFormat("gpt-image-2", "generate", "gif"), /GPT Image 2\.6/);
+  assert.match(validateImageOutputFormat("gpt-image-2.6-flare", "edit", "svg"), /仅支持文生图/);
 });
 
 test("normalizeAutoRetryCount clamps retry count range", () => {

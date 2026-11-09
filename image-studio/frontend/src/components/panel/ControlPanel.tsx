@@ -131,7 +131,7 @@ export function ControlPanel({
     negativePrompt.trim() ? "已填负向提示词" : "无负向限制",
     outputFormat.toUpperCase(),
     `背景 ${background}`,
-    outputFormat === "png" ? null : `压缩 ${outputCompression}`,
+    outputFormat === "png" || outputFormat === "gif" || outputFormat === "svg" ? null : `压缩 ${outputCompression}`,
     inputFidelity === "auto" ? null : `保真 ${inputFidelity}`,
     imageStyle === "default" ? null : `图风 ${imageStyle}`,
     `审核 ${moderation}`,

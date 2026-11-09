@@ -236,11 +236,11 @@ export function FloatingAdvancedPanel({
   const titleSummary = summaryOrFallback(advancedSummary, "按分组展开常用与进阶参数");
   const negativeSummary = negativePrompt.trim() ? "已设置负向提示词" : "未设置负向提示词";
   const seedSummary = seed > 0 ? `Seed ${seed}` : "随机 Seed";
-  const outputSummary = `${outputFormat.toUpperCase()} · 背景 ${background}${outputFormat === "png" ? "" : ` · 压缩 ${outputCompression}`}`;
+  const outputSummary = `${outputFormat.toUpperCase()} · 背景 ${background}${outputFormat === "png" || outputFormat === "gif" || outputFormat === "svg" ? "" : ` · 压缩 ${outputCompression}`}`;
   const strategySummary = `保真 ${inputFidelity} · 风格 ${imageStyle} · 审核 ${moderation}`;
   const streamSummary = `${partialImages === 0 ? "仅最终图" : `${partialImages} 帧预览`} · ${userIdentifier.trim() ? "已填用户标识" : "未填用户标识"}`;
 
-  const outputActiveCount = Number(outputFormat !== "png") + Number(background !== "auto") + Number(outputCompression !== 100);
+  const outputActiveCount = Number(outputFormat !== "png") + Number(background !== "auto") + Number(outputCompression !== 100 && outputFormat !== "gif" && outputFormat !== "svg");
   const strategyActiveCount = Number(inputFidelity !== "auto") + Number(imageStyle !== "default") + Number(moderation !== "low");
   const streamActiveCount = Number(partialImages !== 1) + Number(userIdentifier.trim().length > 0);
   const coreActiveCount = Number(negativePrompt.trim().length > 0) + Number(seed > 0);
@@ -395,7 +395,7 @@ export function FloatingAdvancedPanel({
                   noteClassName="text-[11px] leading-5 text-zinc-500 dark:text-zinc-400"
                 />
               </AdvancedCard>
-              <AdvancedCard title="背景" hint="透明背景需要 PNG/WebP；`gpt-image-2` 当前不支持透明背景。" variant={variant} className="rounded-[16px]">
+              <AdvancedCard title="背景" hint="透明背景需要 PNG/WebP；GIF/SVG 会省略栅格背景设置。" variant={variant} className="rounded-[16px]">
                 <AdvancedBackgroundField
                   background={background}
                   onChange={(value) => setField("background", value)}

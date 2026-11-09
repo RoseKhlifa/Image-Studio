@@ -1085,7 +1085,7 @@ class AndroidImageStudioBridge(
 
     private fun ensureImageFileName(name: String, fallback: String): String {
         val safe = sanitizeFileName(name, fallback)
-        return if (Regex("\\.(png|jpe?g|webp)$", RegexOption.IGNORE_CASE).containsMatchIn(safe)) {
+        return if (Regex("\\.(png|jpe?g|webp|gif|svg)$", RegexOption.IGNORE_CASE).containsMatchIn(safe)) {
             safe
         } else {
             "$safe.png"
@@ -1097,6 +1097,8 @@ class AndroidImageStudioBridge(
         return when {
             lower.endsWith(".jpg") || lower.endsWith(".jpeg") -> "image/jpeg"
             lower.endsWith(".webp") -> "image/webp"
+            lower.endsWith(".gif") -> "image/gif"
+            lower.endsWith(".svg") -> "image/svg+xml"
             else -> "image/png"
         }
     }
@@ -1199,6 +1201,8 @@ class AndroidImageStudioBridge(
             trimmed.endsWith(".png", true) -> "image/png"
             trimmed.endsWith(".jpg", true) || trimmed.endsWith(".jpeg", true) -> "image/jpeg"
             trimmed.endsWith(".webp", true) -> "image/webp"
+            trimmed.endsWith(".gif", true) -> "image/gif"
+            trimmed.endsWith(".svg", true) -> "image/svg+xml"
             trimmed.endsWith(".json", true) -> "application/json"
             trimmed.endsWith(".txt", true) -> "text/plain"
             else -> "*/*"

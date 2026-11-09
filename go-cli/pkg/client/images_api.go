@@ -59,6 +59,63 @@ func supportsImageBackground(model string) bool {
 	return classifyImageModel(model) == "gpt-image"
 }
 
+func supportsImageComplexity(model string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(model))
+	return strings.HasPrefix(normalized, "gpt-image-2.6-")
+}
+
+func supportsAnimatedImageOutput(model string) bool {
+	return supportsImageComplexity(model)
+}
+
+func normalizeImageComplexity(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "low", "medium", "high":
+		return strings.ToLower(strings.TrimSpace(value))
+	default:
+		return DefaultComplexity
+	}
+}
+
+func normalizeGIFFrameCount(value int) int {
+	if value <= 0 {
+		return DefaultGIFFrameCount
+	}
+	if value < MinGIFFrameCount {
+		return MinGIFFrameCount
+	}
+	if value > MaxGIFFrameCount {
+		return MaxGIFFrameCount
+	}
+	return value
+}
+
+func normalizeGIFFrameDurationMs(value int) int {
+	if value <= 0 {
+		return DefaultGIFFrameDurationMs
+	}
+	if value < MinGIFFrameDurationMs {
+		return MinGIFFrameDurationMs
+	}
+	if value > MaxGIFFrameDurationMs {
+		return MaxGIFFrameDurationMs
+	}
+	return (value / 10) * 10
+}
+
+func validateImageOutputFormat(model string, mode Mode, outputFormat string) error {
+	if !IsNonStreamingOutputFormat(outputFormat) {
+		return nil
+	}
+	if !supportsAnimatedImageOutput(model) {
+		return fmt.Errorf("模型 %s 不支持 %s 输出；GIF/SVG 需要 GPT Image 2.6 Sunburst 或 Flare", model, outputFormat)
+	}
+	if outputFormat == "svg" && mode == ModeEdit {
+		return errors.New("SVG 输出仅支持文生图，图生图请改用 PNG/JPEG/WebP/GIF")
+	}
+	return nil
+}
+
 func supportsOutputCompression(model, outputFormat string) bool {
 	return supportsImageBackground(model) && (outputFormat == "jpeg" || outputFormat == "webp")
 }
@@ -265,10 +322,7 @@ func RequestImagesAPIWithPartial(
 	if quality == "" {
 		quality = DefaultQuality
 	}
-	outputFormat := opts.OutputFormat
-	if outputFormat == "" {
-		outputFormat = OutputFormat
-	}
+	outputFormat := NormalizeOutputFormat(opts.OutputFormat)
 	background := normalizeBackground(opts.Background)
 	outputCompression := normalizeOutputCompression(opts.OutputCompression)
 	inputFidelity := normalizeInputFidelity(opts.InputFidelity)
@@ -285,6 +339,11 @@ func RequestImagesAPIWithPartial(
 	useGoogleInteractions := provider == ProviderGoogle ||
 		(provider == ProviderOpenAI && shouldUseGoogleNativeInteractions(baseURL, model))
 	useGrokImagine := provider == ProviderGrok
+	if err := validateImageOutputFormat(model, opts.Mode, outputFormat); err != nil {
+		return ImageResult{}, err
+	}
+	complexity := normalizeImageComplexity(opts.Complexity)
+	nonStreamingOutput := IsNonStreamingOutputFormat(outputFormat)
 
 	var (
 		url         string
@@ -331,7 +390,12 @@ func RequestImagesAPIWithPartial(
 		if len(paths) == 0 {
 			return ImageResult{}, errors.New("图生图模式需要至少一张源图(请在面板里添加参考图)")
 		}
-		multipartBuf, mpType, err := buildEditsMultipart(paths, opts.MaskB64, opts.Prompt, model, size, quality, outputFormat, background, outputCompression, inputFidelity, moderation, userIdentifier, opts.NegativePrompt, opts.Seed, opts.RequestPolicy, partialImages, useNewAPICompat)
+		for _, path := range paths {
+			if strings.EqualFold(filepath.Ext(path), ".svg") {
+				return ImageResult{}, errors.New("SVG 不能作为图生图源图，请改用 PNG/JPEG/WebP/GIF")
+			}
+		}
+		multipartBuf, mpType, err := buildEditsMultipart(paths, opts.MaskB64, opts.Prompt, model, size, quality, outputFormat, background, outputCompression, inputFidelity, moderation, userIdentifier, opts.NegativePrompt, opts.Seed, opts.RequestPolicy, partialImages, useNewAPICompat, opts.Complexity, opts.FrameCount, opts.FrameDurationMs)
 		if err != nil {
 			return ImageResult{}, err
 		}
@@ -347,7 +411,14 @@ func RequestImagesAPIWithPartial(
 			"quality":       quality,
 			"output_format": outputFormat,
 		}
-		if supportsImageBackground(model) {
+		if supportsImageComplexity(model) {
+			payload["complexity"] = complexity
+		}
+		if outputFormat == "gif" {
+			payload["frame_count"] = normalizeGIFFrameCount(opts.FrameCount)
+			payload["frame_duration_ms"] = normalizeGIFFrameDurationMs(opts.FrameDurationMs)
+		}
+		if supportsImageBackground(model) && !nonStreamingOutput {
 			payload["background"] = background
 		}
 		if supportsOutputCompression(model, outputFormat) {
@@ -365,7 +436,7 @@ func RequestImagesAPIWithPartial(
 		if useNewAPICompat || supportsImagesResponseFormat(model, opts.Mode) {
 			payload["response_format"] = "b64_json"
 		}
-		if !useNewAPICompat {
+		if !useNewAPICompat && !nonStreamingOutput {
 			payload["stream"] = true
 			payload["partial_images"] = partialImages
 		}
@@ -614,7 +685,7 @@ func downloadImagesAPIURL(
 	if err != nil {
 		return ImageResult{}, err
 	}
-	req.Header.Set("Accept", "image/png, image/jpeg, image/webp, */*")
+	req.Header.Set("Accept", "image/png, image/jpeg, image/webp, image/gif, image/svg+xml, */*")
 	req.Header.Set("User-Agent", UserAgent())
 
 	resp, err := httpClient.Do(req)
@@ -636,7 +707,7 @@ func downloadImagesAPIURL(
 		return ImageResult{}, fmt.Errorf("上游 URL 图片过大(>%dB 上限)", MaxInputImageBytes)
 	}
 	if mimeType := detectImageMimeTypeFromBytes(data); mimeType == "" {
-		return ImageResult{}, errors.New("上游 URL 没有返回支持的 PNG/JPEG/WebP 图片")
+		return ImageResult{}, errors.New("上游 URL 没有返回支持的 PNG/JPEG/WebP/GIF/SVG 图片")
 	}
 	if onProgress != nil {
 		onProgress("已下载 Images API URL 图片", int(time.Since(startedAt).Seconds()), int64(len(data)))
@@ -756,7 +827,7 @@ func writeDataURLToTemp(dataURL string) (string, error) {
 // OpenAI's multi-image contract uses repeated image[] fields for every source;
 // the singular image field is retained only for a one-image edit.
 func buildEditsMultipart(
-	paths []string, maskB64, prompt, model, size, quality, outputFormat, background string, outputCompression int, inputFidelity, moderation, userIdentifier, negativePrompt string, seed int64, requestPolicy RequestPolicy, partialImages int, useNewAPICompat bool,
+	paths []string, maskB64, prompt, model, size, quality, outputFormat, background string, outputCompression int, inputFidelity, moderation, userIdentifier, negativePrompt string, seed int64, requestPolicy RequestPolicy, partialImages int, useNewAPICompat bool, complexity string, frameCount, frameDurationMs int,
 ) (*bytes.Buffer, string, error) {
 	buf := &bytes.Buffer{}
 	w := multipart.NewWriter(buf)
@@ -802,7 +873,10 @@ func buildEditsMultipart(
 	if strings.TrimSpace(outputFormat) != "" {
 		_ = w.WriteField("output_format", outputFormat)
 	}
-	if supportsImageBackground(model) {
+	if supportsImageComplexity(model) {
+		_ = w.WriteField("complexity", normalizeImageComplexity(complexity))
+	}
+	if supportsImageBackground(model) && !IsNonStreamingOutputFormat(outputFormat) {
 		_ = w.WriteField("background", background)
 	}
 	if supportsOutputCompression(model, outputFormat) {
@@ -820,9 +894,13 @@ func buildEditsMultipart(
 	if useNewAPICompat || supportsImagesResponseFormat(model, ModeEdit) {
 		_ = w.WriteField("response_format", "b64_json")
 	}
-	if !useNewAPICompat {
+	if !useNewAPICompat && !IsNonStreamingOutputFormat(outputFormat) {
 		_ = w.WriteField("stream", "true")
 		_ = w.WriteField("partial_images", fmt.Sprintf("%d", partialImages))
+	}
+	if outputFormat == "gif" {
+		_ = w.WriteField("frame_count", fmt.Sprintf("%d", normalizeGIFFrameCount(frameCount)))
+		_ = w.WriteField("frame_duration_ms", fmt.Sprintf("%d", normalizeGIFFrameDurationMs(frameDurationMs)))
 	}
 	if shouldSendExtendedImageParameters(requestPolicy) && seed != 0 {
 		_ = w.WriteField("seed", fmt.Sprintf("%d", seed))

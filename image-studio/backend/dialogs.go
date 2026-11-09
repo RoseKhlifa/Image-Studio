@@ -226,7 +226,7 @@ func (s *Service) ListBatchInputImages(directory string) (BatchInputDirectory, e
 	}, nil
 }
 
-// SaveImageAs prompts the user for a destination and writes the base64 PNG to disk.
+// SaveImageAs prompts the user for a destination and writes the base64 image to disk.
 func (s *Service) SaveImageAs(imageB64, suggestedName string) (string, error) {
 	if suggestedName == "" {
 		suggestedName = fmt.Sprintf("image-%d.png", time.Now().Unix())
@@ -235,7 +235,8 @@ func (s *Service) SaveImageAs(imageB64, suggestedName string) (string, error) {
 		Title:           "保存图片",
 		DefaultFilename: suggestedName,
 		Filters: []runtime.FileFilter{
-			{DisplayName: "PNG 图片 (*.png)", Pattern: "*.png"},
+			{DisplayName: "图片文件 (*.png;*.jpg;*.jpeg;*.webp;*.gif;*.svg)", Pattern: "*.png;*.jpg;*.jpeg;*.webp;*.gif;*.svg"},
+			{DisplayName: "所有文件 (*.*)", Pattern: "*.*"},
 		},
 	})
 	if err != nil || dst == "" {

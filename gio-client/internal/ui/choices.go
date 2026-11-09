@@ -82,6 +82,8 @@ var (
 		{"PNG", "png"},
 		{"JPEG", "jpeg"},
 		{"WebP", "webp"},
+		{"GIF 动画", "gif"},
+		{"SVG 矢量", "svg"},
 	}
 	policyChoices = []choice{
 		{"OpenAI 标准", string(client.RequestPolicyOpenAI)},

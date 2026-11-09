@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"bytes"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -12,7 +13,7 @@ import (
 	"github.com/yuanhua/image-gptcodex/pkg/client"
 )
 
-// ImportImageFromB64 persists a base64-encoded image (PNG/JPEG/WebP) into the
+// ImportImageFromB64 persists a base64-encoded image (PNG/JPEG/WebP/GIF/SVG) into the
 // imports directory and returns its absolute path. The legacy imageB64 field is
 // intentionally left empty on Wails so imported files do not stay duplicated in
 // frontend state.
@@ -97,6 +98,16 @@ func guessExt(name string, data []byte) string {
 	}
 	if len(data) >= 12 && string(data[0:4]) == "RIFF" && string(data[8:12]) == "WEBP" {
 		return ".webp"
+	}
+	if len(data) >= 6 && (string(data[:6]) == "GIF87a" || string(data[:6]) == "GIF89a") {
+		return ".gif"
+	}
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) > 0 {
+		lower := strings.ToLower(string(trimmed))
+		if strings.Contains(lower, "<svg") && strings.Contains(lower, ">") {
+			return ".svg"
+		}
 	}
 	if dot := strings.LastIndex(name, "."); dot > 0 {
 		ext := strings.ToLower(name[dot:])
