@@ -1,6 +1,10 @@
 import { create } from "zustand";
 import {
   DEFAULT_AUTO_RETRY_COUNT,
+  DEFAULT_GIF_FRAME_COUNT,
+  DEFAULT_GIF_FRAME_DURATION_MS,
+  normalizeGIFFrameCount,
+  normalizeGIFFrameDurationMs,
   normalizeAutoRetryCount,
 } from "../../../../shared/kernel/requestModel.js";
 import {
@@ -631,6 +635,8 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   size: "1024x1024",
   quality: "medium",
   outputFormat: "png",
+  frameCount: DEFAULT_GIF_FRAME_COUNT,
+  frameDurationMs: DEFAULT_GIF_FRAME_DURATION_MS,
   seed: 0,
   background: "auto",
   outputCompression: 100,
@@ -960,7 +966,11 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       return;
     }
     // 其他全局偏好字段
-    const normalizedValue = key === "batchCount"
+    const normalizedValue = key === "frameCount"
+      ? normalizeGIFFrameCount(value)
+      : key === "frameDurationMs"
+        ? normalizeGIFFrameDurationMs(value)
+      : key === "batchCount"
       ? normalizeBatchCount(value)
       : key === "batchProcess"
         ? normalizeBatchProcessConfig(value)
@@ -1457,6 +1467,8 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       size: resolvedSize,
       quality: resolvedQuality,
       outputFormat: s.outputFormat,
+      frameCount: normalizeGIFFrameCount(s.frameCount),
+      frameDurationMs: normalizeGIFFrameDurationMs(s.frameDurationMs),
       imagePaths: editSourcePaths,
       imagePath: "",
       maskB64: maskB64,
@@ -1657,6 +1669,8 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         size: workspaceState.size,
         quality: workspaceState.quality,
         outputFormat: workspaceState.outputFormat,
+        frameCount: normalizeGIFFrameCount(workspaceState.frameCount),
+        frameDurationMs: normalizeGIFFrameDurationMs(workspaceState.frameDurationMs),
         seed: workspaceState.seed,
         background: workspaceState.background,
         outputCompression: workspaceState.outputCompression,
@@ -1812,6 +1826,12 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     try {
       const v = localStorage.getItem("gptcodex.outputFormat");
       if (v === "png" || v === "jpeg" || v === "webp" || v === "gif" || v === "svg") outputFormat = v;
+    } catch {}
+    let frameCount = DEFAULT_GIF_FRAME_COUNT;
+    let frameDurationMs = DEFAULT_GIF_FRAME_DURATION_MS;
+    try {
+      frameCount = normalizeGIFFrameCount(localStorage.getItem("gptcodex.frameCount"));
+      frameDurationMs = normalizeGIFFrameDurationMs(localStorage.getItem("gptcodex.frameDurationMs"));
     } catch {}
     let background: BackgroundValue = "auto";
     try {
@@ -1993,6 +2013,8 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       size: "1024x1024",
       quality: "medium",
       outputFormat,
+      frameCount,
+      frameDurationMs,
       seed: 0,
       background,
       outputCompression,
@@ -2035,6 +2057,8 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       proxyMode: proxyConfig.mode,
       proxyURL: proxyConfig.url,
       outputFormat,
+      frameCount,
+      frameDurationMs,
       background,
       outputCompression,
       inputFidelity,
@@ -2793,6 +2817,8 @@ async function launchOneJob(
             outputFormat: r.outputFormat === "png" || r.outputFormat === "jpeg" || r.outputFormat === "webp" || r.outputFormat === "gif" || r.outputFormat === "svg"
               ? r.outputFormat
               : snapshot.outputFormat,
+            frameCount: snapshot.outputFormat === "gif" ? normalizeGIFFrameCount(payload.frameCount) : undefined,
+            frameDurationMs: snapshot.outputFormat === "gif" ? normalizeGIFFrameDurationMs(payload.frameDurationMs) : undefined,
             parentId,
             createdAt: Date.now(),
             seed: payload.seed || undefined,
@@ -3048,7 +3074,13 @@ function enableCompatibilityExport() {
   scheduleCompatibilityExport(state);
 }
 
-useStudioStore.subscribe((state) => {
+useStudioStore.subscribe((state, previous) => {
+  if (state.frameCount !== previous.frameCount || state.frameDurationMs !== previous.frameDurationMs) {
+    try {
+      localStorage.setItem("gptcodex.frameCount", String(normalizeGIFFrameCount(state.frameCount)));
+      localStorage.setItem("gptcodex.frameDurationMs", String(normalizeGIFFrameDurationMs(state.frameDurationMs)));
+    } catch {}
+  }
   if (!compatibilityExportEnabled) return;
   const next = compatibilityExportFingerprint(state);
   if (next === compatibilityFingerprint) return;

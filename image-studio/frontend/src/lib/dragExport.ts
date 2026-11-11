@@ -41,6 +41,8 @@ type InternalHistoryDragItem = Pick<
   | "size"
   | "quality"
   | "outputFormat"
+  | "frameCount"
+  | "frameDurationMs"
   | "parentId"
   | "createdAt"
   | "seed"
@@ -176,6 +178,8 @@ export function writeInternalHistoryItemDragData(
       size: item.size,
       quality: item.quality,
       outputFormat: item.outputFormat,
+      frameCount: item.frameCount,
+      frameDurationMs: item.frameDurationMs,
       parentId: item.parentId,
       createdAt: item.createdAt,
       seed: item.seed,

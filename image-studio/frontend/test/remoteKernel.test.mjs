@@ -677,6 +677,106 @@ test("runRemoteImageJob emits Images API stream partial image previews", async (
   });
 });
 
+for (const [format, contentType] of [
+  ["relay continuation lines", "text/event-stream"],
+  ["SSE data fields", "text/event-stream"],
+  ["nested data object", "text/event-stream"],
+  ["relay continuation lines", "application/json"],
+  ["Android native stream", "text/event-stream"],
+]) {
+  test(`Images API parses multiline completion metadata (${format}, ${contentType})`, async () => {
+    const finalJSON = '{"type":"image_edit.completed","b64_json":"ZmluYWw=","usage":{\n'
+      + '  "input_tokens": 907,\n  "total_tokens": 1293\n}}';
+    const dataJSON = format === "nested data object" ? finalJSON.replace('"usage":{', '"usage":\n{') : finalJSON;
+    const finalData = format === "SSE data fields" || format === "nested data object" ? dataJSON.replaceAll("\n", "\ndata: ") : dataJSON;
+    const raw = `data: {}\n\nevent: image_edit.completed\ndata: ${finalData}`;
+    let calls = 0;
+    await withPatchedGlobals(async () => {
+      globalThis.fetch = async () => {
+        calls += 1;
+        const bytes = new TextEncoder().encode(raw);
+        return new Response(new ReadableStream({
+          start(controller) {
+            for (let offset = 0; offset < bytes.length; offset += 17) {
+              controller.enqueue(bytes.slice(offset, offset + 17));
+            }
+            controller.close();
+          },
+        }), { status: 200, headers: { "content-type": contentType } });
+      };
+      if (format === "Android native stream") {
+        globalThis.window.AndroidImageStudio = {
+          invoke(requestId, method, payloadJSON) {
+            const [payload] = JSON.parse(payloadJSON);
+            assert.equal(method, "HttpRequestText");
+            calls += 1;
+            queueMicrotask(() => {
+              for (const line of raw.split("\n")) {
+                window.__imageStudioNativeProgress?.(payload.requestKey, { line });
+              }
+              window.__imageStudioNativeResolve?.(requestId, { status: 200, body: "", contentType });
+            });
+          },
+        };
+      }
+    }, async () => {
+      const kernel = await loadRemoteKernel();
+      const result = await kernel.runRemoteImageJob({
+        payload: {
+          apiKey: "key", mode: "generate", prompt: "image", size: "1024x1024", quality: "low",
+          outputFormat: "png", imagePaths: [], imagePath: "", maskB64: "", seed: 0, negativePrompt: "",
+          baseURL: "https://upstream.example", imageModelID: "gpt-image-2.6-sunburst", textModelID: "",
+          apiMode: "images", requestPolicy: "openai", noPromptRevision: false,
+        },
+      }, { signal: new AbortController().signal });
+      assert.equal(result.imageB64, "ZmluYWw=");
+      assert.equal(result.sourceEvent, "images_api");
+      assert.equal(calls, 1);
+    });
+  });
+}
+
+test("Images API does not accept a truncated multiline final event", async () => {
+  await withPatchedGlobals(async () => {
+    globalThis.fetch = async () => new Response(
+      'data: {"type":"image_edit.completed","b64_json":"ZmluYWw=","usage":{\n  "input_tokens": 907\n',
+      { status: 200, headers: { "content-type": "text/event-stream" } },
+    );
+  }, async () => {
+    const kernel = await loadRemoteKernel();
+    await assert.rejects(kernel.runRemoteImageJob({
+      payload: {
+        apiKey: "key", mode: "generate", prompt: "image", size: "1024x1024", quality: "low",
+        outputFormat: "png", imagePaths: [], imagePath: "", maskB64: "", seed: 0, negativePrompt: "",
+        baseURL: "https://upstream.example", imageModelID: "gpt-image-2.6-sunburst", textModelID: "",
+        apiMode: "images", requestPolicy: "openai", noPromptRevision: false, autoRetryEnabled: false,
+      },
+    }, { signal: new AbortController().signal }), /上游没有返回可用图片/);
+  });
+});
+
+test("custom GIF controls reach generation and edit requests and stay out of PNG requests", async () => {
+  const { buildImagesRequestBody } = await import("../src/platform/runtime/remote-kernel/requestPayloads.ts");
+  const payload = {
+    apiKey: "key", mode: "generate", prompt: "loop", size: "auto", quality: "low",
+    outputFormat: "gif", frameCount: 12, frameDurationMs: 80,
+    imagePaths: [], imagePath: "", maskB64: "", seed: 0, negativePrompt: "",
+    baseURL: "https://upstream.example", imageModelID: "gpt-image-2.6-sunburst", textModelID: "",
+    apiMode: "images", requestPolicy: "openai", noPromptRevision: false,
+  };
+  const generated = JSON.parse((await buildImagesRequestBody({ payload }, [])).body);
+  assert.equal(generated.frame_count, 12);
+  assert.equal(generated.frame_duration_ms, 80);
+  assert.equal(generated.stream, undefined);
+  const edited = await buildImagesRequestBody({ payload: { ...payload, mode: "edit" } }, ["data:image/png;base64,YWJj"]);
+  assert.equal(edited.body.get("frame_count"), "12");
+  assert.equal(edited.body.get("frame_duration_ms"), "80");
+  assert.equal(edited.body.has("partial_images"), false);
+  const still = JSON.parse((await buildImagesRequestBody({ payload: { ...payload, outputFormat: "png" } }, [])).body);
+  assert.equal(still.frame_count, undefined);
+  assert.equal(still.frame_duration_ms, undefined);
+});
+
 test("runRemoteImageJob retries when Images API only returns partial previews", async () => {
   let calls = 0;
   const partials = [];

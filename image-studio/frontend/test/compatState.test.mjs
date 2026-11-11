@@ -67,7 +67,9 @@ test("compat export preserves previewPath sourcePaths and parentId in history", 
     proxyURL: "",
     theme: "system",
     fontScale: 1,
-    outputFormat: "png",
+    outputFormat: "gif",
+    frameCount: 12,
+    frameDurationMs: 80,
     background: "auto",
     outputCompression: 100,
     inputFidelity: "auto",
@@ -94,6 +96,8 @@ test("compat export preserves previewPath sourcePaths and parentId in history", 
   assert.equal(savedState.history[0].previewPath, "/tmp/previews/result.png");
   assert.equal(savedState.history[0].parentId, "/tmp/source-a.png");
   assert.deepEqual(savedState.history[0].sourcePaths, ["/tmp/source-a.png", "/tmp/source-b.png"]);
+  assert.equal(savedState.settings.frameCount, 12);
+  assert.equal(savedState.settings.frameDurationMs, 80);
 });
 
 test("compat fingerprint changes when previewPath or sourcePaths change", async () => {

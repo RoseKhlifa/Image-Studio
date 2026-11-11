@@ -12,6 +12,7 @@ package client
 //   - 默认优先走 OpenAI 官方公开字段;若请求策略切到 compat,可附带 relay 扩展字段
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/base64"
@@ -184,6 +185,7 @@ type imagesAPIResponse struct {
 
 type imageStreamExtractor struct {
 	partialB64 string
+	pending    strings.Builder
 	final      ImageResult
 	finalURL   string
 	hasFinal   bool
@@ -212,19 +214,45 @@ func (e *imageStreamExtractor) captureDatum(d imagesAPIDatum) bool {
 func (e *imageStreamExtractor) consume(line string) bool {
 	stripped := strings.TrimSpace(line)
 	if stripped == "" {
+		e.pending.Reset()
 		return false
 	}
-	if !strings.HasPrefix(stripped, "data:") {
+	if strings.HasPrefix(stripped, ":") {
 		return false
 	}
-	payload := strings.TrimSpace(stripped[len("data:"):])
-	if payload == "" || payload == "[DONE]" {
-		return true
+	if strings.HasPrefix(stripped, "event:") || strings.HasPrefix(stripped, "id:") || strings.HasPrefix(stripped, "retry:") {
+		e.pending.Reset()
+		return false
 	}
+	payload := stripped
 	var ev Event
-	if err := decodeEvent(payload, &ev); err != nil {
+	if strings.HasPrefix(stripped, "data:") {
+		payload = strings.TrimSpace(stripped[len("data:"):])
+		if payload == "" || payload == "[DONE]" {
+			e.pending.Reset()
+			return true
+		}
+	} else if e.pending.Len() == 0 {
 		return false
 	}
+	// Some relays pretty-print usage metadata across raw lines. Also accept
+	// standard multiline SSE where every continuation has a data: prefix.
+	if e.pending.Len() > 0 {
+		e.pending.WriteByte('\n')
+	}
+	e.pending.WriteString(payload)
+	if err := decodeEvent(e.pending.String(), &ev); err != nil {
+		var typeError *json.UnmarshalTypeError
+		if errors.As(err, &typeError) {
+			e.pending.Reset()
+		}
+		return false
+	}
+	e.pending.Reset()
+	return e.consumeEvent(ev)
+}
+
+func (e *imageStreamExtractor) consumeEvent(ev Event) bool {
 	evType, _ := ev["type"].(string)
 	switch evType {
 	case "image_generation.partial_image", "image_edit.partial_image":
@@ -513,10 +541,20 @@ func RequestImagesAPIWithPartial(
 	}
 
 	contentTypeHeader := strings.ToLower(resp.Header.Get("Content-Type"))
-	if strings.Contains(contentTypeHeader, "text/event-stream") {
+	responseBody := io.Reader(resp.Body)
+	isStream := strings.Contains(contentTypeHeader, "text/event-stream")
+	if !isStream {
+		// Relays can label SSE keepalives and completion events as JSON.
+		// Peek without consuming bytes so the raw log remains complete.
+		buffered := bufio.NewReader(resp.Body)
+		prefix, _ := buffered.Peek(len("event:"))
+		isStream = bytes.HasPrefix(prefix, []byte("data:")) || bytes.HasPrefix(prefix, []byte("event:")) || bytes.HasPrefix(prefix, []byte(":"))
+		responseBody = buffered
+	}
+	if isStream {
 		var rawBytes int64
 		extractor := imageStreamExtractor{onPartial: onPartial}
-		scanner := NewSSEScanner(resp.Body)
+		scanner := NewSSEScanner(responseBody)
 		for scanner.Scan() {
 			line := scanner.Bytes()
 			rawBytes += int64(len(line) + 1)
@@ -554,7 +592,7 @@ func RequestImagesAPIWithPartial(
 	}
 
 	preview := newCappedPreviewBuffer(4096)
-	teeReader := io.TeeReader(resp.Body, io.MultiWriter(rawSink, preview))
+	teeReader := io.TeeReader(responseBody, io.MultiWriter(rawSink, preview))
 
 	dec := json.NewDecoder(teeReader)
 	for {
@@ -574,7 +612,7 @@ func RequestImagesAPIWithPartial(
 			if useNewAPICompat && errors.As(err, &typeErr) && (typeErr.Value == "array" || typeErr.Value == "string") {
 				continue
 			}
-			_, _ = io.Copy(io.MultiWriter(rawSink, preview), resp.Body)
+			_, _ = io.Copy(io.MultiWriter(rawSink, preview), responseBody)
 			bodyPreview := preview.String()
 			if len(bodyPreview) > 400 {
 				bodyPreview = bodyPreview[:400] + "..."

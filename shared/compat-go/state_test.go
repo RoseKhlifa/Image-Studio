@@ -23,6 +23,31 @@ func TestLoadMissingReturnsEmptyState(t *testing.T) {
 	}
 }
 
+func TestGIFParametersSurviveSaveAndLoad(t *testing.T) {
+	path := StatePath(t.TempDir())
+	input := State{
+		Settings: Settings{OutputFormat: "gif", FrameCount: 12, FrameDurationMs: 80,
+			Presets: []Preset{{ID: "gif", Name: "GIF", OutputFormat: "gif", FrameCount: 4, FrameDurationMs: 500}}},
+		History: []HistoryItem{{ID: "result", Mode: "edit", OutputFormat: "gif", FrameCount: 12, FrameDurationMs: 80}},
+	}
+	if err := Save(path, input); err != nil {
+		t.Fatal(err)
+	}
+	result, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Settings.FrameCount != 12 || result.Settings.FrameDurationMs != 80 {
+		t.Fatalf("animation settings lost: %+v", result.Settings)
+	}
+	if len(result.Settings.Presets) != 1 || result.Settings.Presets[0].FrameCount != 4 || result.Settings.Presets[0].FrameDurationMs != 500 {
+		t.Fatalf("animation preset lost: %+v", result.Settings.Presets)
+	}
+	if len(result.History) != 1 || result.History[0].FrameCount != 12 || result.History[0].FrameDurationMs != 80 {
+		t.Fatalf("animation history lost: %+v", result.History)
+	}
+}
+
 func TestSaveLoadRoundTrip(t *testing.T) {
 	path := StatePath(t.TempDir())
 	input := State{

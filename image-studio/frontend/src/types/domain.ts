@@ -220,6 +220,8 @@ export interface HistoryItem {
   size: SizeValue;
   quality: QualityValue;
   outputFormat?: OutputFormatValue;
+  frameCount?: number;
+  frameDurationMs?: number;
   parentId?: string;       // id of the source image (when mode === "edit")
   createdAt: number;       // unix ms
 
@@ -289,6 +291,8 @@ export interface Workspace {
   size: SizeValue;
   quality: QualityValue;
   outputFormat: OutputFormatValue;
+  frameCount?: number;
+  frameDurationMs?: number;
   seed: number;
   background: BackgroundValue;
   outputCompression: number;
@@ -333,6 +337,8 @@ export interface Preset {
   size: SizeValue;
   quality: QualityValue;
   outputFormat?: OutputFormatValue;
+  frameCount?: number;
+  frameDurationMs?: number;
   negativePrompt: string;
   background?: BackgroundValue;
   outputCompression?: number;

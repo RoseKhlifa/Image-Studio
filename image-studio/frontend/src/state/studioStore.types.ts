@@ -87,6 +87,8 @@ export interface StudioState {
   size: SizeValue;
   quality: QualityValue;
   outputFormat: OutputFormatValue;
+  frameCount: number;
+  frameDurationMs: number;
   seed: number;
   background: BackgroundValue;
   outputCompression: number;

@@ -85,17 +85,21 @@ export function AdvancedOutputFormatField({
 }) {
   return (
     <>
-      <Seg>
-        {OUTPUT_FORMAT_OPTIONS.map((item) => (
-          <SegItem
-            key={item.value}
-            active={outputFormat === item.value}
-            onClick={() => onChange(item.value as OutputFormatValue)}
-          >
-            {item.label}
-          </SegItem>
+      <div className="grid gap-1.5">
+        {[OUTPUT_FORMAT_OPTIONS.slice(0, 3), OUTPUT_FORMAT_OPTIONS.slice(3)].map((options, index) => (
+          <Seg key={index}>
+            {options.map((item) => (
+              <SegItem
+                key={item.value}
+                active={outputFormat === item.value}
+                onClick={() => onChange(item.value as OutputFormatValue)}
+              >
+                <span className="whitespace-nowrap">{item.label}</span>
+              </SegItem>
+            ))}
+          </Seg>
         ))}
-      </Seg>
+      </div>
       <p className={`mt-1 ${noteClassName}`}>JPEG/WebP 体积更小；GIF 生成动画；SVG 生成可编辑矢量。GIF/SVG 需要 GPT Image 2.6 Images API。</p>
     </>
   );

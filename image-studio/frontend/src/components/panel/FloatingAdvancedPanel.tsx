@@ -24,6 +24,7 @@ import {
   AdvancedUserIdentifierField,
 } from "./AdvancedParameterBlocks";
 import { Seg, SegItem } from "./panelChrome";
+import { GifAnimationControls } from "./GifAnimationControls";
 
 type AdvancedGroupKey = "core" | "output" | "strategy" | "stream";
 
@@ -171,6 +172,8 @@ export function FloatingAdvancedPanel({
   variant,
 }: FloatingAdvancedPanelProps) {
   const { targetPlatform, usesAppleUI, usesFluentUI, isMac } = usePlatform();
+  const frameCount = useStudioStore((state) => state.frameCount);
+  const frameDurationMs = useStudioStore((state) => state.frameDurationMs);
   const activeWorkspaceName = useStudioStore((state) => {
     const workspace = state.workspaces.find((item) => item.id === state.activeWorkspaceId);
     return workspace?.name ?? "当前工作区";
@@ -193,6 +196,10 @@ export function FloatingAdvancedPanel({
     offsetX: number;
     offsetY: number;
   } | null>(null);
+
+  useEffect(() => {
+    if (outputFormat === "gif") setGroupOpen((current) => ({ ...current, output: true }));
+  }, [outputFormat]);
 
   useEffect(() => {
     writePrefs(storageKey, {
@@ -236,9 +243,11 @@ export function FloatingAdvancedPanel({
   const titleSummary = summaryOrFallback(advancedSummary, "按分组展开常用与进阶参数");
   const negativeSummary = negativePrompt.trim() ? "已设置负向提示词" : "未设置负向提示词";
   const seedSummary = seed > 0 ? `Seed ${seed}` : "随机 Seed";
-  const outputSummary = `${outputFormat.toUpperCase()} · 背景 ${background}${outputFormat === "png" || outputFormat === "gif" || outputFormat === "svg" ? "" : ` · 压缩 ${outputCompression}`}`;
+  const outputSummary = outputFormat === "gif"
+    ? `GIF · ${frameCount} 帧 · 每帧 ${frameDurationMs} ms`
+    : `${outputFormat.toUpperCase()} · 背景 ${background}${outputFormat === "png" || outputFormat === "svg" ? "" : ` · 压缩 ${outputCompression}`}`;
   const strategySummary = `保真 ${inputFidelity} · 风格 ${imageStyle} · 审核 ${moderation}`;
-  const streamSummary = `${partialImages === 0 ? "仅最终图" : `${partialImages} 帧预览`} · ${userIdentifier.trim() ? "已填用户标识" : "未填用户标识"}`;
+  const streamSummary = `${outputFormat === "gif" || outputFormat === "svg" || partialImages === 0 ? "仅最终结果" : `${partialImages} 帧预览`} · ${userIdentifier.trim() ? "已填用户标识" : "未填用户标识"}`;
 
   const outputActiveCount = Number(outputFormat !== "png") + Number(background !== "auto") + Number(outputCompression !== 100 && outputFormat !== "gif" && outputFormat !== "svg");
   const strategyActiveCount = Number(inputFidelity !== "auto") + Number(imageStyle !== "default") + Number(moderation !== "low");
@@ -395,23 +404,30 @@ export function FloatingAdvancedPanel({
                   noteClassName="text-[11px] leading-5 text-zinc-500 dark:text-zinc-400"
                 />
               </AdvancedCard>
-              <AdvancedCard title="背景" hint="透明背景需要 PNG/WebP；GIF/SVG 会省略栅格背景设置。" variant={variant} className="rounded-[16px]">
-                <AdvancedBackgroundField
-                  background={background}
-                  onChange={(value) => setField("background", value)}
-                  Seg={Seg}
-                  SegItem={SegItem}
-                  noteClassName="text-[11px] leading-5 text-zinc-500 dark:text-zinc-400"
-                />
-              </AdvancedCard>
-              <AdvancedCard title="输出压缩" hint="仅 JPEG/WebP 生效，范围 `0-100`。" variant={variant} className="rounded-[16px]">
-                <AdvancedOutputCompressionField
-                  outputCompression={outputCompression}
-                  onChange={(value) => setField("outputCompression", value)}
-                  variant={variant}
-                  noteClassName="text-[11px] leading-5 text-zinc-500 dark:text-zinc-400"
-                />
-              </AdvancedCard>
+              {outputFormat === "gif" ? (
+                <AdvancedCard title="GIF 动画" hint="设置动画帧数与播放速度。" variant={variant} className="rounded-[16px]">
+                  <GifAnimationControls variant={variant} />
+                </AdvancedCard>
+              ) : null}
+              {outputFormat !== "gif" && outputFormat !== "svg" ? <>
+                <AdvancedCard title="背景" hint="透明背景需要 PNG/WebP；GIF/SVG 会省略栅格背景设置。" variant={variant} className="rounded-[16px]">
+                  <AdvancedBackgroundField
+                    background={background}
+                    onChange={(value) => setField("background", value)}
+                    Seg={Seg}
+                    SegItem={SegItem}
+                    noteClassName="text-[11px] leading-5 text-zinc-500 dark:text-zinc-400"
+                  />
+                </AdvancedCard>
+                <AdvancedCard title="输出压缩" hint="仅 JPEG/WebP 生效，范围 `0-100`。" variant={variant} className="rounded-[16px]">
+                  <AdvancedOutputCompressionField
+                    outputCompression={outputCompression}
+                    onChange={(value) => setField("outputCompression", value)}
+                    variant={variant}
+                    noteClassName="text-[11px] leading-5 text-zinc-500 dark:text-zinc-400"
+                  />
+                </AdvancedCard>
+              </> : null}
             </GroupSection>
 
             <GroupSection
@@ -457,7 +473,7 @@ export function FloatingAdvancedPanel({
               open={groupOpen.stream}
               onToggle={() => updateGroupOpen("stream")}
             >
-              <AdvancedCard title="流式预览帧数" hint="`0` 只返回最终图，`1-3` 会流式返回预览帧。高并发或大尺寸任务时，应用可能自动关闭预览。" variant={variant} className="rounded-[16px]">
+              {outputFormat !== "gif" && outputFormat !== "svg" ? <AdvancedCard title="流式预览帧数" hint="`0` 只返回最终图，`1-3` 会流式返回预览帧。高并发或大尺寸任务时，应用可能自动关闭预览。" variant={variant} className="rounded-[16px]">
                 <AdvancedPartialImagesField
                   partialImages={partialImages}
                   onChange={(value) => setField("partialImages", value)}
@@ -465,7 +481,7 @@ export function FloatingAdvancedPanel({
                   SegItem={SegItem}
                   noteClassName="text-[11px] leading-5 text-zinc-500 dark:text-zinc-400"
                 />
-              </AdvancedCard>
+              </AdvancedCard> : <p className="text-[12px] text-zinc-500">{outputFormat.toUpperCase()} 会在生成完成后返回完整结果。</p>}
               <AdvancedCard title="稳定用户标识" hint="建议传哈希后的用户名或邮箱。" variant={variant} className="rounded-[16px]">
                 <AdvancedUserIdentifierField
                   userIdentifier={userIdentifier}

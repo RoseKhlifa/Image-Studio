@@ -33,6 +33,8 @@ type Settings struct {
 	Theme                     string                          `json:"theme,omitempty"`
 	FontScale                 float64                         `json:"fontScale,omitempty"`
 	OutputFormat              string                          `json:"outputFormat,omitempty"`
+	FrameCount                int                             `json:"frameCount,omitempty"`
+	FrameDurationMs           int                             `json:"frameDurationMs,omitempty"`
 	Background                string                          `json:"background,omitempty"`
 	OutputCompression         *int                            `json:"outputCompression,omitempty"`
 	InputFidelity             string                          `json:"inputFidelity,omitempty"`
@@ -96,6 +98,8 @@ type Preset struct {
 	Size              string `json:"size"`
 	Quality           string `json:"quality"`
 	OutputFormat      string `json:"outputFormat,omitempty"`
+	FrameCount        int    `json:"frameCount,omitempty"`
+	FrameDurationMs   int    `json:"frameDurationMs,omitempty"`
 	NegativePrompt    string `json:"negativePrompt"`
 	Background        string `json:"background,omitempty"`
 	OutputCompression *int   `json:"outputCompression,omitempty"`
@@ -141,6 +145,8 @@ type HistoryItem struct {
 	Size              string   `json:"size"`
 	Quality           string   `json:"quality"`
 	OutputFormat      string   `json:"outputFormat,omitempty"`
+	FrameCount        int      `json:"frameCount,omitempty"`
+	FrameDurationMs   int      `json:"frameDurationMs,omitempty"`
 	ParentID          string   `json:"parentId,omitempty"`
 	CreatedAt         int64    `json:"createdAt"`
 	Seed              int64    `json:"seed,omitempty"`

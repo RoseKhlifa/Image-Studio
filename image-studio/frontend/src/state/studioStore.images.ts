@@ -10,6 +10,7 @@ import {
 } from "../platform/runtime/host";
 import { saveImageForPlatform } from "../platform/android/bridge";
 import { base64ToBlob } from "../lib/images";
+import { normalizeGIFFrameCount, normalizeGIFFrameDurationMs } from "../../../../shared/kernel/requestModel.js";
 import { clearHistoryStorage, removeHistoryItem } from "../lib/storage";
 import type { BatchProcessSourceImage, HistoryItem, SourceImage } from "../types/domain";
 import type { StudioState } from "./studioStore.types";
@@ -227,6 +228,10 @@ export function createImageActions(store: StateAdapter) {
       if (item.moderation !== undefined) patch.moderation = item.moderation;
       if (item.styleTag !== undefined) patch.styleTag = item.styleTag;
       if (item.outputFormat) patch.outputFormat = item.outputFormat;
+      if (item.outputFormat === "gif") {
+        patch.frameCount = normalizeGIFFrameCount(item.frameCount);
+        patch.frameDurationMs = normalizeGIFFrameDurationMs(item.frameDurationMs);
+      }
       store.setState(patch);
       store.getState().pushToast("已应用此图的参数到控制台", "success");
     },

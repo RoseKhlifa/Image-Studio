@@ -104,8 +104,12 @@ export function ResultDetailDrawer() {
             <Kv label="模式" value={detail.mode === "edit" ? "图生图" : "文生图"} />
             <Kv label="尺寸" value={sizeLabel(detail.size)} />
             <Kv label="质量" value={qualityLabel(detail.quality)} />
+            {detail.outputFormat ? <Kv label="输出格式" value={detail.outputFormat.toUpperCase()} /> : null}
+            {detail.outputFormat === "gif" && detail.frameCount ? <Kv label="动画帧数" value={`${detail.frameCount} 帧`} /> : null}
+            {detail.outputFormat === "gif" && detail.frameDurationMs ? <Kv label="每帧时长" value={`${detail.frameDurationMs} ms`} /> : null}
+            {detail.outputFormat === "gif" && detail.frameCount && detail.frameDurationMs ? <Kv label="单次循环" value={`${Number((detail.frameCount * detail.frameDurationMs / 1000).toFixed(2))} 秒`} /> : null}
             {detail.background ? <Kv label="背景" value={detail.background} mono /> : null}
-            {typeof detail.outputCompression === "number" && detail.outputFormat && detail.outputFormat !== "png" ? <Kv label="压缩" value={String(detail.outputCompression)} mono /> : null}
+            {typeof detail.outputCompression === "number" && (detail.outputFormat === "jpeg" || detail.outputFormat === "webp") ? <Kv label="压缩" value={String(detail.outputCompression)} mono /> : null}
             {detail.inputFidelity && detail.inputFidelity !== "auto" ? <Kv label="输入保真" value={detail.inputFidelity} mono /> : null}
             {detail.imageStyle && detail.imageStyle !== "default" ? <Kv label="图像风格" value={detail.imageStyle} mono /> : null}
             {detail.moderation ? <Kv label="审核" value={detail.moderation} mono /> : null}
