@@ -1,5 +1,6 @@
 import { Github, Monitor, Moon, Plus, Settings, Star, Sun } from "lucide-react";
 import { useStudioStore } from "../../state/studioStore";
+import { useStudioFields } from "../../state/useStudioFields";
 import { OpenExternalURL } from "../../platform/runtime/host";
 import { usePlatform } from "../../platform/context";
 import { openExternalURLForPlatform } from "../../platform/android/bridge";
@@ -9,7 +10,11 @@ import { HeaderIconBtn, HeaderToggleBtn } from "./headerPrimitives";
 const REPO_URL = "https://github.com/RoseKhlifa/Image-Studio";
 
 export function AppHeader({ onOpenSettings }: { onOpenSettings: () => void }) {
-  const { fullscreen, theme, setTheme, pushToast, workspaces, newWorkspace, openStarPrompt } = useStudioStore();
+  const { fullscreen, theme, setTheme, pushToast, newWorkspace, openStarPrompt } = useStudioFields([
+    "fullscreen", "theme", "setTheme", "pushToast",
+    "newWorkspace", "openStarPrompt",
+  ]);
+  const workspaceCount = useStudioStore((state) => state.workspaces.length);
   const { isAndroid, isAndroidPhone, isAndroidPad, isMac, usesFluentUI, usesAndroidUI, usesAppleUI } = usePlatform();
   if (fullscreen) return null;
 
@@ -35,12 +40,12 @@ export function AppHeader({ onOpenSettings }: { onOpenSettings: () => void }) {
       <div className={`no-drag ml-auto flex items-center shrink-0 ${usesAndroidUI ? "android-header-actions" : ""} ${isMac ? "mac-header-actions" : ""} ${usesFluentUI ? "gap-1" : isMac ? "gap-2" : "gap-1.5"}`}>
         {!isAndroid && <HeaderIconBtn
           onClick={() => newWorkspace()}
-          title={workspaces.length > 1 ? `${workspaces.length} 个标签 · 新建` : "新建标签"}
+          title={workspaceCount > 1 ? `${workspaceCount} 个标签 · 新建` : "新建标签"}
         >
           <Plus className="h-4 w-4" />
-          {workspaces.length > 1 && (
+          {workspaceCount > 1 && (
             <span className="absolute right-0 top-0 flex h-3.5 min-w-[14px] items-center justify-center rounded-full bg-[var(--accent)] px-[3px] text-[8px] font-semibold leading-none text-white shadow-sm">
-              {workspaces.length}
+              {workspaceCount}
             </span>
           )}
         </HeaderIconBtn>}

@@ -1,0 +1,290 @@
+{
+  "date": "2026-10-06",
+  "timezone": "Asia/Shanghai",
+  "recordedAt": "2026-10-06T13:37:25.146269+08:00",
+  "status": "passed",
+  "scope": "Local automated verification only; manual checks are listed separately.",
+  "baseCommit": "c49519cfb1a230b6fbcacd451f2b6717f2200af0",
+  "branch": "codex/issue-audit-20261006",
+  "environment": {
+    "os": "macOS",
+    "architecture": "arm64",
+    "node": "v25.8.1",
+    "go": "go1.26.3",
+    "androidExecution": "local Docker with SDK 34; JVM target 17; runtime JDK 21"
+  },
+  "checks": [
+    {
+      "name": "frontend",
+      "status": "passed",
+      "command": "cd image-studio/frontend && npm test",
+      "detail": {
+        "tests": 203,
+        "passed": 203,
+        "failed": 0
+      },
+      "logSha256": "efa4814ada05ab64cc1689b519eb94cbe2b25c0a9fdb04543e42925edbf6fb1d"
+    },
+    {
+      "name": "worker",
+      "status": "passed",
+      "command": "cd cloudflare-worker && npm test",
+      "detail": {
+        "tests": 5,
+        "passed": 5,
+        "failed": 0
+      },
+      "logSha256": "c4e10511516407b5d39d48f7dacd7bfb91aad2c2249b1cac3ca7085c420b5ba6"
+    },
+    {
+      "name": "desktop-go",
+      "status": "passed",
+      "command": "cd image-studio && go test ./...",
+      "detail": {
+        "allPackagesPassed": true
+      },
+      "logSha256": "94a00f17329d4eb9b5c528f6e4739e5fe504f5fb9ec5f08cea2ec1a409b70e28"
+    },
+    {
+      "name": "client-go",
+      "status": "passed",
+      "command": "cd go-cli && go test ./...",
+      "detail": {
+        "allPackagesPassed": true
+      },
+      "logSha256": "dcd3d10878ef71e35dcfe340541512037083d7408de917efe226622bd74009c9"
+    },
+    {
+      "name": "gio-go",
+      "status": "passed",
+      "command": "cd gio-client && go test ./...",
+      "detail": {
+        "allPackagesPassed": true
+      },
+      "logSha256": "dcf9c55da718ee63d3ed569b6cf3ea1d798393dc77050758aa4636709d9f2aff"
+    },
+    {
+      "name": "compat-go",
+      "status": "passed",
+      "command": "cd shared/compat-go && go test ./...",
+      "detail": {
+        "allPackagesPassed": true
+      }
+    },
+    {
+      "name": "frontend-builds",
+      "status": "passed",
+      "command": "npm run build:<platform> (image-studio/frontend)",
+      "detail": {
+        "platforms": [
+          "windows",
+          "macos",
+          "linux",
+          "android-pad",
+          "android"
+        ],
+        "typecheckPassed": true
+      }
+    },
+    {
+      "name": "windows-backend-compile",
+      "status": "passed",
+      "command": "GOOS=windows GOARCH=<amd64|arm64> CGO_ENABLED=0 go test -c ./backend",
+      "detail": {
+        "architectures": [
+          "amd64",
+          "arm64"
+        ],
+        "executionOnWindows": false
+      }
+    },
+    {
+      "name": "live-verify",
+      "status": "passed",
+      "command": "node scripts/verify-local-live-verify.mjs",
+      "detail": {
+        "mockUpstream": true,
+        "completedAt": "2026-10-06T05:20:23.650Z"
+      }
+    },
+    {
+      "name": "local-smoke",
+      "status": "passed",
+      "command": "node scripts/local-smoke-check.mjs",
+      "detail": {
+        "mockUpstream": true,
+        "completedAt": "2026-10-06T05:20:28.476Z"
+      }
+    },
+    {
+      "name": "android-jvm-tests",
+      "status": "passed",
+      "command": "Docker SDK 34: ./gradlew --offline --no-daemon :app:testDebugUnitTest --rerun",
+      "detail": {
+        "tests": 15,
+        "suites": [
+          {
+            "name": "top.gptcodex.imagestudio.android.AndroidStreamEventParserTest",
+            "tests": 9,
+            "failures": 0,
+            "errors": 0
+          },
+          {
+            "name": "top.gptcodex.imagestudio.android.ActiveTaskRegistryTest",
+            "tests": 3,
+            "failures": 0,
+            "errors": 0
+          },
+          {
+            "name": "top.gptcodex.imagestudio.android.AndroidBinaryResponseTest",
+            "tests": 3,
+            "failures": 0,
+            "errors": 0
+          }
+        ],
+        "container": "ghcr.io/cirruslabs/android-sdk:34",
+        "jdk": "21.0.5",
+        "forcedTestExecution": true
+      },
+      "logSha256": "7735e627edcbf7937149546f76096f6dbe43e022cdb311b2be7b23e97ad1838a"
+    },
+    {
+      "name": "android-apk-build",
+      "status": "passed",
+      "command": "Docker SDK 34: ./gradlew --offline --no-daemon :app:testDebugUnitTest :app:assembleDebug",
+      "detail": {
+        "prebuiltFrontend": true,
+        "artifact": "android-shell/app/build/outputs/apk/debug/app-debug.apk"
+      },
+      "logSha256": "fcca8c60bd6d387ad02b48d7d144d6c31c6d4f86f9922f79664b142683f7277e"
+    },
+    {
+      "name": "android-apk-validation",
+      "status": "passed",
+      "command": "apksigner verify; binary AndroidManifest.xml and ZIP assets inspection",
+      "detail": {
+        "applicationId": "top.gptcodex.imagestudio.android.debug",
+        "versionCode": 1050001,
+        "versionName": "0.1.5-dev-debug",
+        "signatureV2": true,
+        "frontendHtml": "assets/index.html",
+        "assetEntries": 18,
+        "apkSha256": "67ca4c2ca20ea6e971f99472d3fd56b4c6708ae9bc0615c531b080f6da022270",
+        "badgingMethod": "binary manifest decoded locally; SDK aapt unavailable due amd64 loader mismatch in arm64 container"
+      }
+    },
+    {
+      "name": "macos-release",
+      "status": "passed",
+      "command": "node scripts/verify-local-macos-release.mjs",
+      "detail": {
+        "architectures": [
+          "x86_64",
+          "arm64"
+        ],
+        "signature": "adhoc",
+        "plistVerified": true,
+        "runtimeProbeExecuted": true,
+        "fixtureVersion": "1.1.13-ci.local+verify",
+        "completedAt": "2026-10-06T05:31:29.354Z"
+      }
+    },
+    {
+      "name": "issue-tooling",
+      "status": "passed",
+      "command": "IMAGE_STUDIO_SKIP_ISSUE_CLOSE_GITHUB_SYNC=1 node scripts/verify-issue-close-tooling.mjs",
+      "detail": {
+        "checks": 23,
+        "realGitHubMutations": false,
+        "exportedComments": 8
+      }
+    },
+    {
+      "name": "issue-live-read",
+      "status": "passed",
+      "command": "node scripts/issue-close-helper.mjs verify-open --json",
+      "detail": {
+        "closable": 8,
+        "holdOpen": 3,
+        "deferred": 1,
+        "unexpectedOpen": 0,
+        "mutations": false
+      }
+    },
+    {
+      "name": "dependencies",
+      "status": "passed",
+      "command": "cd image-studio/frontend && npm audit --json",
+      "detail": {
+        "knownVulnerabilities": 0
+      }
+    },
+    {
+      "name": "diff-check",
+      "status": "passed",
+      "command": "git diff --check",
+      "detail": {
+        "passed": true
+      }
+    }
+  ],
+  "issues": {
+    "upstream": "RoseKhlifa/Image-Studio",
+    "openAtAudit": [
+      58,
+      57,
+      55,
+      53,
+      52,
+      51,
+      50,
+      49,
+      44,
+      30,
+      24,
+      14
+    ],
+    "localCoverage": [
+      24,
+      44,
+      49,
+      50,
+      51,
+      53,
+      57,
+      58
+    ],
+    "windowsManualPending": [
+      30,
+      52,
+      55
+    ],
+    "productQuestion": [
+      14
+    ]
+  },
+  "notExecuted": [
+    {
+      "check": "Windows real-machine OneCommander/Explorer/capture release",
+      "issues": [
+        52,
+        55
+      ]
+    },
+    {
+      "check": "Windows native titlebar visual confirmation",
+      "issues": [
+        30
+      ]
+    },
+    {
+      "check": "Paid real upstream and Android device install/runtime smoke",
+      "reason": "No supplied upstream credentials or connected target device were used."
+    }
+  ],
+  "limitations": [
+    "Prior history metadata already deleted by older versions cannot be reconstructed from image files.",
+    "Cross-compiling Windows backends does not validate Windows OLE runtime behavior.",
+    "macOS linker deployment-version warnings were present; builds and runtime probe passed on this host."
+  ]
+}

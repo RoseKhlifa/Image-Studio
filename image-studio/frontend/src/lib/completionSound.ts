@@ -102,9 +102,13 @@ export async function playCompletionSound(
   });
   const audio = createAudio(src);
   if (!audio) return false;
-  audio.currentTime = 0;
-  await Promise.resolve(audio.play()).catch(() => undefined);
-  return true;
+  try {
+    audio.currentTime = 0;
+    await audio.play();
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function normalizeAudioMimeType(type: string | null | undefined, name: string | null | undefined): string | null {

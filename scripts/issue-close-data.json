@@ -1,23 +1,26 @@
 {
-  "updatedAt": "2026-07-10",
+  "updatedAt": "2026-10-06",
   "upstreamRepo": "RoseKhlifa/Image-Studio",
   "verificationBaseline": {
-    "summaryCommand": "npm test; go test ./... (image-studio, go-cli, gio-client, shared/compat-go); npm run build:windows; npm run build:android; npm run build:macos; ./gradlew :app:testDebugUnitTest; git diff --check",
+    "summaryCommand": "npm test (frontend/worker); go test ./... (4 modules); 5 frontend builds; Android JVM/APK; macOS universal/runtime probe; Windows amd64/arm64 backend compile; local live/smoke; issue tooling; git diff --check",
     "summaryStatus": "passed",
-    "summarySteps": 10,
-    "frontendTests": "162/162",
-    "resultFiles": []
+    "summarySteps": 18,
+    "frontendTests": "203/203",
+    "resultFiles": [
+      "docs/verification/issue-audit-20261006.json"
+    ],
+    "summaryFile": "docs/verification/issue-audit-20261006.json"
   },
   "closable": [
     {
       "number": 24,
       "title": "支持全部删除",
-      "comment": "这个需求当前仓库已经完整覆盖。\n\n- 历史栏与 Windows 主历史栏都有“全部删除”入口和二次确认。\n- 删除会在同一个 IndexedDB 事务中清空 `history` 与 `historyFull`，并清理旧 keyval 历史，未加载分页也不会残留。\n- 画布、对比、结果详情、待保存队列和全部 workspace 引用会同步清理；正在加载分页时会先等待既有请求，避免旧记录回写。\n\n主要落点：\n\n- `image-studio/frontend/src/lib/storage.ts`\n- `image-studio/frontend/src/state/historyCleanup.ts`\n- `image-studio/frontend/src/components/history/HistoryRail.tsx`\n- `image-studio/frontend/src/components/history/WindowsHistoryRail.tsx`\n\n最终前端全量测试为 162/162，这个 issue 可以关闭。"
+      "comment": "这个需求当前仓库已经完整覆盖。\n\n- 历史栏与 Windows 主历史栏都有“全部删除”入口和二次确认。\n- 删除会在同一个 IndexedDB 事务中清空 `history` 与 `historyFull`，并清理旧 keyval 历史，未加载分页也不会残留。\n- 画布、对比、结果详情、待保存队列和全部 workspace 引用会同步清理；正在加载分页时会先等待既有请求，避免旧记录回写。\n\n主要落点：\n\n- `image-studio/frontend/src/lib/storage.ts`\n- `image-studio/frontend/src/state/historyCleanup.ts`\n- `image-studio/frontend/src/components/history/HistoryRail.tsx`\n- `image-studio/frontend/src/components/history/WindowsHistoryRail.tsx`\n\n2026-10-06 重新完成本机回归；单条与日期删除也会清理旧库副本，避免迁移恢复记录。验证依据见 docs/verification/issue-audit-20261006.json。"
     },
     {
       "number": 44,
       "title": "[Feature]: 添加批处理功能",
-      "comment": "这个需求当前仓库已经覆盖。\n\n桌面端图生图批处理现已支持：\n\n- 选择目录或多张图片作为输入。\n- 按指定并发逐张处理。\n- 默认回写源目录，或选择独立输出目录。\n- 按源图比例自动适配统一分辨率档位。\n- 保留原文件名，可编辑输出前缀，并对同名文件自动追加序号。\n- 可选失败重试。\n\n主要落点：\n\n- `image-studio/frontend/src/components/panel/BatchProcessSection.tsx`\n- `image-studio/frontend/src/state/studioStore.ts`\n- `image-studio/backend/service.go`\n- `docs/batch-img2img/README.md`\n\n批处理路径已有前后端测试覆盖，这个 issue 可以关闭；更复杂的命名模板可以单独作为增强需求。"
+      "comment": "这个需求当前仓库已经覆盖。\n\n桌面端图生图批处理现已支持：\n\n- 选择目录或多张图片作为输入。\n- 按指定并发逐张处理。\n- 默认回写源目录，或选择独立输出目录。\n- 按源图比例自动适配统一分辨率档位。\n- 保留原文件名，可编辑输出前缀，并对同名文件自动追加序号。\n- 可选失败重试。\n\n主要落点：\n\n- `image-studio/frontend/src/components/panel/BatchProcessSection.tsx`\n- `image-studio/frontend/src/state/studioStore.ts`\n- `image-studio/backend/service.go`\n- `docs/batch-img2img/README.md`\n\n批处理路径已有前后端测试覆盖，这个 issue 可以关闭；更复杂的命名模板可以单独作为增强需求。\n\n2026-10-06 补充修复：队列两轮之间不会因 runningJobs 暂时为空而提前清零；提交失败按任务 ID 正确结算，重复结算不增加计数。真实 store 多轮事件链及 650 次结算回归已覆盖。"
     },
     {
       "number": 49,
@@ -38,6 +41,16 @@
       "number": 53,
       "title": "[Feature]: 支持发送蒙版的API参数",
       "comment": "可选蒙版图片功能已经完成。\n\n- Wails、Android 与 Gio 都可导入和清除蒙版图片。\n- 画布绘制蒙版与导入蒙版复用同一 `maskB64` 请求字段。\n- Responses API 按 `input_image_mask` data URL 发送。\n- Images edits 按 multipart `mask` 文件发送，并保留图片真实 MIME。\n- 无效或空蒙版会明确报错，不再静默忽略。\n\n主要落点：\n\n- `image-studio/frontend/src/state/studioStore.ts`\n- `image-studio/frontend/src/platform/android/canvas/AndroidCanvasWorkspace.tsx`\n- `gio-client/internal/ui/canvas_mask.go`\n- `go-cli/pkg/client/images_api.go`\n- `shared/kernel/requestModel.js`\n\n前端、Go、Gio 与 Android 单测均通过，这个 issue 可以关闭。官方上游若要求 PNG、同尺寸或 alpha 通道，仍需提供符合模型约束的蒙版。"
+    },
+    {
+      "number": 57,
+      "title": "[Feature]: 声音提示",
+      "comment": "生成失败反馈已补齐。\n\n- 提交失败、生成错误和结果处理错误均显示可见错误提示。\n- 按现有任务提示音开关播放声音，后台且通知已授权时发失败系统通知。\n- 同次提交的并发错误只提醒一次；新提交可以再次提醒，主动取消保持静默。\n- Gio 同步支持失败声音和通知。\n\n真实 store 提交/事件链测试覆盖并发失败、提交拒绝和取消；音频拒绝播放时可见提示仍保留。验证记录：docs/verification/issue-audit-20261006.json。"
+    },
+    {
+      "number": 58,
+      "title": "[Feature]: 生图历史似乎不能显示所有的图片",
+      "comment": "历史保留与分页已修复。\n\n- 移除前端/Gio 的 120 条截断；生成和导入不再按可见列表删除数据库。\n- 按 createdAt + id 分页，支持同一天数百张与同毫秒结果，完整历史仍可复用提示词。\n- 导出与共享配置包含未加载记录；导入旧客户端部分快照不会删除本地档案。\n- 按日期清理覆盖未加载记录，并同步删除对应全图和旧库副本。\n\n650 条 IndexedDB 分页、完整图保留及配置导入/导出回归通过。旧版本已经删除的提示词不能从图片文件自动恢复。维护约束与验证记录见 docs/issue-fixes-20261006.md、docs/verification/issue-audit-20261006.json。"
     }
   ],
   "holdOpen": [
@@ -49,7 +62,12 @@
     {
       "number": 52,
       "title": "[Bug]: 在第三方（OneCommander）资源管理器里拖拽结果图片另存为异常",
-      "reason": "五个拖出入口已统一走 Windows 原生 OLE，IDataObject 也显式提供 Unicode CF_HDROP；仍缺 Windows + OneCommander 实机确认"
+      "reason": "Unicode CF_HDROP 保留，五个入口统一为避免 HTML/native 重叠的手势路径；文件格式与内部 MIME 均有测试覆盖；仍需 Windows + OneCommander 实机验收"
+    },
+    {
+      "number": 55,
+      "title": "[Bug]: 拖出复制功能不能用了",
+      "reason": "五处入口改为鼠标手势启动原生拖动，处理 mouseup/Esc/失焦/卸载；Windows 添加真实按钮检查、定时退出与捕获释放，单测和双架构编译通过；仍需 Windows 上验证其他应用拖拽恢复"
     }
   ],
   "deferred": [

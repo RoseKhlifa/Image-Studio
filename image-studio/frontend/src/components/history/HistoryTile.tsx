@@ -3,11 +3,10 @@ import type React from "react";
 import {
   buildHistoryItemDragExport,
   shouldUseNativeFileDrag,
-  writeImageFileDragData,
-  writeInternalHistoryItemDragData,
+  writeHistoryItemFileDragData,
 } from "../../lib/dragExport.ts";
 import { historyPreviewSrc, useBlobURL, useImageLoadState } from "../../lib/images";
-import { BeginNativeFileDrag } from "../../platform/runtime/host";
+import { useNativeFileDrag } from "../common/useNativeFileDrag";
 import { usePlatform } from "../../platform/context";
 import type { HistoryItem } from "../../types/domain";
 import { HistoryMetaBadges } from "./HistoryMetaBadges";
@@ -36,6 +35,7 @@ export function HistoryTile({
   variant?: "default" | "phone" | "phoneFeature" | "windowsFeature" | "windowsList";
 }) {
   const { isMac, targetPlatform, usesFluentUI } = usePlatform();
+  const nativeDrag = useNativeFileDrag(item.savedPath);
   const previewURL = useBlobURL(item.previewBlob ?? item.imageBlob ?? null, item.imageB64 ?? null);
   const imageSrc = historyPreviewSrc(item, previewURL);
   const imageLoadState = useImageLoadState(imageSrc || null);
@@ -68,20 +68,15 @@ export function HistoryTile({
     e.stopPropagation();
     if (shouldUseNativeFileDrag(targetPlatform, item.savedPath)) {
       e.preventDefault();
-      console.debug("[drag-export] native-file-drag", item.savedPath);
-      void BeginNativeFileDrag(item.savedPath).catch((error) => {
-        console.error("[drag-export] native-file-drag failed", error);
-      });
       return;
     }
     e.dataTransfer.effectAllowed = "copy";
-    writeInternalHistoryItemDragData(e.dataTransfer, item);
-    writeImageFileDragData(e.dataTransfer, dragSpec);
+    writeHistoryItemFileDragData(e.dataTransfer, item, dragSpec);
   }
 
   function renderDragImageNode(wrapperClassName?: string, imageClassName?: string) {
     return (
-      <div draggable={!!dragSpec} onDragStart={handleImageDragStart} className={wrapperClassName}>
+      <div draggable={!!dragSpec && !nativeDrag.native} onMouseDown={nativeDrag.onMouseDown} onDragStart={handleImageDragStart} className={wrapperClassName}>
         {imageLoadState === "ready" ? (
           <img
             src={imageSrc}

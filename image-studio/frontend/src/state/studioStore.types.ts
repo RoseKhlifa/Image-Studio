@@ -1,3 +1,4 @@
+import type { HistoryPageCursor } from "../lib/storage";
 import type { GenerateOptionsLike } from "../platform/runtime/hostTypes";
 import type { SavePromptRequest } from "../lib/savePromptState";
 import type {
@@ -137,7 +138,7 @@ export interface StudioState {
   history: HistoryItem[];
   historyHasMore: boolean;
   historyLoading: boolean;
-  historyCursorBeforeDayStart: number | null;
+  historyCursor: HistoryPageCursor | null;
   batchResults: HistoryItem[];
   resultGridOpen: boolean;
   historyRailCollapsed: boolean;

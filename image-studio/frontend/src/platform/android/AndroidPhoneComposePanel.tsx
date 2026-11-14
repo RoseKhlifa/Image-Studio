@@ -3,6 +3,7 @@ import {
   FileText, ListPlus, RotateCw, ScanSearch, Settings, Sparkles, X,
 } from "lucide-react";
 import { useStudioStore } from "../../state/studioStore";
+import { useStudioFields } from "../../state/useStudioFields";
 import { OpenFile } from "../runtime/host";
 import { Mode, SizeValue } from "../../types/domain";
 import { availableQualityOptions, normalizeQualitySelection, STYLE_CHIPS } from "../../components/panel/panelOptions";
@@ -50,7 +51,21 @@ export function AndroidPhoneComposePanel({
     setField, clearError, pushToast, selectSourceImage,
     removeSource, clearSources, viewSourceOnCanvas, openCustomAspectRatioModal, openCustomSizeModal, openUpstreamConfig, submit, cancel, retryLast, optimizePrompt, inferPromptFromCanvas,
     compareSourceOnCanvas,
-  } = useStudioStore();
+  } = useStudioFields([
+    "apiKey", "mode", "prompt", "background",
+    "imageStyle", "inputFidelity", "moderation", "negativePrompt",
+    "outputCompression", "size", "quality", "seed",
+    "styleTag", "userIdentifier", "partialImages", "outputFormat",
+    "batchCount", "editAutoAspectResolution", "loopGeneration", "sources",
+    "currentImage", "errorMessage", "errorCanRetry", "errorRawPath",
+    "isRunning", "lastPayload", "isOptimizingPrompt", "isInferringPrompt",
+    "apiMode", "requestPolicy", "baseURL", "profiles",
+    "aiProfileId", "imageModelID", "customAspectRatios", "setField",
+    "clearError", "pushToast", "selectSourceImage", "removeSource",
+    "clearSources", "viewSourceOnCanvas", "openCustomAspectRatioModal", "openCustomSizeModal",
+    "openUpstreamConfig", "submit", "cancel", "retryLast",
+    "optimizePrompt", "inferPromptFromCanvas", "compareSourceOnCanvas",
+  ]);
   const [templateOpen, setTemplateOpen] = useState(false);
   const [templateManagerOpen, setTemplateManagerOpen] = useState(false);
   const [parametersOpen, setParametersOpen] = useState(false);

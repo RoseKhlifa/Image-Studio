@@ -2,10 +2,9 @@ import type { HistoryItem } from "../../types/domain";
 import {
   buildHistoryItemDragExport,
   shouldUseNativeFileDrag,
-  writeImageFileDragData,
-  writeInternalHistoryItemDragData,
+  writeHistoryItemFileDragData,
 } from "../../lib/dragExport.ts";
-import { BeginNativeFileDrag } from "../../platform/runtime/host";
+import { useNativeFileDrag } from "../common/useNativeFileDrag";
 import { usePlatform } from "../../platform/context";
 
 export function DragExportHandle({
@@ -18,6 +17,7 @@ export function DragExportHandle({
   sourceURL?: string | null;
 }) {
   const { targetPlatform } = usePlatform();
+  const nativeDrag = useNativeFileDrag(item.savedPath);
   const spec = buildHistoryItemDragExport(item, sourceURL);
   if (!spec) return null;
 
@@ -28,11 +28,14 @@ export function DragExportHandle({
     <a
       href={spec.href}
       download={spec.fileName}
-      draggable
+      draggable={!nativeDrag.native}
       className={classes}
       title={`${label} · ${spec.fileName}`}
       aria-label={`${label} · ${spec.fileName}`}
-      onMouseDown={(event) => event.stopPropagation()}
+      onMouseDown={(event) => {
+        event.stopPropagation();
+        nativeDrag.onMouseDown(event);
+      }}
       onClick={(event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -41,15 +44,10 @@ export function DragExportHandle({
         event.stopPropagation();
         if (shouldUseNativeFileDrag(targetPlatform, item.savedPath)) {
           event.preventDefault();
-          console.debug("[drag-export] native-file-drag", item.savedPath);
-          void BeginNativeFileDrag(item.savedPath).catch((error) => {
-            console.error("[drag-export] native-file-drag failed", error);
-          });
           return;
         }
         event.dataTransfer.effectAllowed = "copy";
-        writeInternalHistoryItemDragData(event.dataTransfer, item);
-        writeImageFileDragData(event.dataTransfer, spec);
+        writeHistoryItemFileDragData(event.dataTransfer, item, spec);
       }}
     >
       拖出复制

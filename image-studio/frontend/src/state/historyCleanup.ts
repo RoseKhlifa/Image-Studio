@@ -6,7 +6,7 @@ type HistoryCleanupState = Pick<
   | "history"
   | "historyHasMore"
   | "historyLoading"
-  | "historyCursorBeforeDayStart"
+  | "historyCursor"
   | "currentImage"
   | "batchResults"
   | "resultGridOpen"
@@ -58,7 +58,7 @@ export function buildHistoryCleanupPatch(
     history,
     historyHasMore: false,
     historyLoading: false,
-    historyCursorBeforeDayStart: null,
+    historyCursor: null,
     currentImage: state.currentImage && cleared.has(state.currentImage.id) ? null : state.currentImage,
     batchResults,
     resultGridOpen: batchResults.length > 1 && state.resultGridOpen,

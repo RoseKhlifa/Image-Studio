@@ -10,7 +10,6 @@ import { isWindows } from "../platform";
 import { ACTIVE_PROFILE_LS_KEY, PROFILES_LS_KEY, tryParseProfile } from "../lib/profiles";
 export { loadStoredAIProfileId, persistAIProfileId } from "../lib/profiles";
 import type { UpstreamProfile } from "../types/domain";
-import { pruneHistoryStorage } from "../lib/storage";
 import { dataURLFromBase64, detectImageMimeTypeFromBase64, getImageDimensionsFromBase64 } from "../lib/images";
 
 export const EMPTY_MODE_CFG: ModeConfig = {
@@ -20,8 +19,6 @@ export const EMPTY_MODE_CFG: ModeConfig = {
   imageModelID: "",
   concurrencyLimit: 0,
 };
-
-export const MAX_HISTORY_ITEMS = 120;
 
 let detachSystemThemeListener: (() => void) | null = null;
 
@@ -154,16 +151,6 @@ export async function registerTrustedOutputRoots(roots: string[]): Promise<void>
     if (!root.trim()) continue;
     await RegisterTrustedOutputDir(root).catch(() => undefined);
   }
-}
-
-export function trimHistory(items: HistoryItem[]): HistoryItem[] {
-  if (items.length <= MAX_HISTORY_ITEMS) return items;
-  return items.slice(0, MAX_HISTORY_ITEMS);
-}
-
-export function persistTrimmedHistory(items: HistoryItem[]): void {
-  const keptIDs = items.map((item) => item.id);
-  void pruneHistoryStorage(keptIDs);
 }
 
 export function imageDims(b64: string): { w: number; h: number } | null {

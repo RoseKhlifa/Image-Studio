@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Stage, Layer, Image as KonvaImage, Line, Rect, Arrow } from "react-konva";
 import Konva from "konva";
 import { useStudioStore } from "../../state/studioStore";
+import { useStudioFields } from "../../state/useStudioFields";
 import { HistoryItem } from "../../types/domain";
 import { usePlatform } from "../../platform/context";
 import { ContextMenu, MenuItem } from "../common/ContextMenu";
@@ -19,7 +20,7 @@ import { DragExportHandle } from "./DragExportHandle";
 import { MaskOverlayLayer } from "./MaskOverlayLayer";
 import { AnimatedCanvasImage } from "./AnimatedCanvasImage";
 
-export function CanvasStage() {
+function CanvasStageContent() {
   const {
     currentImage, tool, brushSize, brushMode,
     annotationKind, annotationColor,
@@ -42,19 +43,32 @@ export function CanvasStage() {
     batchResults, resultGridOpen, selectBatchResult, closeResultGrid,
     canvasViewResetTick,
     stepBatchResult,
-  } = useStudioStore();
+    activeWorkspaceId, mode, prompt, size, quality, outputFormat,
+  } = useStudioFields([
+    "currentImage", "tool", "brushSize", "brushMode",
+    "annotationKind", "annotationColor", "selectedAnnotationId", "annotations",
+    "addAnnotation", "removeAnnotation", "clearAnnotations", "maskDataURL",
+    "maskVisible", "maskOpacity", "activateMaskTool", "strokes",
+    "pushStroke", "undoStack", "redoStack", "undo",
+    "redo", "compareB", "compareSplit", "setCompareSplit",
+    "setCompareB", "isRunning", "cancel", "errorMessage",
+    "setField", "streamPreview", "streamPreviews", "runningJobs",
+    "jobsTotal", "jobsCompleted", "fullscreen", "toggleFullscreen",
+    "history", "batchResults", "resultGridOpen", "selectBatchResult",
+    "closeResultGrid", "canvasViewResetTick", "stepBatchResult",
+    "activeWorkspaceId", "mode", "prompt", "size", "quality", "outputFormat",
+  ]);
   const { isMac } = usePlatform();
   const streamPreviewItems = streamPreviewItemsFromPreviews(streamPreviews, {
-    workspaceId: useStudioStore.getState().activeWorkspaceId,
-    mode: useStudioStore.getState().mode,
-    prompt: useStudioStore.getState().prompt,
-    size: useStudioStore.getState().size,
-    quality: useStudioStore.getState().quality,
-    outputFormat: useStudioStore.getState().outputFormat,
+    workspaceId: activeWorkspaceId,
+    mode, prompt, size, quality, outputFormat,
     currentImage,
   });
-  const orderedBatchResults = sortHistoryItemsByCreatedAtAsc(batchResults);
-  const navigationItems = orderedNavigationItemsForCurrent(currentImage?.id, history, batchResults);
+  const orderedBatchResults = useMemo(() => sortHistoryItemsByCreatedAtAsc(batchResults), [batchResults]);
+  const navigationItems = useMemo(
+    () => orderedNavigationItemsForCurrent(currentImage?.id, history, batchResults),
+    [currentImage?.id, history, batchResults],
+  );
   const liveBatchSlotCount = runningJobs.length;
   const liveBatchSlots: BatchGridSlot[] = Array.from({ length: liveBatchSlotCount }, (_, index) => ({ type: "pending", id: `pending-${index}` }));
   for (const item of [...orderedBatchResults].reverse()) {
@@ -668,6 +682,8 @@ export function CanvasStage() {
     </>
   );
 }
+
+export const CanvasStage = memo(CanvasStageContent);
 
 function modeLabelForMenu(item: HistoryItem) {
   return item.mode === "edit" ? "设为继续编辑源图" : "设为图生图源图";

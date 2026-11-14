@@ -4,6 +4,7 @@ import {
   Image as ImageIcon, ListFilter, Loader2, RotateCcw, Search, Settings2, Split, Trash2,
 } from "lucide-react";
 import { useStudioStore } from "../../state/studioStore";
+import { useStudioFields } from "../../state/useStudioFields";
 import type { HistoryItem, Mode } from "../../types/domain";
 import { ContextMenu } from "../common/ContextMenu";
 import { RawResponseModal } from "./RawResponseModal";
@@ -30,14 +31,24 @@ export type DateFilter = RelativeHistoryDateFilter;
 
 export function HistoryRail() {
   const {
-    history, currentImage, reuseAsSource, deleteHistoryItem, clearHistory, setField,
-    compareB, setCompareB, pushToast, fullscreen,
+    history, reuseAsSource, deleteHistoryItem, clearHistory, setField,
+    setCompareB, pushToast, fullscreen,
     applyHistoryParams, regenerateFromHistory,
     openResultDetail, apiKey, baseURL, apiMode,
     profiles, activeProfileId, setActiveProfile,
     openUpstreamConfig, openHistoryTimeline, testAPIKey, isTestingKey,
     historyRailCollapsed, historyHasMore, historyLoading, loadMoreHistory, setHistoryRailCollapsed,
-  } = useStudioStore();
+  } = useStudioFields([
+    "history", "reuseAsSource", "deleteHistoryItem",
+    "clearHistory", "setField", "setCompareB",
+    "pushToast", "fullscreen", "applyHistoryParams", "regenerateFromHistory",
+    "openResultDetail", "apiKey", "baseURL", "apiMode",
+    "profiles", "activeProfileId", "setActiveProfile", "openUpstreamConfig",
+    "openHistoryTimeline", "testAPIKey", "isTestingKey", "historyRailCollapsed",
+    "historyHasMore", "historyLoading", "loadMoreHistory", "setHistoryRailCollapsed",
+  ]);
+  const currentImageId = useStudioStore((state) => state.currentImage?.id ?? null);
+  const compareItemId = useStudioStore((state) => state.compareB?.id ?? null);
 
   const [q, setQ] = useState("");
   const deferredQ = useDeferredValue(q);
@@ -128,13 +139,13 @@ export function HistoryRail() {
     openMenu,
     rawPath,
   } = useHistoryContextMenu({
-    currentImageId: currentImage?.id ?? null,
-    compareItemId: compareB?.id ?? null,
+    currentImageId,
+    compareItemId,
     onOpenDetail: openResultDetail,
     onApplyParams: applyHistoryParams,
     onRegenerate: (item) => void regenerateFromHistory(item),
     onReuseAsSource: (item) => void reuseAsSource(item),
-    onToggleCompare: (item) => setCompareB(compareB?.id === item.id ? null : item),
+    onToggleCompare: (item) => setCompareB(compareItemId === item.id ? null : item),
     onDelete: (item) => {
       if (window.confirm(`确定删除此历史项?\n\n${item.prompt?.slice(0, 60) || "(无 prompt)"}`)) {
         deleteHistoryItem(item.id);
@@ -156,8 +167,8 @@ export function HistoryRail() {
           buildMenu={buildMenu}
           closeMenu={closeMenu}
           closeRaw={closeRaw}
-          compareB={compareB}
-          currentImage={currentImage}
+          compareItemId={compareItemId}
+          currentImageId={currentImageId}
           dateF={dateF}
           deleteHistoryItem={deleteHistoryItem}
           editCount={editCount}
@@ -193,8 +204,8 @@ export function HistoryRail() {
         />
         <HistoryPromptGroupModal
           group={activePromptGroup}
-          currentItemId={currentImage?.id ?? null}
-          compareItemId={compareB?.id ?? null}
+          currentItemId={currentImageId}
+          compareItemId={compareItemId}
           onClose={() => setActivePromptGroup(null)}
           onSelect={(item) => void selectCurrent(item)}
           onReuse={reuseAsSource}
@@ -287,7 +298,7 @@ export function HistoryRail() {
           </div>
         </section>
 
-        {compareB ? (
+        {compareItemId ? (
           <button
             type="button"
             onClick={() => setCompareB(null)}
@@ -306,8 +317,8 @@ export function HistoryRail() {
             <div className="android-history-feature">
               <AndroidHistoryTile
                 item={latestHistory}
-                isCurrent={currentImage?.id === latestHistory.id}
-                isCompare={compareB?.id === latestHistory.id}
+                isCurrent={currentImageId === latestHistory.id}
+                isCompare={compareItemId === latestHistory.id}
                 onSelect={selectCurrent}
                 onToggleCompare={(next) => setCompareB(next)}
                 onOpenMenu={(x, y) => openMenu(latestHistory, x, y)}
@@ -345,8 +356,8 @@ export function HistoryRail() {
                     <AndroidHistoryPromptGroup
                       key={entry.key}
                       group={entry.group}
-                      currentItemId={currentImage?.id ?? null}
-                      compareItemId={compareB?.id ?? null}
+                      currentItemId={currentImageId}
+                      compareItemId={compareItemId}
                       onSelect={selectCurrent}
                       onToggleCompare={(next) => setCompareB(next)}
                       onOpenMenu={(item, x, y) => openMenu(item, x, y)}
@@ -359,8 +370,8 @@ export function HistoryRail() {
                   <AndroidHistoryTile
                     key={h.id}
                     item={h}
-                    isCurrent={currentImage?.id === h.id}
-                    isCompare={compareB?.id === h.id}
+                    isCurrent={currentImageId === h.id}
+                    isCompare={compareItemId === h.id}
                     onSelect={selectCurrent}
                     onToggleCompare={(next) => setCompareB(next)}
                     onOpenMenu={(x, y) => openMenu(h, x, y)}
@@ -396,12 +407,13 @@ export function HistoryRail() {
             type="button"
             className="danger"
             onClick={() => {
+              const currentImage = useStudioStore.getState().currentImage;
               if (!currentImage) return;
               if (window.confirm(`确定删除当前历史项?\n\n${currentImage.prompt?.slice(0, 60) || "(无 prompt)"}`)) {
                 void deleteHistoryItem(currentImage.id);
               }
             }}
-            disabled={!currentImage}
+            disabled={!currentImageId}
           >
             <Trash2 className="h-4 w-4" /> 删除当前
           </button>
@@ -411,8 +423,8 @@ export function HistoryRail() {
         {rawPath && <RawResponseModal path={rawPath} onClose={closeRaw} />}
         <HistoryPromptGroupModal
           group={activePromptGroup}
-          currentItemId={currentImage?.id ?? null}
-          compareItemId={compareB?.id ?? null}
+          currentItemId={currentImageId}
+          compareItemId={compareItemId}
           onClose={() => setActivePromptGroup(null)}
           onSelect={(item) => void selectCurrent(item)}
           onReuse={reuseAsSource}
@@ -584,7 +596,7 @@ export function HistoryRail() {
         )}
       </div>
 
-      {compareB && (
+      {compareItemId && (
         <button
           onClick={() => setCompareB(null)}
           className={`platform-pill inline-flex items-center justify-center gap-1.5 border border-[color:var(--accent)]/20 bg-[var(--accent-soft)] px-2.5 py-2 text-xs text-[var(--accent)] transition-colors hover:opacity-90 ${usesFluentUI ? "rounded-[8px]" : "rounded-full"}`}
@@ -633,8 +645,8 @@ export function HistoryRail() {
                   <HistoryPromptGroupCard
                     key={entry.key}
                     group={entry.group}
-                    currentItemId={currentImage?.id ?? null}
-                    compareItemId={compareB?.id ?? null}
+                    currentItemId={currentImageId}
+                    compareItemId={compareItemId}
                     onSelect={selectCurrent}
                     onToggleCompare={(next) => setCompareB(next)}
                     onOpenMenu={(item, x, y) => openMenu(item, x, y)}
@@ -647,8 +659,8 @@ export function HistoryRail() {
                 <HistoryTile
                   key={h.id}
                   item={h}
-                  isCurrent={currentImage?.id === h.id}
-                  isCompare={compareB?.id === h.id}
+                  isCurrent={currentImageId === h.id}
+                  isCompare={compareItemId === h.id}
                   onSelect={selectCurrent}
                   onToggleCompare={(next) => setCompareB(next)}
                   onReuse={reuseAsSource}
@@ -673,8 +685,8 @@ export function HistoryRail() {
       {rawPath && <RawResponseModal path={rawPath} onClose={closeRaw} />}
       <HistoryPromptGroupModal
         group={activePromptGroup}
-        currentItemId={currentImage?.id ?? null}
-        compareItemId={compareB?.id ?? null}
+        currentItemId={currentImageId}
+        compareItemId={compareItemId}
         onClose={() => setActivePromptGroup(null)}
         onSelect={(item) => void selectCurrent(item)}
         onReuse={reuseAsSource}

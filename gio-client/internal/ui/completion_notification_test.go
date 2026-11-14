@@ -1,11 +1,51 @@
 package ui
 
 import (
+	"errors"
 	"testing"
 	"time"
 
 	sharedCompat "image-studio/shared/compat"
 )
+
+func TestFailedRunNotifiesAndPlaysConfiguredSound(t *testing.T) {
+	app := &App{
+		completionSound:                  sharedCompat.CompletionSoundSettings{Enabled: true, Mode: "default"},
+		completionNotification:           sharedCompat.CompletionNotificationSettings{Enabled: true},
+		completionNotificationPermission: systemNotificationPermissionGranted,
+	}
+	sounds := make(chan bool, 1)
+	notifications := make(chan string, 1)
+	origSound, origNotification := playCompletionSoundFunc, showSystemNotificationFunc
+	t.Cleanup(func() {
+		playCompletionSoundFunc, showSystemNotificationFunc = origSound, origNotification
+	})
+	playCompletionSoundFunc = func(config sharedCompat.CompletionSoundSettings, force bool) error {
+		sounds <- force
+		return nil
+	}
+	showSystemNotificationFunc = func(title, body string, _ notificationOpenResultAction) error {
+		notifications <- title + ":" + body
+		return nil
+	}
+	app.finishWithError(errors.New("HTTP 503"), "")
+	select {
+	case force := <-sounds:
+		if force {
+			t.Fatal("failure should honor the configured sound setting")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("failure did not trigger sound")
+	}
+	select {
+	case got := <-notifications:
+		if got != "Image Studio · 生成失败:HTTP 503" {
+			t.Fatalf("notification=%q", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("failure did not trigger background notification")
+	}
+}
 
 func TestShouldSendCompletionNotificationOnlyOnFinalBackgroundResult(t *testing.T) {
 	config := sharedCompat.CompletionNotificationSettings{Enabled: true}

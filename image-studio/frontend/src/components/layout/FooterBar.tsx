@@ -1,5 +1,6 @@
 import { Folder, Github, MessageSquare } from "lucide-react";
 import { useStudioStore } from "../../state/studioStore";
+import { useStudioFields } from "../../state/useStudioFields";
 import { OpenExternalURL, OpenOutputDir } from "../../platform/runtime/host";
 import { androidTarget, openExternalURLForPlatform, openOutputLocationForPlatform } from "../../platform/android/bridge";
 import { appVersion } from "../../lib/version";
@@ -9,12 +10,15 @@ const REPO_URL = "https://github.com/RoseKhlifa/Image-Studio";
 const ISSUES_URL = "https://github.com/RoseKhlifa/Image-Studio/issues";
 
 export function FooterBar() {
-  const { fullscreen, history, runningJobs, isRunning, workspaces, pushToast } = useStudioStore();
+  const { fullscreen, history, runningJobs, isRunning, pushToast } = useStudioFields([
+    "fullscreen", "history", "runningJobs", "isRunning",
+    "pushToast",
+  ]);
+  const totalRunning = useStudioStore((state) => state.workspaces.reduce((sum, w) => sum + (w.runningJobIds?.length ?? 0), 0));
   const { isAndroid, isMac, isWindows, usesFluentUI, usesAppleUI } = usePlatform();
   if (fullscreen) return null;
   if (isAndroid) return null;
   if (isMac) return null;
-  const totalRunning = workspaces.reduce((sum, w) => sum + (w.runningJobIds?.length ?? 0), 0);
   const activeRunning = isRunning;
   const anyRunning = activeRunning || totalRunning > 0;
 

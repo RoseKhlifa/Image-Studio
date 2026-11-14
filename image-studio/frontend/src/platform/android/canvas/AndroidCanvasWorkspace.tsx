@@ -36,6 +36,7 @@ import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { ANNOTATION_COLORS, type AnnotationKind, type HistoryItem, type SourceImage } from "../../../types/domain";
 import { useStudioStore } from "../../../state/studioStore";
+import { useStudioFields } from "../../../state/useStudioFields";
 import { base64ToBlob, useBlobURL } from "../../../lib/images";
 import { qualityLabel, sizeLabel } from "../../../components/history/historyLabels";
 import { StreamPreviewBadge } from "../../../components/canvas/StreamPreviewBadge";
@@ -104,7 +105,22 @@ export function AndroidCanvasWorkspace() {
     reuseAsSource,
     pushToast,
     toggleFullscreen,
-  } = useStudioStore();
+  } = useStudioFields([
+    "currentImage", "mode", "sources", "provider",
+    "batchProcess", "isRunning", "progress", "streamPreview",
+    "runningJobs", "jobsCompleted", "jobsTotal", "tool",
+    "brushMode", "brushSize", "maskDataURL", "maskVisible",
+    "maskOpacity", "strokes", "annotationKind", "annotationColor",
+    "annotations", "selectedAnnotationId", "fullscreen", "viewZoom",
+    "batchResults", "resultGridOpen", "undoStack", "redoStack",
+    "setField", "undo", "redo", "activateMaskTool",
+    "importMaskImage", "fillMask", "invertMask", "resetMask",
+    "clearAnnotations", "saveCurrentImageAs", "rotateCurrent", "flipCurrent",
+    "cropToRect", "openResultGrid", "closeResultGrid", "openResultDetail",
+    "selectSourceImage", "viewSourceOnCanvas", "compareSourceOnCanvas", "removeSource",
+    "reorderSources", "clearSources", "reuseAsSource", "pushToast",
+    "toggleFullscreen",
+  ]);
   const { isAndroidPad, androidOrientation } = usePlatform();
   const [sourceOpen, setSourceOpen] = useState(true);
   const hasImage = !!currentImage;

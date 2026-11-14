@@ -19,8 +19,8 @@ export function WindowsHistoryRail({
   buildMenu,
   closeMenu,
   closeRaw,
-  compareB,
-  currentImage,
+  compareItemId,
+  currentImageId,
   dateF,
   deleteHistoryItem,
   filtered,
@@ -61,8 +61,8 @@ export function WindowsHistoryRail({
   buildMenu: (item: HistoryItem) => MenuItem[];
   closeMenu: () => void;
   closeRaw: () => void;
-  compareB: HistoryItem | null;
-  currentImage: HistoryItem | null;
+  compareItemId: string | null;
+  currentImageId: string | null;
   dateF: DateFilter;
   deleteHistoryItem: (id: string) => void | Promise<void>;
   filtered: HistoryItem[];
@@ -210,7 +210,7 @@ export function WindowsHistoryRail({
           </div>
         </section>
 
-        {compareB ? (
+        {compareItemId ? (
           <button type="button" onClick={() => setCompareB(null)} className="platform-pill windows-compare-exit">
             <Split className="h-3.5 w-3.5" /> 退出对比
           </button>
@@ -224,8 +224,8 @@ export function WindowsHistoryRail({
             </div>
             <HistoryTile
               item={latest}
-              isCurrent={currentImage?.id === latest.id}
-              isCompare={compareB?.id === latest.id}
+              isCurrent={currentImageId === latest.id}
+              isCompare={compareItemId === latest.id}
               onSelect={selectCurrent}
               onToggleCompare={(next) => setCompareB(next)}
               onReuse={reuseAsSource}
@@ -253,8 +253,8 @@ export function WindowsHistoryRail({
                   <WindowsHistoryEntry
                     key={entry.key}
                     entry={entry}
-                    currentItemId={currentImage?.id ?? null}
-                    compareItemId={compareB?.id ?? null}
+                    currentItemId={currentImageId}
+                    compareItemId={compareItemId}
                     onDelete={deleteHistoryItem}
                     onOpenMenu={openMenu}
                     onOpenPromptGroup={onOpenPromptGroup}

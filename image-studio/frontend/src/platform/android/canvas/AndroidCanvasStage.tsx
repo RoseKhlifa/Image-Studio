@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Arrow, Image as KonvaImage, Layer, Line, Rect, Stage } from "react-konva";
 import Konva from "konva";
 import { useStudioStore } from "../../../state/studioStore";
+import { useStudioFields } from "../../../state/useStudioFields";
 import type { HistoryItem } from "../../../types/domain";
 import type { Stroke } from "../../../state/studioStore.types";
 import { AnnotationShape } from "../../../components/canvas/AnnotationShape";
@@ -27,7 +28,7 @@ const MIN_VIEW_SCALE = 0.05;
 const MAX_VIEW_SCALE = 8;
 const ZOOM_STEP = 1.2;
 
-export function AndroidCanvasStage() {
+function AndroidCanvasStageContent() {
   const {
     currentImage, tool, brushSize, brushMode,
     annotationKind, annotationColor,
@@ -51,18 +52,31 @@ export function AndroidCanvasStage() {
     batchResults, resultGridOpen, selectBatchResult, closeResultGrid,
     canvasViewResetTick,
     stepBatchResult,
-  } = useStudioStore();
+    mode, prompt, size, quality, outputFormat,
+  } = useStudioFields([
+    "currentImage", "tool", "brushSize", "brushMode",
+    "annotationKind", "annotationColor", "selectedAnnotationId", "annotations",
+    "addAnnotation", "removeAnnotation", "maskDataURL", "maskVisible",
+    "maskOpacity", "activateMaskTool", "strokes", "pushStroke",
+    "undo", "redo", "compareB", "compareSplit",
+    "setCompareSplit", "setCompareB", "isRunning", "cancel",
+    "errorMessage", "setField", "streamPreview", "streamPreviews",
+    "runningJobs", "jobsTotal", "jobsCompleted", "activeWorkspaceId",
+    "fullscreen", "toggleFullscreen", "history", "batchResults",
+    "resultGridOpen", "selectBatchResult", "closeResultGrid", "canvasViewResetTick",
+    "stepBatchResult",
+    "mode", "prompt", "size", "quality", "outputFormat",
+  ]);
   const streamPreviewItems = streamPreviewItemsFromPreviews(streamPreviews, {
     workspaceId: activeWorkspaceId,
-    mode: useStudioStore.getState().mode,
-    prompt: useStudioStore.getState().prompt,
-    size: useStudioStore.getState().size,
-    quality: useStudioStore.getState().quality,
-    outputFormat: useStudioStore.getState().outputFormat,
+    mode, prompt, size, quality, outputFormat,
     currentImage,
   });
-  const orderedBatchResults = sortHistoryItemsByCreatedAtAsc(batchResults);
-  const navigationItems = orderedNavigationItemsForCurrent(currentImage?.id, history, batchResults);
+  const orderedBatchResults = useMemo(() => sortHistoryItemsByCreatedAtAsc(batchResults), [batchResults]);
+  const navigationItems = useMemo(
+    () => orderedNavigationItemsForCurrent(currentImage?.id, history, batchResults),
+    [currentImage?.id, history, batchResults],
+  );
   const liveBatchSlotCount = runningJobs.length;
   const liveBatchSlots: BatchGridSlot[] = Array.from({ length: liveBatchSlotCount }, (_, index) => ({ type: "pending", id: `pending-${index}` }));
   for (const item of [...orderedBatchResults].reverse()) {
@@ -678,6 +692,8 @@ export function AndroidCanvasStage() {
     </div>
   );
 }
+
+export const AndroidCanvasStage = memo(AndroidCanvasStageContent);
 
 export function androidCanvasModeLabel(item: HistoryItem | null) {
   if (!item) return "空画布";

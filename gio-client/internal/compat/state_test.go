@@ -282,6 +282,27 @@ func TestSaveConfigAndHistorySerializesConcurrentHistoryUpdates(t *testing.T) {
 	}
 }
 
+func TestMergeHistoryRetainsLargeBatchAndDeduplicates(t *testing.T) {
+	items := make([]shared.HistoryItem, 650)
+	for i := range items {
+		items[i] = shared.HistoryItem{ID: fmt.Sprintf("image-%04d", i), Prompt: fmt.Sprintf("prompt-%d", i), CreatedAt: int64(i)}
+	}
+	updated := items[10]
+	updated.Prompt = "updated prompt"
+	merged := mergeHistory(updated, items)
+	if len(merged) != len(items) {
+		t.Fatalf("history len=%d want %d", len(merged), len(items))
+	}
+	if merged[0].ID != "image-0649" || merged[len(merged)-1].ID != "image-0000" {
+		t.Fatal("history should preserve the entire archive in descending date order")
+	}
+	for _, item := range merged {
+		if item.ID == updated.ID && item.Prompt != updated.Prompt {
+			t.Fatal("the newest version of a duplicate should replace the old record")
+		}
+	}
+}
+
 func TestSaveStatePrunesHistoryFullForNonPreviewOnlyHistory(t *testing.T) {
 	root := t.TempDir()
 	origStable := StableDataRootForTest()

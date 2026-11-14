@@ -170,6 +170,9 @@ test("shouldUseNativeFileDrag routes persisted Windows and macOS files through t
   assert.equal(dragExport.shouldUseNativeFileDrag("macos", "/Users/me/Pictures/result.png"), true);
   assert.equal(dragExport.shouldUseNativeFileDrag("linux", "/home/me/Pictures/result.png"), false);
   assert.equal(dragExport.shouldUseNativeFileDrag("windows", "  "), false);
+  assert.equal(dragExport.shouldUseNativeFileDrag("windows", "memory://result.png"), false);
+  assert.equal(dragExport.shouldUseNativeFileDrag("macos", "https://example.com/result.png"), false);
+  assert.equal(dragExport.shouldUseNativeFileDrag("windows", "result.png"), false);
 });
 
 test("all persisted drag export surfaces use the shared native file drag route", async () => {
@@ -228,4 +231,21 @@ test("internal history drag payload round-trips through dataTransfer", async () 
     createdAt: 123,
     savedPath: "/tmp/cat.png",
   });
+});
+
+test("browser file drag preserves both export formats and internal history metadata", async () => {
+  const drag = await import("../src/lib/dragExport.ts");
+  const data = new Map([["text/html", "browser default"]]);
+  const transfer = {
+    clearData() { data.clear(); },
+    setData(format, value) { data.set(format, value); },
+    getData(format) { return data.get(format) ?? ""; },
+  };
+  const item = { id: "browser-result", prompt: "cat", mode: "generate", size: "1024x1024", quality: "high", createdAt: 100, imageB64: "AAAA" };
+  const spec = drag.buildHistoryItemDragExport(item);
+  drag.writeHistoryItemFileDragData(transfer, item, spec);
+  assert.equal(data.has("text/html"), false);
+  assert.equal(data.get("DownloadURL"), spec.downloadURL);
+  assert.equal(data.get("text/uri-list"), spec.href);
+  assert.deepEqual(drag.readInternalHistoryItemDragData(transfer), item);
 });

@@ -5,10 +5,9 @@ import { historyPreviewSrc, useBlobURL } from "../../lib/images";
 import {
   buildHistoryItemDragExport,
   shouldUseNativeFileDrag,
-  writeImageFileDragData,
-  writeInternalHistoryItemDragData,
+  writeHistoryItemFileDragData,
 } from "../../lib/dragExport.ts";
-import { BeginNativeFileDrag } from "../../platform/runtime/host";
+import { useNativeFileDrag } from "../common/useNativeFileDrag";
 import type { HistoryItem } from "../../types/domain";
 import { usePlatform } from "../../platform/context";
 import { HistoryModeBadge } from "./HistoryModeBadge";
@@ -128,6 +127,7 @@ function HistoryPromptModalThumbnail({
   const displayIndex = typeof item.batchIndex === "number" ? item.batchIndex + 1 : index + 1;
   const dragSpec = buildHistoryItemDragExport(item);
   const { targetPlatform } = usePlatform();
+  const nativeDrag = useNativeFileDrag(item.savedPath);
 
   function openMenu(event: React.MouseEvent) {
     event.preventDefault();
@@ -152,14 +152,10 @@ function HistoryPromptModalThumbnail({
     event.stopPropagation();
     if (shouldUseNativeFileDrag(targetPlatform, item.savedPath)) {
       event.preventDefault();
-      void BeginNativeFileDrag(item.savedPath).catch((error) => {
-        console.error("[drag-export] native-file-drag failed", error);
-      });
       return;
     }
     event.dataTransfer.effectAllowed = "copy";
-    writeInternalHistoryItemDragData(event.dataTransfer, item);
-    writeImageFileDragData(event.dataTransfer, dragSpec);
+    writeHistoryItemFileDragData(event.dataTransfer, item, dragSpec);
   }
 
   return (
@@ -167,7 +163,8 @@ function HistoryPromptModalThumbnail({
       type="button"
       className={`history-prompt-modal-thumb ${isCurrent ? "active" : ""} ${isCompare ? "compare" : ""}`}
       title={item.prompt}
-      draggable={!!dragSpec}
+      draggable={!!dragSpec && !nativeDrag.native}
+      onMouseDown={nativeDrag.onMouseDown}
       onClick={handleSelect}
       onDoubleClick={() => void onReuse(item)}
       onContextMenu={openMenu}

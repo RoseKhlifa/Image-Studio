@@ -1,13 +1,13 @@
 import { ClipboardCopy, Folder, RotateCw, Save, Sparkles } from "lucide-react";
 import { useStudioStore } from "../../state/studioStore";
-import { BeginNativeFileDrag, OpenOutputDir } from "../../platform/runtime/host";
+import { OpenOutputDir } from "../../platform/runtime/host";
+import { useNativeFileDrag } from "../common/useNativeFileDrag";
 import { submitShortcutLabel } from "../../platform";
 import { historyPreviewSrc, isGIFImage, useBlobURL } from "../../lib/images";
 import {
   buildHistoryItemDragExport,
   shouldUseNativeFileDrag,
-  writeImageFileDragData,
-  writeInternalHistoryItemDragData,
+  writeHistoryItemFileDragData,
 } from "../../lib/dragExport.ts";
 import { androidSaveHint, androidTarget, openOutputLocationForPlatform } from "../../platform/android/bridge";
 import { saveHistoryItemAs } from "../../lib/saveResultImage";
@@ -21,12 +21,13 @@ export function ResultDetailDrawer() {
   const setField = useStudioStore((s) => s.setField);
   const pushToast = useStudioStore((s) => s.pushToast);
   const { usesFluentUI, targetPlatform } = usePlatform();
+  const nativeDrag = useNativeFileDrag(item?.savedPath);
+  const previewURL = useBlobURL(isGIFImage(item) ? item?.imageBlob : item?.previewBlob ?? item?.imageBlob ?? null, item?.imageB64 ?? null);
 
   if (!item) return null;
   const detail = item;
 
   const created = new Date(detail.createdAt).toLocaleString();
-  const previewURL = useBlobURL(isGIFImage(detail) ? detail.imageBlob : detail.previewBlob ?? detail.imageBlob ?? null, detail.imageB64 ?? null);
   const imageSrc = historyPreviewSrc(detail, previewURL, true);
   const dragSpec = buildHistoryItemDragExport(detail);
 
@@ -38,14 +39,10 @@ export function ResultDetailDrawer() {
     event.stopPropagation();
     if (shouldUseNativeFileDrag(targetPlatform, detail.savedPath)) {
       event.preventDefault();
-      void BeginNativeFileDrag(detail.savedPath).catch((error) => {
-        console.error("[drag-export] native-file-drag failed", error);
-      });
       return;
     }
     event.dataTransfer.effectAllowed = "copy";
-    writeInternalHistoryItemDragData(event.dataTransfer, detail);
-    writeImageFileDragData(event.dataTransfer, dragSpec);
+    writeHistoryItemFileDragData(event.dataTransfer, detail, dragSpec);
   }
 
   function copy(text: string, label: string) {
@@ -77,7 +74,8 @@ export function ResultDetailDrawer() {
       <div className="grid gap-4 md:grid-cols-[minmax(0,280px)_minmax(0,1fr)]">
         <section className={`platform-card border border-black/[0.05] bg-white/72 p-3 shadow-[var(--shadow-card)] dark:border-white/[0.06] dark:bg-white/[0.03] ${usesFluentUI ? "rounded-[12px]" : "rounded-[18px]"}`}>
           <div
-            draggable={!!dragSpec}
+            draggable={!!dragSpec && !nativeDrag.native}
+            onMouseDown={nativeDrag.onMouseDown}
             onDragStart={handlePreviewDragStart}
             title={dragSpec ? "拖到文件夹复制原图" : undefined}
             className={`flex items-center justify-center border border-black/[0.08] bg-[var(--surface)] p-2 dark:border-white/[0.06] ${usesFluentUI ? "rounded-[10px]" : "rounded-[16px]"}`}
@@ -104,12 +102,8 @@ export function ResultDetailDrawer() {
             <Kv label="模式" value={detail.mode === "edit" ? "图生图" : "文生图"} />
             <Kv label="尺寸" value={sizeLabel(detail.size)} />
             <Kv label="质量" value={qualityLabel(detail.quality)} />
-            {detail.outputFormat ? <Kv label="输出格式" value={detail.outputFormat.toUpperCase()} /> : null}
-            {detail.outputFormat === "gif" && detail.frameCount ? <Kv label="动画帧数" value={`${detail.frameCount} 帧`} /> : null}
-            {detail.outputFormat === "gif" && detail.frameDurationMs ? <Kv label="每帧时长" value={`${detail.frameDurationMs} ms`} /> : null}
-            {detail.outputFormat === "gif" && detail.frameCount && detail.frameDurationMs ? <Kv label="单次循环" value={`${Number((detail.frameCount * detail.frameDurationMs / 1000).toFixed(2))} 秒`} /> : null}
             {detail.background ? <Kv label="背景" value={detail.background} mono /> : null}
-            {typeof detail.outputCompression === "number" && (detail.outputFormat === "jpeg" || detail.outputFormat === "webp") ? <Kv label="压缩" value={String(detail.outputCompression)} mono /> : null}
+            {typeof detail.outputCompression === "number" && detail.outputFormat && detail.outputFormat !== "png" ? <Kv label="压缩" value={String(detail.outputCompression)} mono /> : null}
             {detail.inputFidelity && detail.inputFidelity !== "auto" ? <Kv label="输入保真" value={detail.inputFidelity} mono /> : null}
             {detail.imageStyle && detail.imageStyle !== "default" ? <Kv label="图像风格" value={detail.imageStyle} mono /> : null}
             {detail.moderation ? <Kv label="审核" value={detail.moderation} mono /> : null}

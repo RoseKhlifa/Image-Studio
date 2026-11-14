@@ -15,7 +15,8 @@ const LEGACY_SHARED_API_KEY = "gptcodex.apiKey";
 type HistoryRecord = HistoryItem & { searchText: string; searchTokens: string[] };
 type FullRecord = { id: string; image: Blob };
 export type HistoryPageCursor = {
-  beforeDayStart: number;
+  createdAt: number;
+  id: string;
 };
 export type HistoryPageResult = {
   items: HistoryItem[];
@@ -23,6 +24,7 @@ export type HistoryPageResult = {
 };
 
 let dbPromise: Promise<IDBDatabase> | null = null;
+let legacyMigrationPromise: Promise<void> | null = null;
 
 function openDB(): Promise<IDBDatabase> {
   if (!dbPromise) {
@@ -42,8 +44,16 @@ function openDB(): Promise<IDBDatabase> {
           db.createObjectStore(HISTORY_FULL_STORE, { keyPath: "id" });
         }
       };
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => reject(req.error);
+      req.onsuccess = () => {
+        const db = req.result;
+        db.onversionchange = () => {
+          db.close();
+          dbPromise = null;
+          legacyMigrationPromise = null;
+        };
+        resolve(db);
+      };
+      req.onerror = () => { dbPromise = null; reject(req.error); };
     });
   }
   return dbPromise;
@@ -202,12 +212,6 @@ function stripHistoryRecord(record: HistoryRecord): HistoryItem {
   return item;
 }
 
-function startOfLocalDay(createdAt: number): number {
-  const d = new Date(createdAt);
-  d.setHours(0, 0, 0, 0);
-  return d.getTime();
-}
-
 export async function persistHistoryItems(items: HistoryItem[]): Promise<void> {
   if (items.length === 0) return;
   const { store, tx } = await openHistoryTx("readwrite");
@@ -242,24 +246,34 @@ export async function loadHistoryFullImage(id: string): Promise<string> {
   return rec?.image ? blobToBase64(rec.image) : "";
 }
 
-export async function pruneHistoryStorage(keepIDs: string[]): Promise<void> {
-  const keep = new Set(keepIDs);
-  const { store: historyStore, tx: historyTx } = await openHistoryTx("readwrite");
-  const historyKeys = await reqAsPromise<IDBValidKey[]>(historyStore.getAllKeys());
-  for (const id of historyKeys) {
-    if (typeof id === "string" && !keep.has(id)) historyStore.delete(id);
-  }
-  await txDone(historyTx);
-
-  const { store: fullStore, tx: fullTx } = await openFullTx("readwrite");
-  const fullKeys = await reqAsPromise<IDBValidKey[]>(fullStore.getAllKeys());
-  for (const id of fullKeys) {
-    if (typeof id === "string" && !keep.has(id)) fullStore.delete(id);
-  }
-  await txDone(fullTx);
+export async function removeHistoryOlderThan(cutoff: number): Promise<string[]> {
+  await migrateLegacyHistoryIfNeeded();
+  const db = await openDB();
+  const tx = db.transaction([HISTORY_STORE, HISTORY_FULL_STORE], "readwrite");
+  const donePromise = txDone(tx);
+  const historyStore = tx.objectStore(HISTORY_STORE);
+  const fullStore = tx.objectStore(HISTORY_FULL_STORE);
+  const ids = await new Promise<string[]>((resolve, reject) => {
+    const removed: string[] = [];
+    const req = historyStore.index("createdAt").openCursor(IDBKeyRange.upperBound(cutoff, true));
+    req.onsuccess = () => {
+      const cursor = req.result;
+      if (!cursor) { resolve(removed); return; }
+      const id = (cursor.value as HistoryRecord).id;
+      removed.push(id);
+      cursor.delete();
+      fullStore.delete(id);
+      cursor.continue();
+    };
+    req.onerror = () => reject(req.error);
+  });
+  await donePromise;
+  await removeLegacyHistoryItems(ids);
+  return ids;
 }
 
 export async function removeHistoryItem(id: string): Promise<void> {
+  await removeLegacyHistoryItems([id]);
   const { store: historyStore, tx: historyTx } = await openHistoryTx("readwrite");
   historyStore.delete(id);
   await txDone(historyTx);
@@ -267,6 +281,24 @@ export async function removeHistoryItem(id: string): Promise<void> {
   const { store: fullStore, tx: fullTx } = await openFullTx("readwrite");
   fullStore.delete(id);
   await txDone(fullTx);
+}
+
+async function removeLegacyHistoryItems(ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  const legacy = await openLegacyDB();
+  try {
+    if (!legacy.objectStoreNames.contains(LEGACY_STORE_NAME)) return;
+    const tx = legacy.transaction(LEGACY_STORE_NAME, "readwrite");
+    const donePromise = txDone(tx);
+    const store = tx.objectStore(LEGACY_STORE_NAME);
+    for (const id of ids) {
+      store.delete(`history:${id}`);
+      store.delete(`history-full:${id}`);
+    }
+    await donePromise;
+  } finally {
+    legacy.close();
+  }
 }
 
 async function clearLegacyHistoryStorage(): Promise<string[]> {
@@ -321,17 +353,31 @@ export async function clearHistoryStorage(): Promise<string[]> {
 }
 
 async function migrateLegacyHistoryIfNeeded(): Promise<void> {
+  if (!legacyMigrationPromise) {
+    legacyMigrationPromise = migrateLegacyHistory().catch(() => {
+      // Keep startup usable after a transient failure, but retry on the next
+      // read instead of marking a failed migration permanently complete.
+      legacyMigrationPromise = null;
+    });
+  }
+  await legacyMigrationPromise;
+}
+
+async function migrateLegacyHistory(): Promise<void> {
   const [historyCount, fullCount] = await Promise.all([withHistoryCount(), withFullCount()]);
   if (historyCount > 0 && fullCount > 0) return;
 
+  const legacy = await openLegacyDB();
   try {
-    const legacy = await openLegacyDB();
+    if (!legacy.objectStoreNames.contains(LEGACY_STORE_NAME)) return;
     const tx = legacy.transaction(LEGACY_STORE_NAME, "readonly");
+    const done = txDone(tx);
     const store = tx.objectStore(LEGACY_STORE_NAME);
     if (!store.getAll || !store.getAllKeys) return;
     const [keys, values] = await Promise.all([
       reqAsPromise<IDBValidKey[]>(store.getAllKeys()),
       reqAsPromise<HistoryRecord[]>(store.getAll()),
+      done,
     ]);
     const records = keys.map((k, i) => ({ key: k, value: values[i] }));
     const historyItems = records.filter(({ key }) => typeof key === "string" && key.startsWith("history:"));
@@ -356,8 +402,8 @@ async function migrateLegacyHistoryIfNeeded(): Promise<void> {
       }
       await txDone(fullTx);
     }
-  } catch {
-    // ignore migration failures; app can still run with empty new db
+  } finally {
+    legacy.close();
   }
 }
 
@@ -401,13 +447,10 @@ export async function loadHistoryPage(opts?: {
   const limit = typeof opts?.limit === "number" && Number.isFinite(opts.limit) && opts.limit > 0
     ? Math.floor(opts.limit)
     : 24;
-  const beforeDayStart = opts?.cursor?.beforeDayStart ?? 0;
-  const range = beforeDayStart > 0
-    ? IDBKeyRange.upperBound(beforeDayStart, true)
-    : null;
+  const boundary = opts?.cursor;
+  const range = boundary ? IDBKeyRange.upperBound(boundary.createdAt) : null;
   const result = await new Promise<{ records: HistoryRecord[]; nextCursor: HistoryPageCursor | null }>((resolve, reject) => {
     const out: HistoryRecord[] = [];
-    let currentDayStart: number | null = null;
     const req = store.index("createdAt").openCursor(range, "prev");
     req.onsuccess = () => {
       const cursor = req.result;
@@ -416,26 +459,26 @@ export async function loadHistoryPage(opts?: {
         return;
       }
       const value = cursor.value as HistoryRecord;
-      const dayStart = startOfLocalDay(value.createdAt);
-      if (currentDayStart === null) {
-        currentDayStart = dayStart;
-        out.push(value);
-        cursor.continue();
-        return;
-      }
-      if (dayStart === currentDayStart) {
-        out.push(value);
-        cursor.continue();
-        return;
+      if (boundary && value.createdAt === boundary.createdAt) {
+        const order = indexedDB.cmp(cursor.primaryKey, boundary.id);
+        if (order >= 0) {
+          // Seek over timestamp ties instead of materializing each earlier
+          // result. Keep a correct fallback for older embedded webviews.
+          if (order > 0 && typeof cursor.continuePrimaryKey === "function") {
+            cursor.continuePrimaryKey(boundary.createdAt, boundary.id);
+          } else {
+            cursor.continue();
+          }
+          return;
+        }
       }
       if (out.length >= limit) {
         resolve({
           records: out,
-          nextCursor: { beforeDayStart: currentDayStart },
+          nextCursor: { createdAt: out[out.length - 1].createdAt, id: out[out.length - 1].id },
         });
         return;
       }
-      currentDayStart = dayStart;
       out.push(value);
       cursor.continue();
     };

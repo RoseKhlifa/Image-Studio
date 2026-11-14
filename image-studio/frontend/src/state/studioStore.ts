@@ -1,3 +1,5 @@
+import { mergeHistoryItems } from "../lib/history";
+import { createFailureAlertGate } from "../lib/failureAlert";
 import { create } from "zustand";
 import {
   DEFAULT_AUTO_RETRY_COUNT,
@@ -71,7 +73,7 @@ import {
   loadHistoryPage,
 } from "../lib/storage";
 import {
-  compatibilityExportFingerprint,
+  createCompatibilityExportChangeDetector,
   importCompatibilityStateIfNewer,
   readIgnoredReleaseTag,
   scheduleCompatibilityExport,
@@ -133,6 +135,7 @@ import { isMac, readRuntimePlatformState } from "../platform";
 import { dispatchFullscreenResize, setNativeFullscreen } from "../platform/nativeFullscreen";
 import {
   activeRuntimePatch,
+  completeWorkspaceJob,
   apiModeLabel,
   defaultBatchProcessConfig,
   defaultLoopGenerationConfig,
@@ -178,15 +181,12 @@ import {
   loadStoredActiveProfileId,
   loadStoredAIProfileId,
   loadStoredProfiles,
-  MAX_HISTORY_ITEMS,
   persistActiveProfileId,
   persistAIProfileId,
   persistProfiles,
-  persistTrimmedHistory,
   registerTrustedOutputRoots,
   stripDataURLPrefix,
   tempDataURLFromB64,
-  trimHistory,
 } from "./studioStore.shared";
 import type { ModeConfig, PromptOptimizeRequest, Stroke, StudioState, UndoEntry } from "./studioStore.types";
 import {
@@ -216,6 +216,7 @@ type RuntimeGenerateOptions = GenerateOptionsLike & {
 };
 
 type JobSnapshot = {
+  failureAlert: (message: string) => boolean;
   workspaceId: string;
   apiMode: APIModeValue;
   batchIndex: number;
@@ -333,6 +334,18 @@ function launchQueuedLoopJobs(controller: LoopRunController): void {
         if (!current || current !== controller) return;
         if (status === "error" && !batchQueueMode) {
           stopLoopRun(controller.workspaceId);
+          useStudioStore.setState((state) => {
+            const runtime = workspaceRuntimeFromState(state, controller.workspaceId);
+            const patch: WorkspacePatch = {
+              runningJobs: runtime.runningJobs,
+              jobsCompleted: runtime.jobsCompleted,
+              jobsTotal: runtime.runningJobs.length > 0 ? runtime.jobsCompleted + runtime.runningJobs.length : 0,
+            };
+            return {
+              workspaces: patchWorkspaceRuntime(state.workspaces, controller.workspaceId, patch),
+              ...(state.activeWorkspaceId === controller.workspaceId ? activeRuntimePatch(patch) : {}),
+            } as Partial<StudioState>;
+          });
           return;
         }
         const currentState = useStudioStore.getState();
@@ -684,7 +697,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   history: [],
   historyHasMore: false,
   historyLoading: false,
-  historyCursorBeforeDayStart: null,
+  historyCursor: null,
   batchResults: [],
   resultGridOpen: false,
   historyRailCollapsed: false,
@@ -1544,6 +1557,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     }
 
     const snapshotBase = {
+      failureAlert: createFailureAlertGate(),
       workspaceId,
       apiMode: s.apiMode,
       size: resolvedSize,
@@ -1712,7 +1726,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         history: preview.history,
         historyHasMore: false,
         historyLoading: false,
-        historyCursorBeforeDayStart: null,
+        historyCursor: null,
         batchResults: [],
         resultGridOpen: false,
         historyRailCollapsed: false,
@@ -1781,7 +1795,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       return false;
     });
     const initialHistoryPage = await loadHistoryPage({ limit: INITIAL_HISTORY_LOAD });
-    const items = trimHistory(initialHistoryPage.items);
+    const items = mergeHistoryItems(initialHistoryPage.items);
     const historyHasMore = !!initialHistoryPage.nextCursor;
     let promptHistory: string[] = [];
     let promptTemplates: PromptTemplate[] = [];
@@ -2052,7 +2066,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       apiKey: activeKey, history: items, promptHistory, promptTemplates, presets, customAspectRatios, theme, fontScale,
       historyHasMore,
       historyLoading: false,
-      historyCursorBeforeDayStart: initialHistoryPage.nextCursor?.beforeDayStart ?? null,
+      historyCursor: initialHistoryPage.nextCursor,
       provider, apiMode, responsesTransport, requestPolicy, imagesNewAPICompat, baseURL, textModelID, imageModelID, reasoningEffort, kernelRuntimeMode, noPromptRevision,
       proxyMode: proxyConfig.mode,
       proxyURL: proxyConfig.url,
@@ -2394,17 +2408,15 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     set({ historyLoading: true });
     deferredHistoryLoadPromise = (async () => {
       try {
-        const currentHistory = get().history;
-        const cursorBeforeDayStart = get().historyCursorBeforeDayStart;
         const nextPage = await loadHistoryPage({
-          cursor: typeof cursorBeforeDayStart === "number" ? { beforeDayStart: cursorBeforeDayStart } : null,
+          cursor: get().historyCursor,
           limit: INITIAL_HISTORY_LOAD,
         });
-        const merged = trimHistory([...currentHistory, ...nextPage.items]);
+        const merged = mergeHistoryItems([...get().history, ...nextPage.items]);
         set({
           history: merged,
-          historyHasMore: !!nextPage.nextCursor && merged.length < MAX_HISTORY_ITEMS,
-          historyCursorBeforeDayStart: nextPage.nextCursor?.beforeDayStart ?? null,
+          historyHasMore: !!nextPage.nextCursor,
+          historyCursor: nextPage.nextCursor,
         });
         void backfillHistoryPreviewRefs(nextPage.items);
       } catch (error) {
@@ -2696,6 +2708,16 @@ async function launchOneJob(
   hooks: LaunchOneJobHooks = {},
 ): Promise<void> {
   const store = useStudioStore;
+  const notifyFailure = (message: string) => {
+    if (!snapshot.failureAlert(message)) return;
+    const state = store.getState();
+    state.pushToast(`生成失败:${message}`, "error", 8000);
+    void playCompletionSound(state.completionSound).catch(() => undefined);
+    if (state.completionNotification.enabled && typeof document !== "undefined"
+        && document.visibilityState !== "visible") {
+      showSystemNotification("Image Studio · 生成失败", message);
+    }
+  };
   const jobId = cryptoIDFallback();
   let offProgress = () => {};
   let offLog = () => {};
@@ -2731,14 +2753,15 @@ async function launchOneJob(
       let total = 0;
       store.setState((state) => {
         const runtime = workspaceRuntimeFromState(state, snapshot.workspaceId);
-        const remaining = runtime.runningJobs.filter((id) => id !== jobId);
+        const completion = completeWorkspaceJob(runtime, jobId);
+        const remaining = completion.runningJobs;
         const prunedPreview = removeStreamPreview(runtime.streamPreviews, jobId);
-        completed = runtime.jobsCompleted + 1;
-        total = runtime.jobsTotal;
+        completed = completion.completed;
+        total = completion.total;
         const patch: WorkspacePatch = {
           runningJobs: remaining,
           jobsCompleted: completed,
-          jobsTotal: remaining.length === 0 ? 0 : runtime.jobsTotal,
+          jobsTotal: completion.jobsTotal,
           progress: remaining.length === 0 ? null : runtime.progress,
           streamPreview: remaining.length === 0 ? null : prunedPreview.streamPreview,
           streamPreviews: remaining.length === 0 ? {} : prunedPreview.streamPreviews,
@@ -2846,7 +2869,7 @@ async function launchOneJob(
           };
           const { completed: completedNow, total: totalNow } = removeFromRunning();
           const currentItem = totalNow > 1 ? historyItem : activeItem;
-          const trimmed = trimHistory([historyItem, ...store.getState().history]);
+          const trimmed = mergeHistoryItems([historyItem, ...store.getState().history]);
           store.setState((state) => {
             const workspace = state.workspaces.find((w) => w.id === snapshot.workspaceId);
             const existingBatchIDs = state.activeWorkspaceId === snapshot.workspaceId
@@ -2882,8 +2905,7 @@ async function launchOneJob(
                 : {}),
             } as Partial<StudioState>;
           });
-          persistTrimmedHistory(trimmed);
-          persistHistoryItem(historyItem).catch(() => undefined);
+          await persistHistoryItem(historyItem);
           const loopMode = snapshot.loopGeneration.enabled;
           const isFinalLoopResult = loopMode && completedNow === totalNow;
           const shouldPlaySound = shouldPlayCompletionSound({
@@ -2968,6 +2990,7 @@ async function launchOneJob(
             }
           } catch { /* localStorage 不可用 → 静默跳过 */ }
         } catch (err: any) {
+          notifyFailure(`处理结果失败:${err?.message ?? err}`);
           const patch: WorkspacePatch = {
             errorMessage: `处理结果失败:${err?.message ?? err}`,
             errorCanRetry: true,
@@ -2985,6 +3008,7 @@ async function launchOneJob(
     });
     offError = EventsOn(`error:${jobId}`, (e: { message: string; rawPath?: string }) => {
       cleanup();
+      notifyFailure(e?.message ?? "未知错误");
       store.setState((state) => {
         const runtime = workspaceRuntimeFromState(state, snapshot.workspaceId);
         const prunedPreview = removeStreamPreview(runtime.streamPreviews, jobId);
@@ -3026,6 +3050,7 @@ async function launchOneJob(
     }
   } catch (e: any) {
     cleanup();
+    notifyFailure(`提交失败:${e?.message ?? e}`);
     const patch: WorkspacePatch = {
       errorMessage: `提交失败:${e?.message ?? e}`,
       errorCanRetry: true,
@@ -3035,17 +3060,18 @@ async function launchOneJob(
     let totalNow = 0;
     store.setState((state) => {
       const runtime = workspaceRuntimeFromState(state, snapshot.workspaceId);
-      completedNow = runtime.jobsCompleted + 1;
-      totalNow = runtime.jobsTotal;
+      const completion = completeWorkspaceJob(runtime, jobId);
+      completedNow = completion.completed;
+      totalNow = completion.total;
       const nextMeta = { ...state.runningJobMeta };
       delete nextMeta[jobId];
-      const remaining = runtime.runningJobs.filter((id) => id !== jobId);
+      const remaining = completion.runningJobs;
       const prunedPreview = removeStreamPreview(runtime.streamPreviews, jobId);
       const nextPatch: WorkspacePatch = {
         ...patch,
         runningJobs: remaining,
-        jobsTotal: remaining.length === 0 ? 0 : runtime.jobsTotal,
-        jobsCompleted: remaining.length === 0 ? 0 : runtime.jobsCompleted,
+        jobsTotal: completion.jobsTotal,
+        jobsCompleted: completedNow,
         progress: remaining.length === 0 ? null : runtime.progress,
         streamPreview: remaining.length === 0 ? null : prunedPreview.streamPreview,
         streamPreviews: remaining.length === 0 ? {} : prunedPreview.streamPreviews,
@@ -3065,12 +3091,12 @@ async function launchOneJob(
 export { tempDataURLFromB64, writeBase64ToTempFile };
 
 let compatibilityExportEnabled = false;
-let compatibilityFingerprint = "";
+const compatibilityExportChanged = createCompatibilityExportChangeDetector();
 
 function enableCompatibilityExport() {
   const state = useStudioStore.getState();
   compatibilityExportEnabled = true;
-  compatibilityFingerprint = compatibilityExportFingerprint(state);
+  compatibilityExportChanged(state);
   scheduleCompatibilityExport(state);
 }
 
@@ -3082,9 +3108,7 @@ useStudioStore.subscribe((state, previous) => {
     } catch {}
   }
   if (!compatibilityExportEnabled) return;
-  const next = compatibilityExportFingerprint(state);
-  if (next === compatibilityFingerprint) return;
-  compatibilityFingerprint = next;
+  if (!compatibilityExportChanged(state)) return;
   scheduleCompatibilityExport(state);
 });
 

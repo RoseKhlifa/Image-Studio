@@ -6,12 +6,12 @@ import { historyPreviewSrc, useBlobURL } from "../../lib/images";
 import {
   buildHistoryItemDragExport,
   shouldUseNativeFileDrag,
-  writeImageFileDragData,
-  writeInternalHistoryItemDragData,
+  writeHistoryItemFileDragData,
 } from "../../lib/dragExport.ts";
 import { saveHistoryItemAs, saveHistoryItemsToDirectory } from "../../lib/saveResultImage";
 import { androidSaveHint, androidTarget } from "../../platform/android/bridge";
-import { BeginNativeFileDrag, getHostCapabilities, ChooseDirectory } from "../../platform/runtime/host";
+import { getHostCapabilities, ChooseDirectory } from "../../platform/runtime/host";
+import { useNativeFileDrag } from "./useNativeFileDrag";
 import { usePlatform } from "../../platform/context";
 import { Modal } from "./Modal";
 
@@ -39,11 +39,12 @@ export function SavePromptModal() {
     [batchItems, selectedIds],
   );
 
-  if (!request) return null;
-  const isBatch = request.kind === "batch";
-  const singleItem = request.kind === "single" ? request.item : null;
-  const batchRequest = request.kind === "batch" ? request : null;
+  const isBatch = request?.kind === "batch";
+  const singleItem = request?.kind === "single" ? request.item : null;
+  const batchRequest = request?.kind === "batch" ? request : null;
   const singlePreviewURL = useBlobURL(singleItem?.previewBlob ?? singleItem?.imageBlob ?? null, singleItem?.imageB64 ?? null);
+  const nativeDrag = useNativeFileDrag(singleItem?.savedPath);
+  if (!request) return null;
 
   async function saveSingleAs() {
     if (saving || !singleItem) return;
@@ -98,14 +99,10 @@ export function SavePromptModal() {
       event.stopPropagation();
       if (shouldUseNativeFileDrag(targetPlatform, singleItem.savedPath)) {
         event.preventDefault();
-        void BeginNativeFileDrag(singleItem.savedPath).catch((error) => {
-          console.error("[drag-export] native-file-drag failed", error);
-        });
         return;
       }
       event.dataTransfer.effectAllowed = "copy";
-      writeInternalHistoryItemDragData(event.dataTransfer, singleItem);
-      writeImageFileDragData(event.dataTransfer, dragSpec);
+      writeHistoryItemFileDragData(event.dataTransfer, singleItem, dragSpec);
     }
 
     return (
@@ -113,7 +110,8 @@ export function SavePromptModal() {
         <div className="space-y-4">
           <div className="grid gap-3 sm:grid-cols-[132px_minmax(0,1fr)]">
             <div
-              draggable={!!dragSpec}
+              draggable={!!dragSpec && !nativeDrag.native}
+              onMouseDown={nativeDrag.onMouseDown}
               onDragStart={handleSinglePreviewDragStart}
               title={dragSpec ? "拖到文件夹复制原图" : undefined}
               className={`grid min-h-[132px] place-items-center overflow-hidden border border-black/[0.08] bg-[var(--surface)] p-2 dark:border-white/[0.06] ${usesFluentUI ? "rounded-[10px]" : "rounded-[16px]"}`}

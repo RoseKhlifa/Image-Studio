@@ -305,6 +305,7 @@ func (a *App) startRunWithConfig(cfg kernel.Config, total int, workflowWorkspace
 		var once sync.Once
 		var firstErr atomic.Pointer[error]
 		var jobsDone atomic.Int32
+		var jobsFailed atomic.Int32
 		concurrency := runConcurrency
 		if concurrency < 1 {
 			concurrency = 1
@@ -396,6 +397,11 @@ func (a *App) startRunWithConfig(cfg kernel.Config, total int, workflowWorkspace
 						return
 					}
 					if batchMode {
+						jobsFailed.Add(1)
+						errCopy := err
+						if firstErr.CompareAndSwap(nil, &errCopy) {
+							a.notifyRunFailure(err.Error())
+						}
 						a.appendLog(fmt.Sprintf("[%s] 失败并跳过: %v", jobLabel, err))
 						completed := int(jobsDone.Add(1))
 						a.mu.Lock()
@@ -405,15 +411,14 @@ func (a *App) startRunWithConfig(cfg kernel.Config, total int, workflowWorkspace
 							a.cancel = nil
 							a.lastRunConcurrency = 0
 							a.clearBatchPreviewItemsLocked()
-							a.status = fmt.Sprintf("完成 - %.1fs", time.Since(batchStarted).Seconds())
+							a.status = fmt.Sprintf("完成，%d 项失败 - %.1fs", jobsFailed.Load(), time.Since(batchStarted).Seconds())
 						}
 						a.mu.Unlock()
 						a.invalidateNow()
 						return
 					}
-					if firstErr.Load() == nil {
-						errCopy := err
-						firstErr.Store(&errCopy)
+					errCopy := err
+					if firstErr.CompareAndSwap(nil, &errCopy) {
 						a.finishWithError(err, res.RawPath)
 					}
 					cancelAll()
@@ -538,6 +543,9 @@ func (a *App) startRunWithConfig(cfg kernel.Config, total int, workflowWorkspace
 					a.lastRunConcurrency = 0
 					a.clearBatchPreviewItemsLocked()
 					a.status = fmt.Sprintf("完成 - %.1fs", time.Since(batchStarted).Seconds())
+					if failed := jobsFailed.Load(); failed > 0 {
+						a.status = fmt.Sprintf("完成，%d 项失败 - %.1fs", failed, time.Since(batchStarted).Seconds())
+					}
 				}
 				a.mu.Unlock()
 				if openSavePromptAfterUnlock {
@@ -546,7 +554,7 @@ func (a *App) startRunWithConfig(cfg kernel.Config, total int, workflowWorkspace
 				if openBatchSavePromptAfterUnlock {
 					a.openBatchSavePrompt(batchSaveItems)
 				}
-				if completed == total {
+				if completed == total && firstErr.Load() == nil {
 					a.maybePlayCompletionSound(completed, total)
 					a.maybeSendCompletionNotification(displayItem, completed, total)
 				}

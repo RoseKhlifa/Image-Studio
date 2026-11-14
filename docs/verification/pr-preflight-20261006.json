@@ -1,0 +1,30 @@
+{
+  "date": "2026-10-06",
+  "timezone": "Asia/Shanghai",
+  "recordedAt": "2026-10-06T16:57:58.105616+08:00",
+  "target": "RoseKhlifa/Image-Studio:main",
+  "upstreamCommit": "4c221a5",
+  "branch": "DR-lin-eng:codex/issue-audit-20261006",
+  "upstreamSyncChanges": [
+    "README.md"
+  ],
+  "runtimeCompatibility": {
+    "before": {
+      "node": "20.20.2",
+      "fixture": "test/completionSound.test.mjs",
+      "result": "ERR_UNKNOWN_FILE_EXTENSION for src/lib/completionSound.ts"
+    },
+    "after": {
+      "node": "24.19.0",
+      "frontendTests": 210,
+      "workerTests": 5,
+      "failures": 0
+    }
+  },
+  "workflow": "verify-platform-kernel.yml: node-version 24",
+  "localVersionFile": ".nvmrc: 24",
+  "applicationVerificationRecords": [
+    "issue-audit-20261006.json",
+    "performance-20261006.json"
+  ]
+}

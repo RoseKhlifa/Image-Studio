@@ -275,7 +275,7 @@ export function createImageActions(store: StateAdapter) {
         store.setState({
           historyHasMore: before.historyHasMore,
           historyLoading: before.historyLoading,
-          historyCursorBeforeDayStart: before.historyCursorBeforeDayStart,
+          historyCursor: before.historyCursor,
         });
         throw error;
       }

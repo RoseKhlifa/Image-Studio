@@ -459,7 +459,7 @@ func WriteAPIKey(profileID, value string) error {
 }
 
 func mergeHistory(item shared.HistoryItem, items []shared.HistoryItem) []shared.HistoryItem {
-	out := make([]shared.HistoryItem, 0, min(len(items)+1, 120))
+	out := make([]shared.HistoryItem, 0, len(items)+1)
 	seen := map[string]struct{}{item.ID: {}}
 	out = append(out, item)
 	for _, existing := range items {
@@ -475,9 +475,6 @@ func mergeHistory(item shared.HistoryItem, items []shared.HistoryItem) []shared.
 	sort.SliceStable(out, func(i, j int) bool {
 		return out[i].CreatedAt > out[j].CreatedAt
 	})
-	if len(out) > 120 {
-		out = out[:120]
-	}
 	return out
 }
 

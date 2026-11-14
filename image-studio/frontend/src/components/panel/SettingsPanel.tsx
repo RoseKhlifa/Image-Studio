@@ -616,9 +616,9 @@ export function SettingsPanel({ open, onClose }: { open: boolean; onClose: () =>
           id="settings-alerts"
           ref={setDesktopSectionRef("alerts")}
           title="通知与提示"
-          description="完成整批生成时的声音和系统级通知统一放在这里。"
+          description="整批完成或首次生成失败时的声音与系统通知。"
         >
-          <SettingsRow label="完成提示音">
+          <SettingsRow label="任务提示音">
             <div className={segmentedControlClassName}>
               <SettingsSegButton active={completionSound.enabled} onClick={() => {
                 setCompletionSoundEnabled(true);
@@ -669,7 +669,7 @@ export function SettingsPanel({ open, onClose }: { open: boolean; onClose: () =>
               </button>
             </div>
             <p className="mt-1 text-[11px] leading-relaxed text-zinc-500 dark:text-zinc-300">
-              整批生成全部完成后只播放一次。当前 {completionSound.mode === "custom" && completionSound.customName ? `使用 ${completionSound.customName}` : "使用内置默认音"}。
+              整批完成或首次失败时播放；主动取消时不播放。当前 {completionSound.mode === "custom" && completionSound.customName ? `使用 ${completionSound.customName}` : "使用内置默认音"}。
             </p>
           </SettingsRow>
 

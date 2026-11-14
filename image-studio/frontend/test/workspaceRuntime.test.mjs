@@ -119,3 +119,17 @@ test("tracks per-api-mode running counts and active patches", () => {
   assert.equal(runtime.workspaceRunningCount(state, "images"), 1);
   assert.equal(runtime.activeRuntimePatch({ runningJobs: ["x"], jobsCompleted: 2 }).isRunning, true);
 });
+
+test("a queue survives the gap between waves and finishes only after every job settles", () => {
+  let state = { runningJobs: [], jobsCompleted: 0, jobsTotal: 650 };
+  for (let i = 0; i < 650; i++) {
+    const job = `job-${i}`;
+    state.runningJobs.push(job);
+    const result = runtime.completeWorkspaceJob(state, job);
+    assert.equal(result.completed, i + 1);
+    assert.equal(result.jobsTotal, i === 649 ? 0 : 650);
+    assert.equal(runtime.activeRuntimePatch({ runningJobs: result.runningJobs, jobsTotal: result.jobsTotal, jobsCompleted: result.completed }).isRunning, i !== 649);
+    state = { runningJobs: result.runningJobs, jobsCompleted: result.completed, jobsTotal: result.jobsTotal };
+    assert.equal(runtime.completeWorkspaceJob(state, job).completed, i + 1, "duplicate settlement must not increment the count");
+  }
+});
