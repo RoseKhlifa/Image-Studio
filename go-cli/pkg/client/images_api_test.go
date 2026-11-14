@@ -396,6 +396,9 @@ func TestBuildEditsMultipartSetsMaskMimeType(t *testing.T) {
 		RequestPolicyOpenAI,
 		DefaultPartialImages,
 		false,
+		"",
+		0,
+		0,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -486,6 +489,9 @@ func TestBuildEditsMultipartUsesArrayFieldForEveryMultiImageSource(t *testing.T)
 		RequestPolicyOpenAI,
 		DefaultPartialImages,
 		false,
+		"",
+		0,
+		0,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -540,6 +546,9 @@ func TestBuildEditsMultipartCanonicalizesJPEGSourceAndMaskToSameSizePNG(t *testi
 		RequestPolicyOpenAI,
 		DefaultPartialImages,
 		false,
+		"",
+		0,
+		0,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -638,6 +647,9 @@ func TestBuildEditsMultipartOmitsMaskWhenEmpty(t *testing.T) {
 		RequestPolicyOpenAI,
 		DefaultPartialImages,
 		false,
+		"",
+		0,
+		0,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -672,6 +684,9 @@ func TestBuildEditsMultipartIncludesOutputCompressionForWebP(t *testing.T) {
 		RequestPolicyOpenAI,
 		DefaultPartialImages,
 		false,
+		"",
+		0,
+		0,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -706,6 +721,9 @@ func TestBuildEditsMultipartIncludesInputFidelityForSupportedModels(t *testing.T
 		RequestPolicyOpenAI,
 		DefaultPartialImages,
 		false,
+		"",
+		0,
+		0,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -820,5 +838,83 @@ func TestRequestImagesAPIGrokProviderUsesNativeJSONContracts(t *testing.T) {
 				t.Fatalf("image presence=%v payload=%s", hasImage, requestBody)
 			}
 		})
+	}
+}
+
+func TestGPTImage26GIFOutputUsesNonStreamingAnimationFields(t *testing.T) {
+	finalB64 := base64.StdEncoding.EncodeToString([]byte("GIF89a"))
+	var requestBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"data":[{"b64_json":%q}]}`, finalB64)
+	}))
+	defer srv.Close()
+
+	result, err := RequestImagesAPIWithPartial(context.Background(), Options{
+		APIKey: "sk-test", Prompt: "lantern loop", BaseURL: srv.URL,
+		ImageModelID: "gpt-image-2.6-sunburst", OutputFormat: "gif",
+		FrameCount: 12, FrameDurationMs: 340, PartialImages: 3,
+	}, &bytes.Buffer{}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(requestBody, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["output_format"] != "gif" || payload["frame_count"] != float64(12) || payload["frame_duration_ms"] != float64(340) {
+		t.Fatalf("payload=%s", requestBody)
+	}
+	if _, ok := payload["stream"]; ok {
+		t.Fatalf("GIF request must not stream: %s", requestBody)
+	}
+	if _, ok := payload["partial_images"]; ok {
+		t.Fatalf("GIF request must not include partial_images: %s", requestBody)
+	}
+	if result.ImageB64 != finalB64 {
+		t.Fatalf("result=%+v", result)
+	}
+}
+
+func TestGPTImage26SVGGenerationUsesNonStreamingOutput(t *testing.T) {
+	finalB64 := base64.StdEncoding.EncodeToString([]byte(`<svg xmlns="http://www.w3.org/2000/svg"/>`))
+	var requestBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"data":[{"b64_json":%q}]}`, finalB64)
+	}))
+	defer srv.Close()
+
+	_, err := RequestImagesAPIWithPartial(context.Background(), Options{
+		APIKey: "sk-test", Prompt: "vector logo", BaseURL: srv.URL,
+		ImageModelID: "gpt-image-2.6-flare", OutputFormat: "svg",
+	}, &bytes.Buffer{}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(requestBody, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["output_format"] != "svg" {
+		t.Fatalf("payload=%s", requestBody)
+	}
+	if _, ok := payload["stream"]; ok {
+		t.Fatalf("SVG request must not stream: %s", requestBody)
+	}
+	if _, ok := payload["partial_images"]; ok {
+		t.Fatalf("SVG request must not include partial_images: %s", requestBody)
+	}
+}
+
+func TestSVGEditIsRejectedBeforeUpstreamRequest(t *testing.T) {
+	_, err := RequestImagesAPIWithPartial(context.Background(), Options{
+		APIKey: "sk-test", Prompt: "edit vector", BaseURL: "https://example.com",
+		ImageModelID: "gpt-image-2.6-sunburst", Mode: ModeEdit, OutputFormat: "svg",
+	}, &bytes.Buffer{}, nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "SVG 输出仅支持文生图") {
+		t.Fatalf("err=%v", err)
 	}
 }

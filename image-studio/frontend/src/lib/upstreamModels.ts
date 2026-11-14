@@ -68,13 +68,15 @@ function scoreTextModel(model: UpstreamModelDescriptor): number {
 
 function scoreImageModel(model: UpstreamModelDescriptor): number {
   const id = model.id.toLowerCase();
-  if (id === "gpt-image-2") return 0;
-  if (id === "gpt-image-1") return 1;
-  if (id.startsWith("gpt-image")) return 2;
-  if (id.startsWith("gemini-3.1-flash-image")) return 3;
-  if (id.startsWith("gemini-")) return 4;
-  if (id.startsWith("imagen-")) return 5;
-  if (id.startsWith("dall-e")) return 6;
+  if (id === "gpt-image-2.6-sunburst") return 0;
+  if (id === "gpt-image-2.6-flare") return 1;
+  if (id === "gpt-image-2") return 2;
+  if (id === "gpt-image-1") return 3;
+  if (id.startsWith("gpt-image")) return 4;
+  if (id.startsWith("gemini-3.1-flash-image")) return 5;
+  if (id.startsWith("gemini-")) return 6;
+  if (id.startsWith("imagen-")) return 7;
+  if (id.startsWith("dall-e")) return 8;
   return 100;
 }
 

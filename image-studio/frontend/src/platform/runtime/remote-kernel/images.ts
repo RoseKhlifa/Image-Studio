@@ -18,22 +18,50 @@ import {
 
 const MAX_IMAGE_URL_BYTES = 50 * 1024 * 1024;
 
-function parseStreamEvent(line: string, allowRawJSON = false): any | null {
-  const stripped = line.trim();
-  const payload = stripped.startsWith("data:")
-    ? stripped.slice("data:".length).trim()
-    : allowRawJSON ? stripped : "";
-  if (!payload || payload === "[DONE]") return null;
-  try {
-    return JSON.parse(payload);
-  } catch {
-    return null;
+class ImageStreamDecoder {
+  private pending = "";
+  private allowRawJSON: boolean;
+
+  constructor(allowRawJSON = false) {
+    this.allowRawJSON = allowRawJSON;
+  }
+
+  consume(line: string): any | null {
+    const stripped = line.trim();
+    if (!stripped) {
+      this.pending = "";
+      return null;
+    }
+    if (stripped.startsWith(":")) return null;
+    if (/^(event|id|retry):/.test(stripped)) {
+      this.pending = "";
+      return null;
+    }
+    const isData = stripped.startsWith("data:");
+    const payload = isData ? stripped.slice("data:".length).trim() : stripped;
+    if (!payload || payload === "[DONE]") {
+      this.pending = "";
+      return null;
+    }
+    if (!isData && !this.allowRawJSON && !this.pending) {
+      return null;
+    }
+    // Accumulate standard SSE data fields and raw continuation lines emitted
+    // by relays, without treating a complete nested object as another event.
+    this.pending = this.pending ? `${this.pending}\n${payload}` : payload;
+    try {
+      const event = JSON.parse(this.pending);
+      this.pending = "";
+      return event;
+    } catch {
+      return null;
+    }
   }
 }
 
-function parseNativeProgressPayload(payload: unknown, allowRawJSON = false): { line: string; event: any | null } {
+function parseNativeProgressPayload(payload: unknown, decoder: ImageStreamDecoder): { line: string; event: any | null } {
   if (typeof payload === "string") {
-    return { line: payload, event: parseStreamEvent(payload, allowRawJSON) };
+    return { line: payload, event: decoder.consume(payload) };
   }
   if (!payload || typeof payload !== "object") {
     return { line: "", event: null };
@@ -44,7 +72,7 @@ function parseNativeProgressPayload(payload: unknown, allowRawJSON = false): { l
   const structured = (payload as { event?: unknown }).event;
   const event = structured && typeof structured === "object"
     ? structured
-    : parseStreamEvent(line, allowRawJSON);
+    : decoder.consume(line);
   return { line, event };
 }
 
@@ -121,7 +149,7 @@ function parseImagesResponseSync(raw: string, status: number): ExtractedImageRes
 
 function ensureSupportedImageBase64(imageB64: string, source: string): string {
   if (!imageB64 || !detectImageMimeTypeFromBase64(imageB64)) {
-    throw new RemoteKernelError(`${source}没有返回支持的 PNG/JPEG/WebP 图片`);
+    throw new RemoteKernelError(`${source}没有返回支持的 PNG/JPEG/WebP/GIF/SVG 图片`);
   }
   return imageB64;
 }
@@ -146,7 +174,7 @@ async function imageURLToBase64(
     const native = await nativeHttpRequestText(
       parsed.toString(),
       "GET",
-      { Accept: "image/png, image/jpeg, image/webp, */*" },
+      { Accept: "image/png, image/jpeg, image/webp, image/gif, image/svg+xml, */*" },
       null,
       signal,
       undefined,
@@ -165,7 +193,7 @@ async function imageURLToBase64(
   }
   const response = await fetch(parsed.toString(), {
     method: "GET",
-    headers: { Accept: "image/png, image/jpeg, image/webp, */*" },
+    headers: { Accept: "image/png, image/jpeg, image/webp, image/gif, image/svg+xml, */*" },
     signal,
   });
   if (!response.ok) {
@@ -175,7 +203,7 @@ async function imageURLToBase64(
   if (blob.size > MAX_IMAGE_URL_BYTES) {
     throw new RemoteKernelError(`上游 URL 图片过大(${blob.size}B > ${MAX_IMAGE_URL_BYTES}B 上限)`);
   }
-  if (blob.type && !["image/png", "image/jpeg", "image/webp"].includes(blob.type.toLowerCase())) {
+  if (blob.type && !["image/png", "image/jpeg", "image/webp", "image/gif", "image/svg+xml"].includes(blob.type.toLowerCase())) {
     throw new RemoteKernelError(`上游 URL 图片类型不支持:${blob.type}`);
   }
   const buffer = await blob.arrayBuffer();
@@ -260,10 +288,11 @@ async function parseImagesResponse(
   try {
     parsedValues = [JSON.parse(raw)];
   } catch (error) {
-    if (!allowEmptyKeepAlive) return parseImagesResponseSync(raw, status);
+    if (!allowEmptyKeepAlive && !/^\s*(data:|event:|:)/.test(raw)) return parseImagesResponseSync(raw, status);
+    const decoder = new ImageStreamDecoder(allowEmptyKeepAlive);
     parsedValues = raw
       .split(/\r?\n/)
-      .map((line) => parseStreamEvent(line, true))
+      .map((line) => decoder.consume(line))
       .filter((value) => value !== null);
     if (parsedValues.length === 0 && raw.trim()) {
       throw new RemoteKernelError(`解析 Images API 响应失败:${(error as any)?.message || error}`);
@@ -279,6 +308,8 @@ async function parseImagesResponse(
     if (parsed?.error?.message) {
       throw new RemoteKernelError(`上游返回错误:${parsed.error.message}`);
     }
+    const streamResult = parseImagesStreamEvent(parsed, { signal });
+    if (streamResult) return streamResult;
     const first = Array.isArray(parsed?.data) ? parsed.data[0] : null;
     if (first?.b64_json) {
       return {
@@ -306,8 +337,9 @@ function parseImagesStreamRaw(
   allowRawJSON = false,
 ): ExtractedImageResult | null {
   const partialCallbacks = emitPartials ? callbacks : { signal: callbacks.signal };
+  const decoder = new ImageStreamDecoder(allowRawJSON);
   for (const line of raw.split(/\r?\n/)) {
-    const event = parseStreamEvent(line, allowRawJSON);
+    const event = decoder.consume(line);
     if (!event) continue;
     const result = parseImagesStreamEvent(event, partialCallbacks);
     if (result) return result;
@@ -337,8 +369,9 @@ export async function requestImagesOnce(
       let rawFromLines = "";
       let nativeStreamResult: ExtractedImageResult | null = null;
       let nativeBytesReceived = 0;
+      const streamDecoder = new ImageStreamDecoder(allowEmptyKeepAlive);
       const consumeNativePayload = (payload: unknown) => {
-        const parsedPayload = parseNativeProgressPayload(payload, allowEmptyKeepAlive);
+        const parsedPayload = parseNativeProgressPayload(payload, streamDecoder);
         if (parsedPayload.line) {
           rawFromLines += `${parsedPayload.line}\n`;
           nativeBytesReceived += parsedPayload.line.length + 1;
@@ -426,6 +459,7 @@ export async function requestImagesOnce(
       let pending = "";
       let result: ExtractedImageResult | null = null;
       let bytesReceived = 0;
+      const streamDecoder = new ImageStreamDecoder(allowEmptyKeepAlive);
       try {
         while (true) {
           const { value, done } = await reader.read();
@@ -438,16 +472,18 @@ export async function requestImagesOnce(
           while (newline >= 0) {
             const line = pending.slice(0, newline).replace(/\r$/, "");
             pending = pending.slice(newline + 1);
-            const event = parseStreamEvent(line, allowEmptyKeepAlive);
+            const event = streamDecoder.consume(line);
             const parsed = event ? parseImagesStreamEvent(event, callbacks) : null;
             if (parsed) result = parsed;
             callbacks.onProgress?.("已收到 Images API 流式事件", nowSeconds(startedAt), bytesReceived);
             newline = pending.indexOf("\n");
           }
         }
-        raw += decoder.decode();
+        const tail = decoder.decode();
+        raw += tail;
+        pending += tail;
         if (pending.trim()) {
-          const event = parseStreamEvent(pending, allowEmptyKeepAlive);
+          const event = streamDecoder.consume(pending);
           const parsed = event ? parseImagesStreamEvent(event, callbacks) : null;
           if (parsed) result = parsed;
         }

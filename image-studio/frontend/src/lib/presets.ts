@@ -9,6 +9,7 @@ import type {
   QualityValue,
   SizeValue,
 } from "../types/domain";
+import { normalizeGIFFrameCount, normalizeGIFFrameDurationMs } from "../../../../shared/kernel/requestModel.js";
 
 export type PresetEditableFields = Pick<Preset, "name" | "size" | "quality" | "outputFormat" | "batchCount" | "styleTag">;
 
@@ -16,6 +17,8 @@ export type PresetStateSnapshot = {
   size: SizeValue;
   quality: QualityValue;
   outputFormat: OutputFormatValue;
+  frameCount?: number;
+  frameDurationMs?: number;
   negativePrompt: string;
   background: BackgroundValue;
   outputCompression: number;
@@ -32,6 +35,8 @@ export function pickPresetStateSnapshot(source: PresetStateSnapshot): PresetStat
     size: source.size,
     quality: source.quality,
     outputFormat: source.outputFormat,
+    frameCount: normalizeGIFFrameCount(source.frameCount),
+    frameDurationMs: normalizeGIFFrameDurationMs(source.frameDurationMs),
     negativePrompt: source.negativePrompt,
     background: source.background,
     outputCompression: source.outputCompression,
@@ -57,6 +62,8 @@ export function buildPresetPatch(preset: Preset, current: PresetStateSnapshot): 
     size: preset.size,
     quality: preset.quality,
     outputFormat: preset.outputFormat ?? current.outputFormat,
+    frameCount: normalizeGIFFrameCount(preset.frameCount ?? current.frameCount),
+    frameDurationMs: normalizeGIFFrameDurationMs(preset.frameDurationMs ?? current.frameDurationMs),
     negativePrompt: preset.negativePrompt,
     background: preset.background ?? current.background,
     outputCompression: preset.outputCompression ?? current.outputCompression,
@@ -75,6 +82,10 @@ export function presetMatchesSnapshot(preset: Preset, current: PresetStateSnapsh
     patch.size === current.size
     && patch.quality === current.quality
     && patch.outputFormat === current.outputFormat
+    && (patch.outputFormat !== "gif" || (
+      patch.frameCount === normalizeGIFFrameCount(current.frameCount)
+      && patch.frameDurationMs === normalizeGIFFrameDurationMs(current.frameDurationMs)
+    ))
     && patch.negativePrompt === current.negativePrompt
     && patch.background === current.background
     && patch.outputCompression === current.outputCompression

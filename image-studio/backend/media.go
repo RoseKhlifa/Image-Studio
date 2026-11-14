@@ -56,12 +56,16 @@ func (s *Service) registerGeneratedMedia(fullPath, thumbPath string, width, heig
 		}
 	}
 	id := mediaIDForPath(fullAbs)
+	previewURL := "/media/thumb/" + id
+	if thumbAbs == "" {
+		previewURL = "/media/full/" + id
+	}
 	asset := mediaAsset{
 		ID:            id,
 		FullPath:      fullAbs,
 		ThumbPath:     thumbAbs,
 		FullURL:       "/media/full/" + id,
-		PreviewURL:    "/media/thumb/" + id,
+		PreviewURL:    previewURL,
 		PreviewWidth:  width,
 		PreviewHeight: height,
 	}
@@ -114,7 +118,14 @@ func (s *Service) registerImportedPreview(sourcePath string) (mediaAsset, error)
 	previewPath := filepath.Join(previewsDir, previewName)
 	width, height, err := createAVIFThumbnail(absSource, previewPath, mediaPreviewMaxEdge)
 	if err != nil {
-		return mediaAsset{}, err
+		// SVG is a valid generated output but Go's image package cannot rasterize
+		// it. Keep the original as the preview source so browsers can render it.
+		if !strings.EqualFold(filepath.Ext(absSource), ".svg") {
+			return mediaAsset{}, err
+		}
+		_ = os.Remove(previewPath)
+		width, height = 0, 0
+		previewPath = ""
 	}
 	id := mediaIDForPath(absSource)
 	asset := mediaAsset{
@@ -125,6 +136,9 @@ func (s *Service) registerImportedPreview(sourcePath string) (mediaAsset, error)
 		PreviewURL:    "/media/preview/" + id,
 		PreviewWidth:  width,
 		PreviewHeight: height,
+	}
+	if previewPath == "" {
+		asset.PreviewURL = asset.FullURL
 	}
 	s.mu.Lock()
 	if s.mediaAssets == nil {

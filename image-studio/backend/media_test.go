@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"image"
 	"image/color"
+	"image/gif"
 	"image/png"
 	"mime"
 	"net/http"
@@ -14,6 +15,51 @@ import (
 	"strings"
 	"testing"
 )
+
+func TestMediaHandlerPreservesAllGIFFrames(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	root := t.TempDir()
+	fullPath := filepath.Join(imagesSubdir(root), "animation.gif")
+	if err := os.MkdirAll(filepath.Dir(fullPath), secureDirMode); err != nil {
+		t.Fatal(err)
+	}
+	palette := color.Palette{color.RGBA{R: 255, A: 255}, color.RGBA{B: 255, A: 255}}
+	first := image.NewPaletted(image.Rect(0, 0, 24, 16), palette)
+	second := image.NewPaletted(first.Bounds(), palette)
+	for i := range second.Pix {
+		second.Pix[i] = 1
+	}
+	var original bytes.Buffer
+	if err := gif.EncodeAll(&original, &gif.GIF{Image: []*image.Paletted{first, second}, Delay: []int{8, 20}, LoopCount: 0}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fullPath, original.Bytes(), secureFileMode); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService()
+	if err := svc.RegisterTrustedOutputDir(root); err != nil {
+		t.Fatal(err)
+	}
+	ref, err := svc.RegisterMediaAsset(fullPath, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	svc.MediaHandler(http.NotFoundHandler()).ServeHTTP(response, httptest.NewRequest(http.MethodGet, ref.FullURL, nil))
+	if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "image/gif" {
+		t.Fatalf("status=%d type=%q", response.Code, response.Header().Get("Content-Type"))
+	}
+	if !bytes.Equal(response.Body.Bytes(), original.Bytes()) {
+		t.Fatal("original animation bytes changed")
+	}
+	animation, err := gif.DecodeAll(bytes.NewReader(response.Body.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(animation.Image) != 2 || animation.Delay[0] != 8 || animation.Delay[1] != 20 || animation.LoopCount != 0 {
+		t.Fatalf("animation frames or timing lost: %+v", animation)
+	}
+}
 
 func TestListBatchInputImagesOnlyScansCurrentDirectoryImages(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())

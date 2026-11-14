@@ -21,6 +21,8 @@ export const ASPECT_OPTIONS: { value: SizeValue; label: string; w: number; h: nu
 
 export const QUALITY_TIERS: { value: QualityValue; label: string }[] = [
   { value: "auto", label: "自动" },
+  { value: "max", label: "极高" },
+  { value: "xhigh", label: "超高" },
   { value: "low", label: "快速" },
   { value: "medium", label: "标准" },
   { value: "high", label: "精修" },
@@ -35,6 +37,9 @@ export function availableQualityOptions(imageModelID?: string): Array<{ value: Q
   }
   if (family === "dalle3") {
     return QUALITY_TIERS.filter((item) => item.value === "auto" || item.value === "standard" || item.value === "hd");
+  }
+  if ((imageModelID || "").toLowerCase().startsWith("gpt-image-2.6-")) {
+    return QUALITY_TIERS.filter((item) => ["auto", "low", "medium", "high", "xhigh", "max"].includes(item.value));
   }
   return QUALITY_TIERS.filter((item) => item.value === "auto" || item.value === "low" || item.value === "medium" || item.value === "high");
 }

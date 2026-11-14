@@ -253,7 +253,7 @@ export function AndroidUpstreamProfileForm({
             type="text"
             value={draft.imageModelID}
             onChange={(event) => onPatchDraft({ imageModelID: event.target.value })}
-            placeholder={draft.provider === "google" ? "例如 gemini-3.1-flash-image" : draft.provider === "grok" ? "例如 grok-imagine-image" : "留空 = 默认 gpt-image-2"}
+            placeholder={draft.provider === "google" ? "例如 gemini-3.1-flash-image" : draft.provider === "grok" ? "例如 grok-imagine-image" : "留空 = 默认 gpt-image-2.6-sunburst"}
             className="focus-ring android-upstream-input font-mono-token"
             spellCheck={false}
           />

@@ -103,3 +103,20 @@ test("legacy presets without auto-aspect mode clear ordinary img2img override", 
 
   assert.equal(legacyPatch.editAutoAspectResolution, "");
 });
+
+test("GIF presets preserve frame count and timing and match both controls", () => {
+  const source = makeState({ outputFormat: "gif", frameCount: 12, frameDurationMs: 80 });
+  const preset = presets.buildPresetFromSnapshot("GIF", "animation", source);
+  const applied = presets.buildPresetPatch(preset, makeState({ frameCount: 4, frameDurationMs: 500 }));
+  assert.equal(applied.frameCount, 12);
+  assert.equal(applied.frameDurationMs, 80);
+  assert.equal(presets.findMatchingPresetId([preset], source), "animation");
+  assert.equal(presets.findMatchingPresetId([preset], { ...source, frameCount: 9 }), null);
+  assert.equal(presets.findMatchingPresetId([preset], { ...source, frameDurationMs: 200 }), null);
+});
+
+test("static presets ignore hidden GIF timing when finding a match", () => {
+  const source = makeState({ frameCount: 12, frameDurationMs: 80 });
+  const preset = presets.buildPresetFromSnapshot("PNG", "still", source);
+  assert.equal(presets.findMatchingPresetId([preset], { ...source, frameCount: 4, frameDurationMs: 500 }), "still");
+});

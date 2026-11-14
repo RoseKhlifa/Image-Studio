@@ -108,7 +108,7 @@ export function FAQModal({ open, onClose }: { open: boolean; onClose: () => void
               <li>
                 <strong>Images API</strong> 只用<strong>一个</strong>模型 ID:
                 <ul>
-                  <li><strong>请求模型 ID</strong>(通常为 <code>gpt-image-2</code>):直接传给 <code>/v1/images/generations</code> 的 <code>model</code> 字段。Google 官方主机上的 <code>gemini-3.1-flash-image</code> 会按官方 Interactions API 请求；第三方 Gemini / Imagen 中转仍使用非流式 Images 兼容请求。</li>
+                  <li><strong>请求模型 ID</strong>(默认 <code>gpt-image-2.6-sunburst</code>):直接传给 <code>/v1/images/generations</code> 的 <code>model</code> 字段。GPT Image 2.6 支持 PNG/JPEG/WebP、动画 GIF 和 SVG；GIF/SVG 会自动关闭流式预览。Google 官方主机上的 <code>gemini-3.1-flash-image</code> 会按官方 Interactions API 请求；第三方 Gemini / Imagen 中转仍使用非流式 Images 兼容请求。</li>
                 </ul>
               </li>
             </ul>
@@ -140,7 +140,8 @@ export function FAQModal({ open, onClose }: { open: boolean; onClose: () => void
               <li><strong>多参考图</strong>:作为多个 <code>input_image</code> 内容块发送,上游解释方式因模型而异</li>
               <li><strong>蒙版</strong>:Responses 模式按 OpenAI 官方 <code>input_image_mask</code> 发送；Images 模式按标准 multipart <code>mask</code> 文件发送</li>
               <li><strong>background / output_compression</strong>:属于 OpenAI 官方图像字段。仅 GPT 图像模型支持；压缩只对 JPEG / WebP 生效，透明背景需要 PNG / WebP</li>
-              <li><strong>input_fidelity</strong>:用于图生图/参考图流程。`gpt-image-2` 要省略此字段；其它支持该能力的 GPT 图像模型可选 `low` / `high`</li>
+              <li><strong>input_fidelity</strong>:用于图生图/参考图流程。GPT Image 2.x 会自动高保真并省略此字段；其它支持该能力的 GPT 图像模型可选 `low` / `high`</li>
+              <li><strong>GIF / SVG</strong>:GPT Image 2.6 Images API 专属输出。GIF 可生成或编辑并使用默认 9 帧、每帧 200ms；SVG 只支持文生图，不能用于图生图输入。</li>
               <li><strong>style</strong>:仅 `dall-e-3` 文生图支持，值为 `vivid` / `natural`</li>
               <li><strong>partial_images</strong>:属于 OpenAI 官方流式图像字段。当前支持 `0-3`，`0` 只返回最终图，`1-3` 会流式返回预览帧；高并发批量生成时，应用可能自动关闭预览以优先保证最终图完整</li>
               <li><strong>稳定用户标识</strong>:属于 OpenAI 官方请求字段。Responses 模式映射到 `safety_identifier`，Images API 模式映射到 `user`，建议传哈希后的用户标识</li>

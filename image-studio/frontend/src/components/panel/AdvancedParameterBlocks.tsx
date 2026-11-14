@@ -85,18 +85,22 @@ export function AdvancedOutputFormatField({
 }) {
   return (
     <>
-      <Seg>
-        {OUTPUT_FORMAT_OPTIONS.map((item) => (
-          <SegItem
-            key={item.value}
-            active={outputFormat === item.value}
-            onClick={() => onChange(item.value as OutputFormatValue)}
-          >
-            {item.label}
-          </SegItem>
+      <div className="grid gap-1.5">
+        {[OUTPUT_FORMAT_OPTIONS.slice(0, 3), OUTPUT_FORMAT_OPTIONS.slice(3)].map((options, index) => (
+          <Seg key={index}>
+            {options.map((item) => (
+              <SegItem
+                key={item.value}
+                active={outputFormat === item.value}
+                onClick={() => onChange(item.value as OutputFormatValue)}
+              >
+                <span className="whitespace-nowrap">{item.label}</span>
+              </SegItem>
+            ))}
+          </Seg>
         ))}
-      </Seg>
-      <p className={`mt-1 ${noteClassName}`}>JPEG/WebP 体积更小；落盘扩展名 jpeg → .jpg</p>
+      </div>
+      <p className={`mt-1 ${noteClassName}`}>JPEG/WebP 体积更小；GIF 生成动画；SVG 生成可编辑矢量。GIF/SVG 需要 GPT Image 2.6 Images API。</p>
     </>
   );
 }
@@ -158,7 +162,7 @@ export function AdvancedBackgroundField({
           </SegItem>
         ))}
       </Seg>
-      <p className={`mt-1 ${noteClassName}`}>仅 GPT 图像模型支持。`transparent` 需要 PNG/WebP；`gpt-image-2` 当前不支持透明背景。</p>
+      <p className={`mt-1 ${noteClassName}`}>仅 GPT 图像模型支持。`transparent` 需要 PNG/WebP；GIF/SVG 会省略栅格背景设置。</p>
     </>
   );
 }
@@ -227,7 +231,7 @@ export function AdvancedInputFidelityField({
           </SegItem>
         ))}
       </Seg>
-      <p className={`mt-1 ${noteClassName}`}>用于图生图/参考图流程。`gpt-image-2` 会自动高保真并忽略此项。</p>
+      <p className={`mt-1 ${noteClassName}`}>用于图生图/参考图流程。GPT Image 2.x 会自动高保真并忽略此项。</p>
     </>
   );
 }

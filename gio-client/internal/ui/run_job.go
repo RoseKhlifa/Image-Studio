@@ -821,7 +821,7 @@ func (a *App) batchSourcePathsForRunWithManual(manual []string) ([]string, error
 		}
 		ext := strings.ToLower(filepath.Ext(entry.Name()))
 		switch ext {
-		case ".png", ".jpg", ".jpeg", ".webp":
+		case ".png", ".jpg", ".jpeg", ".webp", ".gif":
 			out = append(out, filepath.Join(dir, entry.Name()))
 		}
 	}

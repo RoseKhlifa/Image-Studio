@@ -367,6 +367,9 @@ func (s *Service) runJob(ctx context.Context, jobID string, opts GenerateOptions
 		Size:                    opts.Size,
 		Quality:                 opts.Quality,
 		OutputFormat:            opts.OutputFormat,
+		Complexity:              opts.Complexity,
+		FrameCount:              opts.FrameCount,
+		FrameDurationMs:         opts.FrameDurationMs,
 		MaskB64:                 opts.MaskB64,
 		Seed:                    opts.Seed,
 		NegativePrompt:          opts.NegativePrompt,
@@ -408,6 +411,9 @@ func (s *Service) runJob(ctx context.Context, jobID string, opts GenerateOptions
 			Size:                    opts.Size,
 			Quality:                 opts.Quality,
 			OutputFormat:            opts.OutputFormat,
+			Complexity:              opts.Complexity,
+			FrameCount:              opts.FrameCount,
+			FrameDurationMs:         opts.FrameDurationMs,
 			MaskB64:                 opts.MaskB64,
 			Seed:                    opts.Seed,
 			NegativePrompt:          opts.NegativePrompt,
@@ -591,7 +597,7 @@ func (s *Service) runJob(ctx context.Context, jobID string, opts GenerateOptions
 		s.emitErrorWithRaw(jobID, err, rawPath)
 		return
 	}
-	effectiveOutputFormat := opts.OutputFormat
+	effectiveOutputFormat := client.NormalizeOutputFormat(opts.OutputFormat)
 	if mode == client.ModeEdit && strings.TrimSpace(clientOpts.MaskB64) != "" && len(clientOpts.ImagePaths) > 0 {
 		composited, compositeErr := compositeMaskedEditB64(originalEditSourcePath, clientOpts.MaskB64, result.ImageB64)
 		if compositeErr != nil {
@@ -615,8 +621,12 @@ func (s *Service) runJob(ctx context.Context, jobID string, opts GenerateOptions
 	thumbPath := filepath.Join(thumbsDir, thumbName)
 	thumbW, thumbH, thumbErr := createAVIFThumbnail(savedPath, thumbPath, mediaThumbMaxEdge)
 	if thumbErr != nil {
-		s.emitErrorWithRaw(jobID, fmt.Errorf("生成 AVIF 缩略图失败:%w", thumbErr), rawPath)
-		return
+		// SVG is a supported final format but cannot be decoded by Go's raster
+		// image package. Serve the original vector asset as its own preview.
+		logFn(fmt.Sprintf("生成 AVIF 缩略图失败，将使用原图预览:%v", thumbErr))
+		_ = os.Remove(thumbPath)
+		thumbPath = ""
+		thumbW, thumbH = 0, 0
 	}
 	asset, mediaErr := s.registerGeneratedMedia(savedPath, thumbPath, thumbW, thumbH)
 	if mediaErr != nil {

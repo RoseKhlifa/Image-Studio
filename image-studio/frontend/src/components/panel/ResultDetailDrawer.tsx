@@ -3,7 +3,7 @@ import { useStudioStore } from "../../state/studioStore";
 import { OpenOutputDir } from "../../platform/runtime/host";
 import { useNativeFileDrag } from "../common/useNativeFileDrag";
 import { submitShortcutLabel } from "../../platform";
-import { historyPreviewSrc, useBlobURL } from "../../lib/images";
+import { historyPreviewSrc, isGIFImage, useBlobURL } from "../../lib/images";
 import {
   buildHistoryItemDragExport,
   shouldUseNativeFileDrag,
@@ -22,13 +22,13 @@ export function ResultDetailDrawer() {
   const pushToast = useStudioStore((s) => s.pushToast);
   const { usesFluentUI, targetPlatform } = usePlatform();
   const nativeDrag = useNativeFileDrag(item?.savedPath);
-  const previewURL = useBlobURL(item?.previewBlob ?? item?.imageBlob ?? null, item?.imageB64 ?? null);
+  const previewURL = useBlobURL(isGIFImage(item) ? item?.imageBlob : item?.previewBlob ?? item?.imageBlob ?? null, item?.imageB64 ?? null);
 
   if (!item) return null;
   const detail = item;
 
   const created = new Date(detail.createdAt).toLocaleString();
-  const imageSrc = historyPreviewSrc(detail, previewURL);
+  const imageSrc = historyPreviewSrc(detail, previewURL, true);
   const dragSpec = buildHistoryItemDragExport(detail);
 
   function handlePreviewDragStart(event: React.DragEvent<HTMLDivElement>) {

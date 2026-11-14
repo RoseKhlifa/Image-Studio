@@ -10,6 +10,7 @@ import {
 } from "../platform/runtime/host";
 import { saveImageForPlatform } from "../platform/android/bridge";
 import { base64ToBlob } from "../lib/images";
+import { normalizeGIFFrameCount, normalizeGIFFrameDurationMs } from "../../../../shared/kernel/requestModel.js";
 import { clearHistoryStorage, removeHistoryItem } from "../lib/storage";
 import type { BatchProcessSourceImage, HistoryItem, SourceImage } from "../types/domain";
 import type { StudioState } from "./studioStore.types";
@@ -227,6 +228,10 @@ export function createImageActions(store: StateAdapter) {
       if (item.moderation !== undefined) patch.moderation = item.moderation;
       if (item.styleTag !== undefined) patch.styleTag = item.styleTag;
       if (item.outputFormat) patch.outputFormat = item.outputFormat;
+      if (item.outputFormat === "gif") {
+        patch.frameCount = normalizeGIFFrameCount(item.frameCount);
+        patch.frameDurationMs = normalizeGIFFrameDurationMs(item.frameDurationMs);
+      }
       store.setState(patch);
       store.getState().pushToast("已应用此图的参数到控制台", "success");
     },
@@ -279,7 +284,9 @@ export function createImageActions(store: StateAdapter) {
     async saveCurrentImageAs() {
       const current = store.getState().currentImage;
       if (!current) return;
-      const suggested = `image-${current.mode}-${current.id.slice(0, 8)}.png`;
+      const outputFormat = current.outputFormat || "png";
+      const extension = outputFormat === "jpeg" ? "jpg" : outputFormat;
+      const suggested = `image-${current.mode}-${current.id.slice(0, 8)}.${extension}`;
       try {
         const saved = current.savedPath
           ? await SaveImagePathAs(current.savedPath, suggested)
@@ -296,8 +303,8 @@ export function createImageActions(store: StateAdapter) {
 
     async importImageFile(file: File) {
       try {
-        if (!/^image\/(png|jpe?g|webp)$/.test(file.type)) {
-          store.setState({ errorMessage: `不支持的图片类型:${file.type || "(未知)"},请用 PNG/JPG/WebP`, errorCanRetry: false, errorRawPath: null });
+        if (!/^image\/(png|jpe?g|webp|gif)$/.test(file.type)) {
+          store.setState({ errorMessage: `不支持的图片类型:${file.type || "(未知)"},请用 PNG/JPG/WebP/GIF`, errorCanRetry: false, errorRawPath: null });
           return;
         }
         const b64 = await fileToBase64(file);

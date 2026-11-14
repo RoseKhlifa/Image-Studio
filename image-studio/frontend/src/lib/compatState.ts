@@ -1,3 +1,4 @@
+import { normalizeGIFFrameCount, normalizeGIFFrameDurationMs } from "../../../../shared/kernel/requestModel.js";
 import { LoadCompatibilityState, SaveCompatibilityState } from "../platform/runtime/host.ts";
 import { targetPlatform } from "../platform/index.ts";
 import type {
@@ -63,6 +64,8 @@ export type CompatibilityState = {
     theme?: ThemeMode;
     fontScale?: number;
     outputFormat?: OutputFormatValue;
+    frameCount?: number;
+    frameDurationMs?: number;
     background?: BackgroundValue;
     outputCompression?: number;
     inputFidelity?: InputFidelityValue;
@@ -105,6 +108,8 @@ export type CompatibilityExportInput = {
   theme: ThemeMode;
   fontScale: number;
   outputFormat: OutputFormatValue;
+  frameCount?: number;
+  frameDurationMs?: number;
   background: BackgroundValue;
   outputCompression: number;
   inputFidelity: InputFidelityValue;
@@ -133,7 +138,7 @@ let exportInFlight = false;
 
 const exportFields: Record<keyof CompatibilityExportInput, true> = {
   history: true, profiles: true, activeProfileId: true, aiProfileId: true,
-  proxyMode: true, proxyURL: true, theme: true, fontScale: true, outputFormat: true,
+  proxyMode: true, proxyURL: true, theme: true, fontScale: true, outputFormat: true, frameCount: true, frameDurationMs: true,
   background: true, outputCompression: true, inputFidelity: true, imageStyle: true,
   moderation: true, userIdentifier: true, partialImages: true, protectStreamPreview: true,
   autoRetryEnabled: true, autoRetryCount: true, promptTemplates: true, promptHistory: true,
@@ -223,6 +228,8 @@ export function compatibilityExportFingerprint(input: CompatibilityExportInput):
     theme: input.theme,
     fontScale: input.fontScale,
     outputFormat: input.outputFormat,
+    frameCount: normalizeGIFFrameCount(input.frameCount),
+    frameDurationMs: normalizeGIFFrameDurationMs(input.frameDurationMs),
     background: input.background,
     outputCompression: input.outputCompression,
     inputFidelity: input.inputFidelity,
@@ -263,6 +270,8 @@ function buildCompatibilityState(input: CompatibilityExportInput): Compatibility
       theme: normalizeTheme(input.theme),
       fontScale: normalizeFontScale(input.fontScale),
       outputFormat: normalizeOutputFormat(input.outputFormat),
+      frameCount: normalizeGIFFrameCount(input.frameCount),
+      frameDurationMs: normalizeGIFFrameDurationMs(input.frameDurationMs),
       background: normalizeBackground(input.background),
       outputCompression: normalizeOutputCompression(input.outputCompression),
       inputFidelity: normalizeInputFidelity(input.inputFidelity),
@@ -311,6 +320,8 @@ function applyCompatibilityLocalStorage(state: CompatibilityState): void {
   if (settings.theme) writeLocalStorageString("gptcodex.theme", normalizeTheme(settings.theme));
   if (typeof settings.fontScale === "number") writeLocalStorageString("gptcodex.fontScale", String(normalizeFontScale(settings.fontScale)));
   if (settings.outputFormat) writeLocalStorageString("gptcodex.outputFormat", normalizeOutputFormat(settings.outputFormat));
+  if (typeof settings.frameCount === "number") writeLocalStorageString("gptcodex.frameCount", String(normalizeGIFFrameCount(settings.frameCount)));
+  if (typeof settings.frameDurationMs === "number") writeLocalStorageString("gptcodex.frameDurationMs", String(normalizeGIFFrameDurationMs(settings.frameDurationMs)));
   if (settings.background) writeLocalStorageString("gptcodex.background", normalizeBackground(settings.background));
   if (typeof settings.outputCompression === "number") writeLocalStorageString("gptcodex.outputCompression", String(normalizeOutputCompression(settings.outputCompression)));
   if (settings.inputFidelity) writeLocalStorageString("gptcodex.inputFidelity", normalizeInputFidelity(settings.inputFidelity));
@@ -394,6 +405,8 @@ function normalizeSettings(raw: unknown): CompatibilityState["settings"] {
     theme: normalizeTheme(source.theme),
     fontScale: normalizeFontScale(source.fontScale),
     outputFormat: normalizeOutputFormat(source.outputFormat),
+    frameCount: normalizeGIFFrameCount(source.frameCount),
+    frameDurationMs: normalizeGIFFrameDurationMs(source.frameDurationMs),
     background: normalizeBackground(source.background),
     outputCompression: normalizeOutputCompression(source.outputCompression),
     inputFidelity: normalizeInputFidelity(source.inputFidelity),
@@ -451,6 +464,8 @@ function toSerializableHistoryItem(raw: unknown): HistoryItem | null {
     size: normalizeSize(item.size),
     quality: normalizeQuality(item.quality),
     outputFormat: normalizeOutputFormat(item.outputFormat),
+    frameCount: normalizeGIFFrameCount(item.frameCount),
+    frameDurationMs: normalizeGIFFrameDurationMs(item.frameDurationMs),
     parentId: stringOrUndefined(item.parentId),
     createdAt,
     seed: numberOrUndefined(item.seed),
@@ -484,6 +499,8 @@ function historyFingerprint(item: HistoryItem) {
     size: item.size,
     quality: item.quality,
     outputFormat: item.outputFormat,
+    frameCount: normalizeGIFFrameCount(item.frameCount),
+    frameDurationMs: normalizeGIFFrameDurationMs(item.frameDurationMs),
     createdAt: item.createdAt,
     seed: item.seed,
     negativePrompt: item.negativePrompt,
@@ -512,6 +529,8 @@ function cloneExportInput(input: CompatibilityExportInput): CompatibilityExportI
     theme: input.theme,
     fontScale: input.fontScale,
     outputFormat: input.outputFormat,
+    frameCount: normalizeGIFFrameCount(input.frameCount),
+    frameDurationMs: normalizeGIFFrameDurationMs(input.frameDurationMs),
     background: input.background,
     outputCompression: input.outputCompression,
     inputFidelity: input.inputFidelity,
@@ -602,6 +621,8 @@ function normalizePresets(raw: unknown): Preset[] {
       size: normalizeSize(source.size),
       quality: normalizeQuality(source.quality),
       outputFormat: normalizeOutputFormat(source.outputFormat),
+      frameCount: normalizeGIFFrameCount(source.frameCount),
+      frameDurationMs: normalizeGIFFrameDurationMs(source.frameDurationMs),
       negativePrompt: typeof source.negativePrompt === "string" ? source.negativePrompt : "",
       background: source.background === undefined ? undefined : normalizeBackground(source.background),
       outputCompression: source.outputCompression === undefined ? undefined : normalizeOutputCompression(source.outputCompression),
@@ -632,7 +653,7 @@ function normalizeKernelRuntimeMode(value: unknown): KernelRuntimeMode {
 }
 
 function normalizeOutputFormat(value: unknown): OutputFormatValue {
-  return value === "jpeg" || value === "webp" || value === "png" ? value : "png";
+  return value === "jpeg" || value === "webp" || value === "gif" || value === "svg" || value === "png" ? value : "png";
 }
 
 function normalizeBackground(value: unknown): BackgroundValue {
@@ -675,7 +696,7 @@ function normalizeSize(value: unknown): HistoryItem["size"] {
 }
 
 function normalizeQuality(value: unknown): HistoryItem["quality"] {
-  return value === "auto" || value === "high" || value === "low" || value === "medium" || value === "standard" || value === "hd"
+  return value === "auto" || value === "high" || value === "low" || value === "medium" || value === "xhigh" || value === "max" || value === "standard" || value === "hd"
     ? value
     : "medium";
 }

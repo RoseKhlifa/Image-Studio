@@ -45,14 +45,14 @@ return selectedPaths`,
 		return parseDialogPaths(string(out)), nil
 	default:
 		if path, err := exec.LookPath("zenity"); err == nil {
-			out, err := exec.Command(path, "--file-selection", "--multiple", "--separator=\n", "--file-filter=Images | *.png *.jpg *.jpeg *.webp").Output()
+			out, err := exec.Command(path, "--file-selection", "--multiple", "--separator=\n", "--file-filter=Images | *.png *.jpg *.jpeg *.webp *.gif").Output()
 			if err != nil {
 				return nil, err
 			}
 			return parseDialogPaths(string(out)), nil
 		}
 		if path, err := exec.LookPath("kdialog"); err == nil {
-			out, err := exec.Command(path, "--getopenfilename", ".", "Images (*.png *.jpg *.jpeg *.webp)", "--multiple", "--separate-output").Output()
+			out, err := exec.Command(path, "--getopenfilename", ".", "Images (*.png *.jpg *.jpeg *.webp *.gif)", "--multiple", "--separate-output").Output()
 			if err != nil {
 				return nil, err
 			}

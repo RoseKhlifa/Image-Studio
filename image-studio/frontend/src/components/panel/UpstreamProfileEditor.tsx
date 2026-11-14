@@ -375,7 +375,7 @@ export function UpstreamProfileEditor({
           <input
             type="text"
             value={draft.imageModelID}
-            placeholder={draft.provider === "google" ? "例如 gemini-3.1-flash-image" : draft.provider === "grok" ? "例如 grok-imagine-image" : "留空=默认 gpt-image-2"}
+            placeholder={draft.provider === "google" ? "例如 gemini-3.1-flash-image" : draft.provider === "grok" ? "例如 grok-imagine-image" : "留空=默认 gpt-image-2.6-sunburst"}
             onChange={(e) => onPatchDraft({ imageModelID: e.target.value })}
             spellCheck={false}
             className={`focus-ring w-full min-w-0 border border-black/[0.08] bg-[var(--surface)] px-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 dark:border-white/[0.08] dark:text-zinc-100 dark:placeholder:text-zinc-500 font-mono-token ${usesFluentUI ? "rounded-[10px]" : "rounded-[14px]"}`}

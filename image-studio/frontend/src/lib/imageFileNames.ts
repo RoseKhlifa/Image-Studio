@@ -3,6 +3,8 @@ import type { HistoryItem, OutputFormatValue } from "../types/domain";
 function extensionForFormat(format?: OutputFormatValue): string {
   if (format === "jpeg") return "jpg";
   if (format === "webp") return "webp";
+  if (format === "gif") return "gif";
+  if (format === "svg") return "svg";
   return "png";
 }
 

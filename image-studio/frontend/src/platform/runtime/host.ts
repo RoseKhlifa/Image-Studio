@@ -4,7 +4,7 @@ import {
   runRemoteImageJob,
   optimizePromptRemote,
 } from "./remoteKernel.ts";
-import { normalizeRequestPolicy } from "../../../../../shared/kernel/requestModel.js";
+import { normalizeOutputFormat, normalizeRequestPolicy } from "../../../../../shared/kernel/requestModel.js";
 import {
   canUseWebGLImageTransforms,
   cropVirtualImage,
@@ -188,10 +188,11 @@ async function startRemoteJob(options: GenerateOptionsLike): Promise<JobStartedL
       const finalImageB64 = preparedMask
         ? await compositeMaskedEdit(preparedMask, result.imageB64)
         : result.imageB64;
-      const finalOutputFormat = preparedMask ? "png" : (options.outputFormat || "png");
+      const finalOutputFormat = preparedMask ? "png" : normalizeOutputFormat(options.outputFormat || "png");
+      const suggestedExtension = finalOutputFormat === "jpeg" ? "jpg" : finalOutputFormat;
       const saved = registerVirtualImage({
         imageB64: finalImageB64,
-        suggestedName: `image-${options.mode || "generate"}.${finalOutputFormat}`,
+        suggestedName: `image-${options.mode || "generate"}.${suggestedExtension}`,
       });
       emitLocalEvent(`result:${jobId}`, {
         imageB64: finalImageB64,
@@ -502,7 +503,11 @@ export function SaveImageAs(imageB64: string, suggestedName: string): Promise<st
     ? "image/jpeg"
     : suggestedName.toLowerCase().endsWith(".webp")
       ? "image/webp"
-      : "image/png";
+      : suggestedName.toLowerCase().endsWith(".gif")
+        ? "image/gif"
+        : suggestedName.toLowerCase().endsWith(".svg")
+          ? "image/svg+xml"
+          : "image/png";
   return Promise.resolve(saveByDownload(new Blob([Uint8Array.from(atob(imageB64), (ch) => ch.charCodeAt(0))], { type: mimeType }), suggestedName));
 }
 

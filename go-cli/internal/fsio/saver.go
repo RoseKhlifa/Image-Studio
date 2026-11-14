@@ -50,7 +50,7 @@ func DefaultOutputDir() string {
 }
 
 // BuildImageName composes the final image filename matching the Python script.
-// outputFormat 来自 Options.OutputFormat("png" / "jpeg" / "webp"),空时回退到
+// outputFormat 来自 Options.OutputFormat("png" / "jpeg" / "webp" / "gif" / "svg"),空时回退到
 // client.OutputFormat 默认。文件扩展名走 client.FileExtForFormat 标准化(jpeg→jpg)。
 func BuildImageName(mode client.Mode, prompt, timestamp, outputFormat string) string {
 	prefix := "generate"

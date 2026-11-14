@@ -186,6 +186,8 @@ export function saveActiveWorkspaceSnapshot(s: StudioState): Workspace[] {
       size: s.size,
       quality: s.quality,
       outputFormat: s.outputFormat,
+      frameCount: s.frameCount,
+      frameDurationMs: s.frameDurationMs,
       seed: s.seed,
       background: s.background,
       outputCompression: s.outputCompression,

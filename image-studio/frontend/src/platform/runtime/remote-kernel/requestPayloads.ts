@@ -10,6 +10,12 @@ import {
 import {
   buildResponsesPayload as buildSharedResponsesPayload,
   normalizeBackground,
+  normalizeOutputFormat,
+  normalizeImageComplexity,
+  normalizeGIFFrameCount,
+  normalizeGIFFrameDurationMs,
+  isNonStreamingOutputFormat,
+  validateImageOutputFormat,
   normalizeImageStyle,
   normalizeInputFidelity,
   normalizeUpstreamProvider,
@@ -117,7 +123,7 @@ export async function buildImagesRequestBody(
   const imageModel = normalizeImageModel(request.payload.imageModelID);
   const size = request.payload.size || "1024x1024";
   const quality = request.payload.quality || "auto";
-  const outputFormat = request.payload.outputFormat || "png";
+  const outputFormat = normalizeOutputFormat(request.payload.outputFormat);
   const background = normalizeBackground(request.payload.background);
   const imageStyle = normalizeImageStyle(request.payload.imageStyle);
   const inputFidelity = normalizeInputFidelity(request.payload.inputFidelity);
@@ -125,10 +131,15 @@ export async function buildImagesRequestBody(
   const moderation = normalizeModeration(request.payload.moderation);
   const userIdentifier = normalizeUserIdentifier(request.payload.userIdentifier || "");
   const includeExtended = shouldSendExtendedImageParameters(request.payload.requestPolicy);
-  const partialImages = request.payload.disablePreview ? 0 : normalizePartialImages(request.payload.partialImages);
+  const partialImages = request.payload.disablePreview || isNonStreamingOutputFormat(outputFormat)
+    ? 0
+    : normalizePartialImages(request.payload.partialImages);
   const useNewAPICompat = shouldUseImagesNewAPICompat(request.payload);
   const provider = normalizeUpstreamProvider(request.payload.provider || "openai");
   const maskB64 = String(request.payload.maskB64 || "").trim();
+
+  const outputFormatError = validateImageOutputFormat(imageModel, mode, outputFormat);
+  if (outputFormatError) throw new RemoteKernelError(outputFormatError);
 
   if (maskB64 && mode !== "edit") {
     throw new RemoteKernelError("蒙版仅支持图生图模式");
@@ -187,6 +198,9 @@ export async function buildImagesRequestBody(
     if (sourceDataURLs.length === 0) {
       throw new RemoteKernelError("图生图模式需要至少一张源图(请先添加参考图)");
     }
+    if (sourceDataURLs.some((value) => /^data:image\/svg\+xml[;,]/i.test(value))) {
+      throw new RemoteKernelError("SVG 不能作为图生图源图，请改用 PNG/JPEG/WebP/GIF");
+    }
     let uploadSourceDataURLs = sourceDataURLs;
     let uploadMaskB64 = maskB64;
     if (maskB64) {
@@ -222,7 +236,7 @@ export async function buildImagesRequestBody(
     form.append("size", size);
     form.append("quality", quality);
     form.append("output_format", outputFormat);
-    if (supportsImageBackground(imageModel)) {
+    if (supportsImageBackground(imageModel) && !isNonStreamingOutputFormat(outputFormat)) {
       form.append("background", background);
     }
     if (supportsOutputCompression(imageModel, outputFormat)) {
@@ -240,9 +254,16 @@ export async function buildImagesRequestBody(
     if (useNewAPICompat || supportsImagesResponseFormat(imageModel, mode)) {
       form.append("response_format", "b64_json");
     }
-    if (!useNewAPICompat) {
+    if (!useNewAPICompat && !isNonStreamingOutputFormat(outputFormat)) {
       form.append("stream", "true");
       form.append("partial_images", String(partialImages));
+    }
+    if (imageModel.toLowerCase().startsWith("gpt-image-2.6-")) {
+      form.append("complexity", normalizeImageComplexity(request.payload.complexity || ""));
+    }
+    if (outputFormat === "gif") {
+      form.append("frame_count", String(normalizeGIFFrameCount(request.payload.frameCount)));
+      form.append("frame_duration_ms", String(normalizeGIFFrameDurationMs(request.payload.frameDurationMs)));
     }
     if (includeExtended && request.payload.seed) form.append("seed", String(request.payload.seed));
     if (includeExtended && request.payload.negativePrompt.trim()) form.append("negative_prompt", request.payload.negativePrompt.trim());
@@ -257,7 +278,14 @@ export async function buildImagesRequestBody(
     quality,
     output_format: outputFormat,
   };
-  if (supportsImageBackground(imageModel)) {
+  if (imageModel.toLowerCase().startsWith("gpt-image-2.6-")) {
+    payload.complexity = normalizeImageComplexity(request.payload.complexity || "");
+  }
+  if (outputFormat === "gif") {
+    payload.frame_count = normalizeGIFFrameCount(request.payload.frameCount);
+    payload.frame_duration_ms = normalizeGIFFrameDurationMs(request.payload.frameDurationMs);
+  }
+  if (supportsImageBackground(imageModel) && !isNonStreamingOutputFormat(outputFormat)) {
     payload.background = background;
   }
   if (supportsOutputCompression(imageModel, outputFormat)) {
@@ -275,7 +303,7 @@ export async function buildImagesRequestBody(
   if (useNewAPICompat || supportsImagesResponseFormat(imageModel, mode)) {
     payload.response_format = "b64_json";
   }
-  if (!useNewAPICompat) {
+  if (!useNewAPICompat && !isNonStreamingOutputFormat(outputFormat)) {
     payload.stream = true;
     payload.partial_images = partialImages;
   }

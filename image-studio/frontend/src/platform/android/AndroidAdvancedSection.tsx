@@ -3,6 +3,8 @@ import type { BackgroundValue, ImageStyleValue, InputFidelityValue, ModerationVa
 import { BACKGROUND_OPTIONS, IMAGE_STYLE_OPTIONS, INPUT_FIDELITY_OPTIONS, MODERATION_OPTIONS, OUTPUT_FORMAT_OPTIONS } from "../../types/domain";
 import { Modal } from "../../components/common/Modal";
 import { vibrateForPlatform } from "./bridge";
+import { useStudioStore } from "../../state/studioStore";
+import { GifAnimationControls } from "../../components/panel/GifAnimationControls";
 
 export function AndroidAdvancedSection({
   advancedOpen,
@@ -35,6 +37,8 @@ export function AndroidAdvancedSection({
   setField: (key: string, value: any) => void;
   surface?: "phone" | "pad";
 }) {
+  const frameCount = useStudioStore((state) => state.frameCount);
+  const frameDurationMs = useStudioStore((state) => state.frameDurationMs);
   const openAdvanced = () => {
     vibrateForPlatform(8);
     setAdvancedOpen(true);
@@ -44,11 +48,11 @@ export function AndroidAdvancedSection({
   const backgroundLabel = background === "transparent" ? "透明" : background === "opaque" ? "纯色" : "自动";
   const inputFidelityLabel = inputFidelity === "auto" ? "默认" : inputFidelity;
   const imageStyleLabel = imageStyle === "default" ? "默认" : imageStyle;
-  const outputCompressionLabel = outputFormat === "png" ? "N/A" : String(outputCompression);
+  const outputCompressionLabel = outputFormat === "png" || outputFormat === "gif" || outputFormat === "svg" ? "N/A" : String(outputCompression);
   const moderationLabel = moderation === "auto" ? "auto" : "low";
   const userIdentifierLabel = userIdentifier.trim() ? "已填写" : "未填写";
-  const partialImagesLabel = partialImages === 0 ? "仅最终图" : `${partialImages} 帧`;
-  const title = surface === "pad" ? "10 项高级设置" : "负向提示词、背景、压缩、输入保真、风格、审核、用户标识、预览帧数、Seed 与输出格式";
+  const partialImagesLabel = outputFormat === "gif" || outputFormat === "svg" || partialImages === 0 ? "仅最终结果" : `${partialImages} 帧`;
+  const title = outputFormat === "gif" ? "GIF 动画与高级设置" : surface === "pad" ? "10 项高级设置" : "负向提示词、背景、压缩、输入保真、风格、审核、用户标识、预览帧数、Seed 与输出格式";
   const negativeLabel = surface === "pad" ? "负向" : "负向提示词";
 
   return (
@@ -75,12 +79,12 @@ export function AndroidAdvancedSection({
               <strong>{moderationLabel}</strong>
             </span>
             <span>
-              <span>背景</span>
-              <strong>{backgroundLabel}</strong>
+              <span>{outputFormat === "gif" ? "动画帧数" : "背景"}</span>
+              <strong>{outputFormat === "gif" ? `${frameCount} 帧` : backgroundLabel}</strong>
             </span>
             <span>
-              <span>压缩</span>
-              <strong>{outputCompressionLabel}</strong>
+              <span>{outputFormat === "gif" ? "每帧时长" : "压缩"}</span>
+              <strong>{outputFormat === "gif" ? `${frameDurationMs} ms` : outputCompressionLabel}</strong>
             </span>
             <span>
               <span>保真</span>
@@ -187,40 +191,50 @@ function AndroidAdvancedEditor({
         </div>
       </div>
 
-      <div className="android-phone-advanced-section">
-        <div className="android-phone-advanced-label">背景</div>
-        <div className="android-phone-format-row">
-          {BACKGROUND_OPTIONS.map((item) => (
-            <button
-              key={item.value}
-              type="button"
-              onClick={() => {
-                vibrateForPlatform(5);
-                setField("background", item.value as BackgroundValue);
-              }}
-              className={`android-choice-chip ${background === item.value ? "active" : ""}`}
-            >
-              {item.label}
-            </button>
-          ))}
+      {outputFormat === "gif" ? (
+        <div className="android-phone-advanced-section">
+          <div className="android-phone-advanced-label">GIF 动画</div>
+          <GifAnimationControls variant="android" />
         </div>
-      </div>
+      ) : null}
 
-      <div className="android-phone-advanced-section">
-        <div className="android-phone-advanced-label">输出压缩</div>
-        <input
-          type="number"
-          value={outputCompression}
-          min={0}
-          max={100}
-          step={1}
-          onChange={(event) => {
-            const raw = event.target.value.trim();
-            setField("outputCompression", raw ? Math.max(0, Math.min(100, Math.round(Number(raw) || 0))) : 100);
-          }}
-          className="focus-ring android-phone-seed-input font-mono-token"
-        />
-      </div>
+      {outputFormat !== "gif" && outputFormat !== "svg" ? <>
+        <div className="android-phone-advanced-section">
+          <div className="android-phone-advanced-label">背景</div>
+          <div className="android-phone-format-row">
+            {BACKGROUND_OPTIONS.map((item) => (
+              <button
+                key={item.value}
+                type="button"
+                onClick={() => {
+                  vibrateForPlatform(5);
+                  setField("background", item.value as BackgroundValue);
+                }}
+                className={`android-choice-chip ${background === item.value ? "active" : ""}`}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="android-phone-advanced-section">
+          <div className="android-phone-advanced-label">输出压缩</div>
+          <input
+            type="number"
+            value={outputCompression}
+            min={0}
+            max={100}
+            step={1}
+            onChange={(event) => {
+              const raw = event.target.value.trim();
+              setField("outputCompression", raw ? Math.max(0, Math.min(100, Math.round(Number(raw) || 0))) : 100);
+            }}
+            className="focus-ring android-phone-seed-input font-mono-token"
+          />
+        </div>
+
+      </> : null}
 
       <div className="android-phone-advanced-section">
         <div className="android-phone-advanced-label">输入保真</div>
@@ -291,7 +305,7 @@ function AndroidAdvancedEditor({
         />
       </div>
 
-      <div className="android-phone-advanced-section">
+      {outputFormat !== "gif" && outputFormat !== "svg" ? <div className="android-phone-advanced-section">
         <div className="android-phone-advanced-label">流式预览帧数</div>
         <div className="android-phone-format-row">
           {[0, 1, 2, 3].map((value) => (
@@ -309,7 +323,7 @@ function AndroidAdvancedEditor({
           ))}
         </div>
         <p className="android-parameter-note mt-2">高并发或 2K/4K 大尺寸任务时，应用可能自动关闭流式预览，以优先保证最终图完整。</p>
-      </div>
+      </div> : null}
 
       <div className="android-phone-advanced-section">
         <div className="android-phone-advanced-label">Seed</div>

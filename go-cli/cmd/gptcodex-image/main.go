@@ -28,7 +28,11 @@ func run() error {
 	mode := flag.String("mode", "", "generate | edit (overrides interactive prompt)")
 	image := flag.String("image", "", "source image path (required for edit mode)")
 	size := flag.String("size", "", "1024x1024 | 1536x1024 | 1024x1536 | 2048x1152")
-	quality := flag.String("quality", "", "auto | high | medium | low")
+	quality := flag.String("quality", "", "auto | low | medium | high | xhigh | max")
+	outputFormat := flag.String("output-format", "png", "png | jpeg | webp | gif | svg")
+	complexity := flag.String("complexity", "high", "low | medium | high (GPT Image 2.6)")
+	frameCount := flag.Int("frame-count", 0, "GIF frame count (2-16; default 9)")
+	frameDurationMs := flag.Int("frame-duration-ms", 0, "GIF frame duration in milliseconds (20-2000; default 200)")
 	prompt := flag.String("prompt", "", "prompt text (or edit instructions)")
 	outDir := flag.String("out-dir", "", "output directory (default: ./images)")
 	flag.Parse()
@@ -126,12 +130,16 @@ func run() error {
 	defer cancel()
 
 	opts := client.Options{
-		APIKey:       *apiKey,
-		Prompt:       *prompt,
-		Mode:         resolvedMode,
-		Size:         *size,
-		Quality:      *quality,
-		ImageDataURL: imageDataURL,
+		APIKey:          *apiKey,
+		Prompt:          *prompt,
+		Mode:            resolvedMode,
+		Size:            *size,
+		Quality:         *quality,
+		OutputFormat:    client.NormalizeOutputFormat(*outputFormat),
+		Complexity:      *complexity,
+		FrameCount:      *frameCount,
+		FrameDurationMs: *frameDurationMs,
+		ImageDataURL:    imageDataURL,
 	}
 
 	logger := func(msg string) {

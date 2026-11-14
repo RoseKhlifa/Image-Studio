@@ -15,7 +15,10 @@ export type RemoteGeneratePayload = {
   prompt: string;
   size: string;
   quality: string;
+  complexity?: string;
   outputFormat: string;
+  frameCount?: number;
+  frameDurationMs?: number;
   imagePaths: string[];
   imagePath: string;
   maskB64: string;
