@@ -14,9 +14,10 @@ import { AnnotationShape } from "./AnnotationShape";
 import { useCanvasShortcuts } from "./useCanvasShortcuts";
 import { StreamPreviewBadge } from "./StreamPreviewBadge";
 import { streamPreviewItemsFromPreviews } from "../../state/studioStore.streamPreview";
-import { historyFullSrc, orderedNavigationItemsForCurrent, sortHistoryItemsByCreatedAtAsc } from "../../lib/images";
+import { historyFullSrc, isGIFImage, orderedNavigationItemsForCurrent, sortHistoryItemsByCreatedAtAsc } from "../../lib/images";
 import { DragExportHandle } from "./DragExportHandle";
 import { MaskOverlayLayer } from "./MaskOverlayLayer";
+import { AnimatedCanvasImage } from "./AnimatedCanvasImage";
 
 export function CanvasStage() {
   const {
@@ -87,6 +88,7 @@ export function CanvasStage() {
 
   const currentImageURL = historyFullSrc(currentImage, null);
   const image = useImageFromSource(currentImage?.imageBlob ?? null, currentImage?.imageB64, currentImageURL);
+  const animated = isGIFImage(currentImage);
   const importedMaskImage = useImageFromSource(null, undefined, maskDataURL);
 
   useEffect(() => {
@@ -548,10 +550,10 @@ export function CanvasStage() {
           <CompareOverlay
             aBlob={currentImage.imageBlob ?? null}
             aB64={currentImage.imageB64}
-            aUrl={currentImage.fullUrl}
+            aUrl={currentImageURL}
             bBlob={compareB.imageBlob ?? null}
             bB64={compareB.imageB64}
-            bUrl={compareB.fullUrl}
+            bUrl={historyFullSrc(compareB, null)}
             split={compareSplit}
             onSplit={setCompareSplit}
             aLabel="当前图"
@@ -564,6 +566,7 @@ export function CanvasStage() {
         // stage-host's grid-derived width. stage-host stays bounded by the grid
         // track; this wrapper takes whatever size stage-host gives it via inset:0.
         <div className="stage-canvas-wrap" style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
+        {animated && image ? <AnimatedCanvasImage image={image} stageRef={stageRef} view={view} /> : null}
         <Stage
           ref={stageRef}
           width={hostSize.w}
@@ -583,7 +586,7 @@ export function CanvasStage() {
           onContextMenu={openCanvasMenu}
         >
           <Layer ref={imageLayerRef}>
-            {image && <KonvaImage image={image} listening={false} />}
+            {image && !animated && <KonvaImage image={image} listening={false} />}
           </Layer>
 
           {image ? (

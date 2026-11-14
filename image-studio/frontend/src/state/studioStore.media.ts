@@ -18,7 +18,7 @@ import {
   buildPresetPatch,
   pickPresetStateSnapshot,
 } from "../lib/presets";
-import { base64ToBlob, orderedNavigationItemsForCurrent } from "../lib/images";
+import { base64ToBlob, isGIFImage, orderedNavigationItemsForCurrent } from "../lib/images";
 import { persistHistoryItems } from "../lib/storage";
 import type { HistoryItem, Preset, Toast } from "../types/domain";
 import type { StudioState } from "./studioStore.types";
@@ -140,6 +140,12 @@ export function createMediaActions(store: StateAdapter) {
 
     async openResultDetail(item: HistoryItem) {
       store.setState({ resultDetail: toPreviewOnlyHistoryItem(item) });
+      if (isGIFImage(item)) {
+        const full = await ensureFullHistoryItem(item, {
+          setState: (fn) => store.setState((state) => fn(state)),
+        });
+        if (full && store.getState().resultDetail?.id === item.id) store.setState({ resultDetail: full });
+      }
     },
 
     closeResultDetail() {

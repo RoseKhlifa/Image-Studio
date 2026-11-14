@@ -2,7 +2,7 @@ import { ClipboardCopy, Folder, RotateCw, Save, Sparkles } from "lucide-react";
 import { useStudioStore } from "../../state/studioStore";
 import { BeginNativeFileDrag, OpenOutputDir } from "../../platform/runtime/host";
 import { submitShortcutLabel } from "../../platform";
-import { historyPreviewSrc, useBlobURL } from "../../lib/images";
+import { historyPreviewSrc, isGIFImage, useBlobURL } from "../../lib/images";
 import {
   buildHistoryItemDragExport,
   shouldUseNativeFileDrag,
@@ -26,8 +26,8 @@ export function ResultDetailDrawer() {
   const detail = item;
 
   const created = new Date(detail.createdAt).toLocaleString();
-  const previewURL = useBlobURL(detail.previewBlob ?? detail.imageBlob ?? null, detail.imageB64 ?? null);
-  const imageSrc = historyPreviewSrc(detail, previewURL);
+  const previewURL = useBlobURL(isGIFImage(detail) ? detail.imageBlob : detail.previewBlob ?? detail.imageBlob ?? null, detail.imageB64 ?? null);
+  const imageSrc = historyPreviewSrc(detail, previewURL, true);
   const dragSpec = buildHistoryItemDragExport(detail);
 
   function handlePreviewDragStart(event: React.DragEvent<HTMLDivElement>) {

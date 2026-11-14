@@ -158,15 +158,36 @@ export function useBlobURL(blob?: Blob | null, fallbackB64?: string | null): str
 export function historyPreviewSrc(
   item: {
     id?: string | null;
+    imageId?: string | null;
+    fullUrl?: string | null;
+    savedPath?: string | null;
+    outputFormat?: string | null;
     previewUrl?: string | null;
     imageBlob?: Blob | null;
     previewBlob?: Blob | null;
     imageB64?: string | null;
   } | null | undefined,
   objectURL: string | null,
+  animateGIF = false,
 ): string {
   if (!item) return "";
+  if (animateGIF && isGIFImage(item)) return historyFullSrc(item, objectURL);
   return item.previewUrl || objectURL || (item.imageB64 ? dataURLFromBase64(item.imageB64) : "");
+}
+
+export function isGIFImage(item: {
+  outputFormat?: string | null;
+  savedPath?: string | null;
+  fullUrl?: string | null;
+  imageB64?: string | null;
+  imageBlob?: Blob | null;
+} | null | undefined): boolean {
+  if (!item) return false;
+  return item.outputFormat === "gif"
+    || item.imageBlob?.type === "image/gif"
+    || !!item.imageB64 && detectImageMimeTypeFromBase64(item.imageB64) === "image/gif"
+    || /\.gif(?:[?#]|$)/i.test(item.savedPath || "")
+    || /\.gif(?:[?#]|$)/i.test(item.fullUrl || "");
 }
 
 export function useImageLoadState(src: string | null | undefined): "idle" | "loading" | "ready" | "error" {
@@ -235,7 +256,7 @@ export function historyFullSrc(
 ): string {
   if (!item) return "";
   const mediaFullUrl = isTransientPreviewItem(item) ? "" : mediaFullUrlFromImageId(item.imageId);
-  return item.fullUrl || mediaFullUrl || objectURL || item.previewUrl || (item.imageB64 ? dataURLFromBase64(item.imageB64) : "");
+  return item.fullUrl || mediaFullUrl || objectURL || (item.imageB64 ? dataURLFromBase64(item.imageB64) : "") || item.previewUrl || "";
 }
 
 export function useImageElement(source?: Blob | string | null): HTMLImageElement | null {

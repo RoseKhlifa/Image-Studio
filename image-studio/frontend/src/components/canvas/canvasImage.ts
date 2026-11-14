@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { base64ToBlob } from "../../lib/images";
 
 export async function copyImageB64ToClipboard(b64: string): Promise<boolean> {
   try {
@@ -22,7 +23,7 @@ export async function copyImageURLToClipboard(url: string): Promise<boolean> {
   }
 }
 
-// Convert a Blob/base64 PNG to an HTMLImageElement (lazy).
+// Load the original image with its MIME type preserved, including animated GIFs.
 // Clears the previous image synchronously when the source changes so the rest
 // of the canvas never renders with a stale-image / new-view mismatch.
 export function useImageFromSource(
@@ -57,10 +58,7 @@ export function useImageFromSource(
 
 function b64ToObjectURL(b64: string): string | null {
   try {
-    const bin = atob(b64);
-    const bytes = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    return URL.createObjectURL(new Blob([bytes], { type: "image/png" }));
+    return URL.createObjectURL(base64ToBlob(b64));
   } catch {
     return null;
   }

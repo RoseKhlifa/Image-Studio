@@ -10,7 +10,8 @@ import { CompareOverlay } from "../../../components/canvas/CompareOverlay";
 import { copyImageB64ToClipboard, copyImageURLToClipboard, useImageFromSource } from "../../../components/canvas/canvasImage";
 import { StreamPreviewBadge } from "../../../components/canvas/StreamPreviewBadge";
 import { useCanvasShortcuts } from "../../../components/canvas/useCanvasShortcuts";
-import { historyFullSrc, orderedNavigationItemsForCurrent, sortHistoryItemsByCreatedAtAsc } from "../../../lib/images";
+import { historyFullSrc, isGIFImage, orderedNavigationItemsForCurrent, sortHistoryItemsByCreatedAtAsc } from "../../../lib/images";
+import { AnimatedCanvasImage } from "../../../components/canvas/AnimatedCanvasImage";
 import { streamPreviewItemsFromPreviews } from "../../../state/studioStore.streamPreview";
 import { vibrateForPlatform } from "../bridge";
 import { MaskOverlayLayer } from "../../../components/canvas/MaskOverlayLayer";
@@ -93,6 +94,7 @@ export function AndroidCanvasStage() {
 
   const currentImageURL = historyFullSrc(currentImage, null);
   const image = useImageFromSource(currentImage?.imageBlob ?? null, currentImage?.imageB64, currentImageURL);
+  const animated = isGIFImage(currentImage);
   const importedMaskImage = useImageFromSource(null, undefined, maskDataURL);
 
   useEffect(() => {
@@ -563,10 +565,10 @@ export function AndroidCanvasStage() {
         <CompareOverlay
           aBlob={currentImage.imageBlob ?? null}
           aB64={currentImage.imageB64}
-          aUrl={currentImage.fullUrl}
+          aUrl={currentImageURL}
           bBlob={compareB.imageBlob ?? null}
           bB64={compareB.imageB64}
-          bUrl={compareB.fullUrl}
+          bUrl={historyFullSrc(compareB, null)}
           split={compareSplit}
           onSplit={setCompareSplit}
           aLabel="当前图"
@@ -575,6 +577,7 @@ export function AndroidCanvasStage() {
       ) : null}
       {!showingResultGrid && currentImage && !compareB && hostSize.w > 0 && hostSize.h > 0 ? (
         <div className="stage-canvas-wrap">
+          {animated && image ? <AnimatedCanvasImage image={image} stageRef={stageRef} view={view} /> : null}
           <Stage
             ref={stageRef}
             width={hostSize.w}
@@ -598,7 +601,7 @@ export function AndroidCanvasStage() {
             onTouchCancel={endPinch}
           >
             <Layer>
-              {image ? <KonvaImage image={image} listening={false} /> : null}
+              {image && !animated ? <KonvaImage image={image} listening={false} /> : null}
             </Layer>
 
             {image ? (

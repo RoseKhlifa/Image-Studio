@@ -1,5 +1,5 @@
 import type { HistoryItem } from "../../types/domain";
-import { historyPreviewSrc, useBlobURL } from "../../lib/images";
+import { historyPreviewSrc, isGIFImage, useBlobURL } from "../../lib/images";
 import { DragExportHandle } from "./DragExportHandle";
 
 export type BatchGridSlot =
@@ -125,8 +125,8 @@ function BatchGridTile({
   selectionMode: boolean;
   singleLayout: boolean;
 }) {
-  const previewURL = useBlobURL(item.imageBlob ?? item.previewBlob ?? null, item.imageB64 ?? null);
-  const src = historyPreviewSrc(item, previewURL);
+  const previewURL = useBlobURL(isGIFImage(item) ? item.imageBlob : item.imageBlob ?? item.previewBlob ?? null, item.imageB64 ?? null);
+  const src = historyPreviewSrc(item, previewURL, true);
   return (
     <div
       className={`batch-grid-tile ${active ? "active" : ""} ${preview ? "previewing" : ""} ${selected ? "selected" : ""} ${selectionMode ? "selection-mode" : ""}`}
